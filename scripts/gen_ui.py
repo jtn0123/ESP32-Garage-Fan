@@ -15,14 +15,23 @@ except Exception:
     yaml = None
 
 
-# Resolve repository root similarly to other generators
+# Resolve repository root similarly to other generators.
+# SCons deletes __file__ from the globals it exec()s pre-scripts with, so when it is
+# missing walk up from the working directory (PlatformIO leaves it wherever pio was
+# launched, e.g. firmware/arduino) until the repo's layout markers appear.
 try:
     THIS = pathlib.Path(__file__).resolve()
     ROOT = THIS.parents[1]
-except Exception:
-    ROOT = pathlib.Path(os.getcwd())
-    if (ROOT / "platformio.ini").exists():
-        ROOT = ROOT.parent.parent
+except NameError:
+    _here = pathlib.Path(os.getcwd()).resolve()
+    ROOT = next(
+        (
+            c
+            for c in (_here, *_here.parents)
+            if (c / "config").is_dir() and (c / "scripts").is_dir()
+        ),
+        _here,
+    )
 
 UI_SPEC_PATH = ROOT / "config" / "ui_spec.json"
 # Repo-relative so generated files are identical regardless of checkout location.
@@ -760,3 +769,14 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+elif __name__ == "SCons.Script":
+    # PlatformIO runs this file as a SCons pre-script (see extra_scripts in
+    # firmware/arduino/platformio.ini). SCons exec()s pre-scripts against
+    # SCons.Script's globals, so __name__ is "SCons.Script" and never "__main__" --
+    # with only the guard above this generator silently did nothing during builds.
+    # Any other name means an importer (a test) loaded the module to call into it,
+    # which must not write generated files as a side effect.
+    #
+    # sys.argv belongs to SCons here, so generate with defaults rather than letting
+    # parse_known_args() sift through SCons's own flags.
+    main([])
