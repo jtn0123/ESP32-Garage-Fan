@@ -596,13 +596,26 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 except Exception:
                     p0 = 0
             elif kind == "batteryGlyph":
+                # Explicit x/y/w/h win; otherwise derive from the op's rect the
+                # same way the web sim does (13x7 glyph at rect left, vertically
+                # centered), so firmware and sim draw the identical glyph box.
+                glyph_w, glyph_h = 13, 7
+                rect_xywh = rects.get(rname) if isinstance(rname, str) else None
                 try:
-                    p0 = int(op.get("x", 0))
-                    p1 = int(op.get("y", 0))
-                    p2 = int(op.get("w", 0))
-                    p3 = int(op.get("h", 0))
+                    if op.get("x") is None and isinstance(rect_xywh, list) and len(rect_xywh) == 4:
+                        rx, ry, _, rh = (int(v) for v in rect_xywh)
+                        p0 = rx + 2
+                        p1 = ry + max(0, (rh - glyph_h) // 2)
+                        p2 = int(op.get("w", glyph_w))
+                        p3 = int(op.get("h", glyph_h))
+                    else:
+                        p0 = int(op.get("x", 0))
+                        p1 = int(op.get("y", 0))
+                        p2 = int(op.get("w", glyph_w))
+                        p3 = int(op.get("h", glyph_h))
                 except Exception:
-                    p0 = p1 = p2 = p3 = 0
+                    p0 = p1 = 0
+                    p2, p3 = glyph_w, glyph_h
                 src = str(op.get("percent", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
             # Emit row

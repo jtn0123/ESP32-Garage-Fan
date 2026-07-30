@@ -24,6 +24,20 @@ def _start_http_server(root: str, port: int) -> subprocess.Popen:
     )
 
 
+def _wait_sim_settled(page, quiet_ms: int = 400):
+    """Wait until the sim has drawn and no redraw landed for quiet_ms.
+
+    The sim keeps drawing asynchronously after load (geometry and
+    sample_data fetches each trigger a redraw); a fixed sleep races those
+    and can capture a golden mid-load.
+    """
+    page.wait_for_function(
+        "(q) => window.__simReady === true && window.__lastDrawAt"
+        " && (Date.now() - window.__lastDrawAt) > q",
+        arg=quiet_ms,
+    )
+
+
 @pytest.mark.skipif(
     not bool(__import__("importlib").util.find_spec("playwright")),
     reason="playwright not installed",
@@ -47,7 +61,7 @@ def test_web_sim_screenshot_matches_golden_with_tolerance(tmp_path):
             # Use larger viewport since we'll capture the canvas element directly
             page = browser.new_page(viewport={"width": 800, "height": 600})
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
 
             # Provide deterministic data
             data = {
@@ -63,6 +77,10 @@ def test_web_sim_screenshot_matches_golden_with_tolerance(tmp_path):
                 "battery_percent": 76,
                 "days": "128",
                 "wind_mph": 4.2,
+                # Pin the header version: without it the sim falls back to the
+                # git-describe stamp baked into ui_generated.js, which changes
+                # every commit and would invalidate the golden.
+                "fw_version": "1.05",
             }
 
             def handle_route(route):
@@ -70,11 +88,19 @@ def test_web_sim_screenshot_matches_golden_with_tolerance(tmp_path):
 
             page.route("**/sample_data.json", handle_route)
             page.reload(wait_until="load")
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
 
             # Capture canvas element directly (not the whole page)
             canvas = page.locator("#epd")
             bytes_png = canvas.screenshot()
+
+            # Always save the current capture: CI uploads out/* as artifacts,
+            # so a golden mismatch there leaves behind the exact platform
+            # render needed to re-bless tests/golden_web_sim.png.
+            out_dir = os.path.join(ROOT, "out")
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, "golden_web_sim_current.png"), "wb") as f:
+                f.write(bytes_png)
 
             import PIL.Image
 

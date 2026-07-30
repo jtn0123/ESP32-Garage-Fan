@@ -335,6 +335,7 @@
       case 'storm': return 'Storm';
       case 'fog': return 'Fog';
       case 'wind': return 'Wind';
+      case 'hail': return 'Hail';
       default: return 'Sunny';
     }
   }
@@ -2081,8 +2082,14 @@
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';
               let s = String(op.text || '');
               s = s.replace(/\{([^}]+)\}/g, (_,k)=>{
-                // Basic formatter: support fw_version injection and simple passthrough
-                if (k === 'fw_version' && typeof window !== 'undefined' && typeof window.UI_FW_VERSION === 'string') return window.UI_FW_VERSION;
+                // Basic formatter: support fw_version injection and simple passthrough.
+                // Prefer the data feed's fw_version (what a real device reports);
+                // the git stamp baked into ui_generated.js is only a fallback.
+                if (k === 'fw_version'){
+                  if (data.fw_version !== undefined && data.fw_version !== null && String(data.fw_version) !== '') return String(data.fw_version);
+                  if (typeof window !== 'undefined' && typeof window.UI_FW_VERSION === 'string') return window.UI_FW_VERSION;
+                }
+                if (k === 'weather_short') return shortConditionLabel(data.weather || '');
                 const base = k.replace(/[:].*$/, '').replace(/->.*$/, '');
                 // Prefer provided data; fall back to DEFAULTS when missing
                 let val = (data[base] !== undefined && data[base] !== null)
@@ -2149,22 +2156,16 @@
                 const y = (op.y !== undefined) ? (r[1] + op.y) : (r[1] + 1);
                 // Use our text function for tracking
                 text(x, y, s, fpx, weight, op.rect);
-                // Export status-left metrics for battery group lines
-                if (s.startsWith('Batt ')){
-                  window.__layoutMetrics.statusLeft.line1Y = y;
-                  // approximate group bounds: from battery x (set in batteryGlyph) to end of string
-                  const leftCol = rects.FOOTER_STATUS || [6,92,160,28];
-                  window.__layoutMetrics.statusLeft.left = leftCol[0];
-                  window.__layoutMetrics.statusLeft.right = leftCol[0] + leftCol[2];
+                // Export footer metrics for layout tests, keyed by rect
+                if (op.rect === 'FOOTER_BATTERY'){
                   const textW = ctx.measureText(s).width;
-                  const groupW = 13 + 6 + textW; // icon + gap + text
-                  const left = window.__layoutMetrics.statusLeft.left;
-                  const right = window.__layoutMetrics.statusLeft.right;
-                  const colMid = (left + right) / 2;
-                  const groupX = colMid - groupW / 2;
-                  window.__layoutMetrics.statusLeft.batteryGroup = { x: groupX, w: groupW };
-                } else if (s.startsWith('~')){
-                  window.__layoutMetrics.statusLeft.line2Y = y;
+                  window.__layoutMetrics.statusLeft.line1Y = y;
+                  window.__layoutMetrics.statusLeft.left = r[0];
+                  window.__layoutMetrics.statusLeft.right = r[0] + r[2];
+                  window.__layoutMetrics.statusLeft.batteryText = { x, w: textW };
+                } else if (op.rect === 'FOOTER_IP'){
+                  const textW = ctx.measureText(s).width;
+                  window.__layoutMetrics.statusLeft.ip = { x, w: textW };
                 }
                 ctx.restore();
               } else {
@@ -2193,22 +2194,6 @@
                   text(x, y, s, fpx, weight, regionName);
                 }
                 
-                // Export metrics even for absolute-positioned footer rows
-                if (s.startsWith('Batt ') || s.includes('%')){
-                  window.__layoutMetrics.statusLeft.line1Y = y;
-                  const leftCol = rects.FOOTER_STATUS || [6,92,160,28];
-                  window.__layoutMetrics.statusLeft.left = leftCol[0];
-                  window.__layoutMetrics.statusLeft.right = leftCol[0] + leftCol[2];
-                  const textW = ctx.measureText(s).width;
-                  const groupW = 13 + 6 + textW; // icon + gap + text
-                  const left = window.__layoutMetrics.statusLeft.left;
-                  const right = window.__layoutMetrics.statusLeft.right;
-                  const colMid = (left + right) / 2;
-                  const groupX = colMid - groupW / 2;
-                  window.__layoutMetrics.statusLeft.batteryGroup = { x: groupX, w: groupW };
-                } else if (s.startsWith('~')){
-                  window.__layoutMetrics.statusLeft.line2Y = y;
-                }
               }
               break;
             }
@@ -2302,7 +2287,10 @@
               const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';
               const raw = String(op.text||'');
-              const s = raw.replace(/\{([^}]+)\}/g, (_,k)=>String(data[k]||''));
+              const s = raw.replace(/\{([^{}]+)\}/g, (_,k)=>{
+                if (k === 'weather_short') return shortConditionLabel(data.weather || '');
+                return String(data[k]||'');
+              });
               ctx.font = `${weight} ${fpx}px ${FONT_STACK}`; ctx.textBaseline='top';
               const tw = ctx.measureText(s).width;
               // Center text horizontally in rect (matches firmware behavior)
@@ -2324,7 +2312,6 @@
                   actualBounds: { x: r[0], y: r[1], width: r[2], height: r[3] }
                 };
               }
-              const fpx = ((fonts['small']||{}).px) || pxSmall;
               let barX = r[0], barY = r[1], barW = r[2], barH = r[3];
               const isV2 = (function(){
                 try{
@@ -2337,13 +2324,16 @@
               // For WEATHER_ICON region in v2: left-justify icon in its rect (no border)
               let iconW, iconH, startX, startY;
               if (op.rect === 'WEATHER_ICON' && isV2) {
-                // AGGRESSIVELY clear any border - fill larger area with white
+                // Clear the icon area, clamped to the frame interior so the
+                // 1px display border (x=0/249, y=0/121) is never erased.
+                // The firmware does no clear at all here (full refresh starts
+                // from a blank buffer), so anything we wipe must stay inside.
+                const clearX0 = Math.max(1, barX - 2);
+                const clearY0 = Math.max(1, barY - 2);
+                const clearX1 = Math.min(WIDTH - 1, barX + barW + 2);
+                const clearY1 = Math.min(HEIGHT - 1, barY + barH + 2);
                 ctx.fillStyle = '#fff';
-                ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
-                // Also stroke with white to ensure no border remains
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(barX, barY, barW, barH);
+                ctx.fillRect(clearX0, clearY0, Math.max(0, clearX1 - clearX0), Math.max(0, clearY1 - clearY0));
                 ctx.strokeStyle = '#000'; // Reset for icon drawing
                 // Inset and clip to avoid any boundary overlap/cutoff
                 const inset = 2;
@@ -2367,23 +2357,8 @@
                   const drewSvg = tryDrawMdiIcon(category, startX, startY, iconW, iconH);
                   if (!drewSvg) drawWeatherGlyph(category, startX, startY, iconW, iconH);
                 }
-                // If FOOTER_WEATHER exists, draw text immediately to right inside its own rect left-aligned
-                // Draw label to the right of the inner icon box if quadrant label exists
-                const fw = rects.FOOTER_WEATHER;
-                const rawLabel = String(data.weather || 'cloudy').trim();
-                if (fw && fw[2] > 0 && rawLabel) {
-                  const label = shortConditionLabel(rawLabel);
-                  ctx.font = `${fpx}px ${FONT_STACK}`; ctx.textBaseline='top';
-                  const tx = fw[0] + 2;
-                  const ty = fw[1] + Math.max(0, Math.floor((fw[3]-fpx)/2));
-                  // Clip label to FOOTER_WEATHER region to prevent overflow
-                  ctx.save();
-                  ctx.beginPath();
-                  ctx.rect(fw[0], fw[1], fw[2], fw[3]);
-                  ctx.clip();
-                  text(tx, ty, label, fpx, 'normal', 'FOOTER_WEATHER');
-                  ctx.restore();
-                }
+                // The weather label is drawn by the footer_split textCenteredIn
+                // op on FOOTER_WEATHER (same as firmware) — not here.
                 ctx.restore();
                 break;
               }
@@ -2817,6 +2792,14 @@
     }catch(e){}
   })();
 
+  // sample_data.json nests scenarios ({default:{...}, time_of_day:{...}});
+  // tests may route a flat payload instead — accept both shapes. Returns a
+  // shallow copy so callers can annotate it without mutating the source.
+  function unwrapSamplePayload(payload){
+    if (payload && typeof payload === 'object' && payload.default) return { ...payload.default };
+    return payload;
+  }
+
   async function load(){
     console.log('load() called');
     
@@ -2837,7 +2820,7 @@
     try{
       const res = await fetch('sample_data.json');
       if(!res.ok) throw new Error('fetch failed');
-      const data = await res.json();
+      const data = unwrapSamplePayload(await res.json());
       draw(data);
     } catch(e){ }
     // Wire region inspector controls
@@ -2889,7 +2872,7 @@
     refreshEl.addEventListener('click', async ()=>{
       try{
         const res = await fetch('sample_data.json');
-        const data = await res.json();
+        const data = unwrapSamplePayload(await res.json());
         data.time = new Date().toTimeString().slice(0,5);
         lastData = data;
         // Partial redraw demo: clear header version rect and re-render spec variant
@@ -2900,6 +2883,9 @@
           window.drawFromSpec(ctx, lastData, variant);
         }
         applyOneBitThreshold();
+        // Stamp the redraw so test settle-waits see this refresh (the direct
+        // drawFromSpec path bypasses draw(), which normally sets this).
+        window.__lastDrawAt = Date.now();
       }catch(e){ load(); }
     });
   }

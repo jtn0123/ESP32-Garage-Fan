@@ -127,6 +127,31 @@ def draw_weather_icon(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int],
         draw.rectangle(((x0, y0), (x1, y1)), outline=0, width=1)
 
 
+# Keyword order matters: first match wins. Mirrors the web sim's
+# shortConditionLabel and the firmware's spec_short_condition so all three
+# renderers show the same footer text for the same condition string.
+_CONDITION_LABELS = (
+    (("night", "moon"), "Night"),
+    (("part",), "Partly"),
+    (("cloud", "overcast"), "Cloudy"),
+    (("storm", "thunder", "lightning"), "Storm"),
+    (("rain", "pour", "shower", "drizzle"), "Rain"),
+    (("hail",), "Hail"),
+    (("snow", "sleet"), "Snow"),
+    (("fog", "mist", "haze"), "Fog"),
+    (("wind",), "Wind"),
+)
+
+
+def short_condition_label(weather: str) -> str:
+    """Short, user-facing weather label (see _CONDITION_LABELS)."""
+    c = (weather or "").lower()
+    for keywords, label in _CONDITION_LABELS:
+        if any(k in c for k in keywords):
+            return label
+    return "Sunny"
+
+
 def draw_layout(draw: ImageDraw.ImageDraw, data: dict):
     # Load shared geometry; fall back to current coordinates if missing
     g = load_geometry()
@@ -150,18 +175,14 @@ def draw_layout(draw: ImageDraw.ImageDraw, data: dict):
     # Renamed from INSIDE_TIME to INSIDE_PRESSURE: y=70, h=10
     _INSIDE_PRESSURE = R("INSIDE_PRESSURE", (6, 70, 6 + 118, 70 + 10))
     OUT_TEMP = R("OUT_TEMP", (129, 36, 129 + 94, 36 + 28))
-    # Updated coords: x=168, y=90, w=30, h=32
-    R("WEATHER_ICON", (168, 90, 168 + 30, 90 + 32))
-    # OUT_PRESSURE: x=177, y=68, w=64, h=12
-    R("OUT_PRESSURE", (177, 68, 177 + 64, 68 + 12))
-    # OUT_HUMIDITY: x=131, y=78, w=44, h=12 (alias OUT_ROW2_L for backward compat)
-    OUT_ROW2_L = R("OUT_HUMIDITY", (131, 78, 131 + 44, 78 + 12))
-    # OUT_WIND: x=177, y=80, w=44, h=10 (alias OUT_ROW2_R for backward compat)
-    OUT_ROW2_R = R("OUT_WIND", (177, 80, 177 + 44, 80 + 10))
-    # FOOTER_STATUS (alias FOOTER_L for backward compat)
-    FOOTER_L = R("FOOTER_STATUS", (6, 90, 6 + 160, 90 + 32))
-    # Updated coords: x=200, y=90, w=44, h=32
-    R("FOOTER_WEATHER", (200, 90, 200 + 44, 90 + 32))
+    WEATHER_ICON = R("WEATHER_ICON", (140, 90, 140 + 30, 90 + 30))
+    OUT_PRESSURE = R("OUT_PRESSURE", (131, 74, 131 + 110, 74 + 10))
+    # OUT_HUMIDITY / OUT_WIND share the row under the outside temp
+    OUT_ROW2_L = R("OUT_HUMIDITY", (131, 64, 131 + 44, 64 + 10))
+    OUT_ROW2_R = R("OUT_WIND", (177, 64, 177 + 64, 64 + 10))
+    FOOTER_BATTERY = R("FOOTER_BATTERY", (6, 88, 6 + 118, 88 + 12))
+    FOOTER_IP = R("FOOTER_IP", (6, 104, 6 + 120, 104 + 14))
+    FOOTER_WEATHER = R("FOOTER_WEATHER", (174, 90, 174 + 72, 90 + 30))
 
     # Frame and header
     draw.rectangle(((0, 0), (WIDTH - 1, HEIGHT - 1)), outline=0, width=1)
@@ -239,9 +260,18 @@ def draw_layout(draw: ImageDraw.ImageDraw, data: dict):
     draw_temp_right(INSIDE_TEMP, str(data.get("inside_temp", "72.5")))
     inside_rh_text = f"{data.get('inside_hum','47')}% RH"
     draw.text((INSIDE_RH[0], INSIDE_RH[1]), inside_rh_text, font=font_sm, fill=0)
+    # Inside pressure row, drawn only when data provides it (spec `when` clause)
+    inside_pressure = data.get("pressure_hpa")
+    if inside_pressure not in (None, ""):
+        draw.text(
+            (_INSIDE_PRESSURE[0], _INSIDE_PRESSURE[1]),
+            f"{float(inside_pressure):.1f} hPa",
+            font=font_sm,
+            fill=0,
+        )
 
     draw_temp_right(OUT_TEMP, str(data.get("outside_temp", "68.4")))
-    # Bottom small rows per spec: RH left bottom, wind right bottom
+    # Row under outside temp: RH left, wind right; pressure row below
     outside_rh_text = f"{data.get('outside_hum','53')}% RH"
     draw.text((OUT_ROW2_L[0], OUT_ROW2_L[1]), outside_rh_text, font=font_sm, fill=0)
     try:
@@ -250,15 +280,24 @@ def draw_layout(draw: ImageDraw.ImageDraw, data: dict):
         wind_mps = 4.2
     wind_text = f"{wind_mps*2.237:.1f} mph"
     draw.text((OUT_ROW2_R[0], OUT_ROW2_R[1]), wind_text, font=font_sm, fill=0)
+    outside_pressure = data.get("outside_pressure_hpa")
+    if outside_pressure not in (None, ""):
+        draw.text(
+            (OUT_PRESSURE[0], OUT_PRESSURE[1]),
+            f"{float(outside_pressure):.0f} hPa",
+            font=font_sm,
+            fill=0,
+        )
 
-    # Weather icon in WEATHER_ICON region [168, 90, 30, 32]
-    # Weather text in FOOTER_WEATHER region [200, 90, 44, 32]
-    # These match the firmware display_renderer.cpp and ui_spec.json
-    icon_x, icon_y, icon_w, icon_h = 168, 90, 30, 32
-    weather_x, weather_y, weather_w = 200, 90, 44
+    # Weather icon and label rects come from the shared geometry (ui_spec.json)
+    icon_x, icon_y = WEATHER_ICON[0], WEATHER_ICON[1]
+    icon_w, icon_h = WEATHER_ICON[2] - WEATHER_ICON[0], WEATHER_ICON[3] - WEATHER_ICON[1]
+    weather_x, weather_y = FOOTER_WEATHER[0], FOOTER_WEATHER[1]
+    weather_w = FOOTER_WEATHER[2] - FOOTER_WEATHER[0]
 
-    cond_label = str(data.get("weather", "Cloudy")).split(" ")[0].split("-")[0]
-    cond_lower = str(data.get("weather", "")).lower()
+    weather_raw = str(data.get("weather", "Cloudy"))
+    cond_lower = weather_raw.lower()
+    cond_label = short_condition_label(weather_raw)
 
     # Draw weather icon centered in WEATHER_ICON region
     icon_cx = icon_x + icon_w // 2
@@ -304,41 +343,38 @@ def draw_layout(draw: ImageDraw.ImageDraw, data: dict):
         r0 = min(icon_w, icon_h) // 4
         draw.ellipse((icon_cx - r0, icon_cy - r0, icon_cx + r0, icon_cy + r0), outline=0, width=1)
 
-    # Draw weather text centered in FOOTER_WEATHER region at y=109
+    # Weather label centered in FOOTER_WEATHER (textCenteredIn, yOffset 10)
     tl_cond = int(ImageDraw.Draw(Image.new("1", (1, 1))).textlength(cond_label, font=font_sm))
     text_x = weather_x + max(0, (weather_w - tl_cond) // 2)
-    text_y = weather_y + 19  # y=90+19=109, matches firmware
+    text_y = weather_y + 10
     draw.text((text_x, text_y), cond_label, font=font_sm, fill=0)
 
-    # Status/footer split (match firmware draw_status_line_direct layout)
-    # 3-row stacked layout:
-    # Row 1: Battery glyph + voltage/percent at y=87
-    # Row 2: Days remaining at y=98
-    # Row 3: IP centered at y=109
+    # Footer split (matches ui_spec.json footer_split):
+    # battery glyph at left of FOOTER_BATTERY, combined battery text
+    # right-aligned in the same rect, IP centered in FOOTER_IP.
     pct = int(str(data.get("percent", "76")))
-    bx, by, bw, bh = 8, 87, 13, 7
+    bat_x0, bat_y0, bat_x1, bat_y1 = FOOTER_BATTERY
+    bw, bh = 13, 7
+    bx = bat_x0 + 2
+    by = bat_y0 + max(0, ((bat_y1 - bat_y0) - bh) // 2)
     draw.rectangle(((bx, by), (bx + bw, by + bh)), outline=0, width=1)
     draw.rectangle(((bx + bw, by + 2), (bx + bw + 2, by + 6)), fill=0)
     fillw = max(0, min(bw - 2, int((bw - 2) * (pct / 100))))
     if fillw > 0:
         draw.rectangle(((bx + 1, by + 1), (bx + 1 + fillw, by + bh - 1)), fill=0)
-    # Row 1: Battery text next to icon
-    left = f"{data.get('voltage','4.01')}V {pct}%"
-    draw.text((27, 87), left, font=font_sm, fill=0)
-    # Row 2: Days remaining
-    eta = f"~{data.get('days','128')}d"
-    draw.text((8, 98), eta, font=font_sm, fill=0)
-    # Row 3: IP centered in FOOTER_STATUS region
+    batt_text = f"{data.get('voltage','4.01')}V {pct}% ~{data.get('days','128')}d"
+    tl_batt = int(ImageDraw.Draw(Image.new("1", (1, 1))).textlength(batt_text, font=font_sm))
+    draw.text((bat_x1 - 2 - tl_batt, bat_y0 + 1), batt_text, font=font_sm, fill=0)
+
     ip_val = data.get("ip", "192.168.1.42")
     if ip_val and ip_val != "0.0.0.0":
         ip = f"IP {ip_val}"
     else:
         ip = "IP --"
-    # Center IP within FOOTER_L
-    left_col_width = FOOTER_L[2] - FOOTER_L[0]
-    ip_w = len(ip) * 6
-    ip_x = FOOTER_L[0] + max(0, (left_col_width - ip_w) // 2)
-    draw.text((ip_x, 109), ip, font=font_sm, fill=0)
+    ip_x0, ip_y0, ip_x1, _ip_y1 = FOOTER_IP
+    tl_ip = int(ImageDraw.Draw(Image.new("1", (1, 1))).textlength(ip, font=font_sm))
+    ip_x = ip_x0 + max(0, ((ip_x1 - ip_x0) - tl_ip) // 2)
+    draw.text((ip_x, ip_y0 + 1), ip, font=font_sm, fill=0)
 
 
 def render(data: dict) -> Image.Image:

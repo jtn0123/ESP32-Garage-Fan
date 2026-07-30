@@ -23,6 +23,19 @@ def _start_http_server(root: str, port: int) -> subprocess.Popen:
     )
 
 
+def _wait_sim_settled(page, quiet_ms: int = 400):
+    """Wait until the sim has drawn and no redraw landed for quiet_ms.
+
+    The sim keeps drawing asynchronously after load (geometry and
+    sample_data fetches each trigger a redraw); a fixed sleep races those.
+    """
+    page.wait_for_function(
+        "(q) => window.__simReady === true && window.__lastDrawAt"
+        " && (Date.now() - window.__lastDrawAt) > q",
+        arg=quiet_ms,
+    )
+
+
 def _canvas_rgba(page, x: int, y: int):
     js = (
         "([x,y])=>{"
@@ -70,7 +83,7 @@ def test_layout_centering_and_clipping():
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 700, "height": 400})
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
 
             # Ensure canvas logs exist
             assert page.evaluate("() => !!document.getElementById('epd')")
@@ -100,32 +113,35 @@ def test_layout_centering_and_clipping():
             M = page.evaluate("() => window.__layoutMetrics || null")
             assert M is not None
 
+            # Footer rects from the active spec (single source of truth)
+            rects = page.evaluate("() => (window.UI_SPEC && window.UI_SPEC.rects) || null")
+            assert rects is not None
+            bat_rect = rects["FOOTER_BATTERY"]  # [x, y, w, h]
+            ip_rect = rects["FOOTER_IP"]
+
             try:
-                # 1) Battery icon centered vertically between first two rows
-                by = M["statusLeft"]["batteryIcon"]["y"]
-                bh = M["statusLeft"]["batteryIcon"]["h"]
-                icon_cy = by + bh / 2
+                # 1) Battery icon vertically centered within FOOTER_BATTERY
+                icon = M["statusLeft"]["batteryIcon"]
+                icon_cy = icon["y"] + icon["h"] / 2
+                rect_cy = bat_rect[1] + bat_rect[3] / 2
+                assert abs(icon_cy - rect_cy) <= 2
+
+                # 2) Battery text right-aligned in FOOTER_BATTERY, on the same row
+                #    as the icon, without overlapping it
+                bt = M["statusLeft"]["batteryText"]
+                text_right = bt["x"] + bt["w"]
+                rect_right = bat_rect[0] + bat_rect[2]
+                assert abs(text_right - (rect_right - 2)) <= 2
+                assert icon["x"] + icon["w"] + 2 <= bt["x"]
                 row1y = M["statusLeft"]["line1Y"]
-                row2y = M["statusLeft"]["line2Y"]
-                mid_y = (row1y + row2y + 8) / 2  # approximate text baselines
-                # Allow more tolerance as the icon is positioned at y=88
-                assert abs(icon_cy - mid_y) <= 4
+                assert bat_rect[1] <= row1y <= bat_rect[1] + bat_rect[3]
 
-                # 2) Battery group centered horizontally across left column
-                left = M["statusLeft"]["left"]
-                right = M["statusLeft"]["right"]
-                group_left = M["statusLeft"]["batteryGroup"]["x"]
-                group_w = M["statusLeft"]["batteryGroup"]["w"]
-                col_mid = (left + right) / 2
-                group_mid = group_left + group_w / 2
-                assert abs(col_mid - group_mid) <= 1.5
-
-                # 3) IP row centered within left column (if using centered layout)
-                if "ip" in M["statusLeft"]:
-                    ipx = M["statusLeft"]["ip"]["x"]
-                    ipw = M["statusLeft"]["ip"]["w"]
-                    ip_mid = ipx + ipw / 2
-                    assert abs(ip_mid - col_mid) <= 1.5
+                # 3) IP row centered within FOOTER_IP
+                ipx = M["statusLeft"]["ip"]["x"]
+                ipw = M["statusLeft"]["ip"]["w"]
+                ip_mid = ipx + ipw / 2
+                col_mid = ip_rect[0] + ip_rect[2] / 2
+                assert abs(ip_mid - col_mid) <= 1.5
 
                 # 4) Weather block (icon + label) is horizontally centered (legacy layout only)
                 if "bar" in M.get("weather", {}):
@@ -227,7 +243,7 @@ def test_web_sim_backend_integration_full_reload():
             page.route("**/sample_data.json", handle_route)
 
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
 
             # Count non-white pixels in the bottom-right weather bar area
             def count_nonwhite(x0, y0, w, h):
@@ -245,7 +261,7 @@ def test_web_sim_backend_integration_full_reload():
 
             # Full reload → second payload (Rain)
             page.reload(wait_until="load")
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
             cnt_rain = count_nonwhite(*area)
 
             # Expect a visual change in the weather area between Cloudy and Rain
@@ -309,7 +325,7 @@ def test_web_sim_partial_refresh_only_updates_header_time():
             page.route("**/sample_data.json", handle_route)
 
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
 
             # Capture OUT_TEMP rectangle pixels before refresh
             OUT_TEMP = [129, 36, 94, 28]  # Updated to match display_geometry.json
@@ -320,9 +336,15 @@ def test_web_sim_partial_refresh_only_updates_header_time():
             )
             before = page.evaluate(js_read, OUT_TEMP)
 
-            # Click Refresh → fetches sample_data.json and redraws with new data
+            # Click Refresh → fetches sample_data.json and redraws with new
+            # data. Wait for a draw stamped AFTER the click (the refresh
+            # handler bumps __lastDrawAt), not just any earlier quiet period.
+            before_draw = page.evaluate("() => window.__lastDrawAt || 0")
             page.click("#refresh")
-            page.wait_for_timeout(400)
+            page.wait_for_function(
+                "(prev) => window.__lastDrawAt && window.__lastDrawAt > prev",
+                arg=before_draw,
+            )
 
             after = page.evaluate(js_read, OUT_TEMP)
 

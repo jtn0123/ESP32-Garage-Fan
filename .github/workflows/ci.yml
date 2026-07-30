@@ -205,6 +205,7 @@ jobs:
             out/*_page.png
             out/*_canvas.png
             out/*_metrics.json
+            out/golden_web_sim_current.png
             pytest-web.txt
 
   firmware-build:
