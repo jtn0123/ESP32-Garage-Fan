@@ -146,11 +146,13 @@ void DebugCommands::cmdState(PubSubClient* client) {
   OutsideReadings outside = mqtt_get_outside_readings();
 
   char response[384];
-  snprintf(response, sizeof(response),
-           "{\"cmd\":\"state\",\"outside\":{\"temp_c\":%.1f,\"humidity\":%.0f,\"valid_temp\":%s,"
-           "\"valid_humidity\":%s}}",
-           outside.temperatureC, outside.humidityPct, outside.validTemp ? "true" : "false",
-           outside.validHum ? "true" : "false");
+  snprintf(
+      response, sizeof(response),
+      "{\"cmd\":\"state\",\"outside\":{\"temp_c\":%.1f,\"humidity\":%.0f,\"pressure_hpa\":%.1f,"
+      "\"valid_temp\":%s,\"valid_humidity\":%s,\"valid_pressure\":%s}}",
+      outside.temperatureC, outside.humidityPct, outside.pressureHPa,
+      outside.validTemp ? "true" : "false", outside.validHum ? "true" : "false",
+      outside.validPressure ? "true" : "false");
 
   publishResponse(client, response);
 }

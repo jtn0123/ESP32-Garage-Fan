@@ -1,7 +1,7 @@
 # Home Assistant automation: publish outdoor metrics to MQTT (retained)
 #
-# - Publishes outdoor temperature/humidity/condition to topics that the room node
-#   subscribes to by default: home/outdoor/{temp,hum,weather}
+# - Publishes outdoor temperature/humidity/pressure/condition to topics that the room
+#   node subscribes to by default: home/outdoor/{temp,hum,weather,pressure_hpa}
 # - Marked retained so values are available immediately after the node wakes.
 # - Adjust entity_id and base topics to match your setup.
 
@@ -13,6 +13,7 @@ trigger:
     entity_id:
       - sensor.outdoor_temperature
       - sensor.outdoor_humidity
+      - sensor.outdoor_pressure
       - weather.home
 action:
   - variables:
@@ -23,6 +24,7 @@ action:
       wind: "{{ states('sensor.outdoor_wind_speed') }}"
       hi: "{{ states('sensor.outdoor_high_temperature') }}"
       lo: "{{ states('sensor.outdoor_low_temperature') }}"
+      p: "{{ states('sensor.outdoor_pressure') }}"
   - service: mqtt.publish
     data:
       topic: "{{ base }}/temp"
@@ -52,6 +54,11 @@ action:
     data:
       topic: "{{ base }}/low"
       payload: "{{ lo }}"
+      retain: true
+  - service: mqtt.publish
+    data:
+      topic: "{{ base }}/pressure_hpa"
+      payload: "{{ p }}"
       retain: true
 
 

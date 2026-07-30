@@ -16,12 +16,14 @@ struct OutsideReadings {
   float windMps = NAN;
   float highTempC = NAN;
   float lowTempC = NAN;
+  float pressureHPa = NAN;
   bool validTemp = false;
   bool validHum = false;
   bool validWeather = false;
   bool validWind = false;
   bool validHigh = false;
   bool validLow = false;
+  bool validPressure = false;
 };
 
 class Preferences;

@@ -34,7 +34,7 @@ const UiOpHeader kOps_inside[] = {
     { OP_TEXT, 7, 1, 2, 0, 0, 0, 0, "INSIDE", NULL },
     { OP_TEMPGROUPCENTERED, 9, 0, 2, 0, 0, 0, 0, "inside_temp_f", NULL },
     { OP_TEXT, 6, 2, 0, 0, 0, 0, 0, "{inside_hum_pct}% RH", NULL },
-    { OP_TEXT, 8, 2, 0, 0, 0, 0, 0, "{pressure_hpa:.1f} hPa", NULL },
+    { OP_TEXT, 8, 2, 0, 0, 0, 0, 0, "{pressure_hpa:.1f} hPa", "pressure_hpa" },
 };
 const int kOps_inside_count = sizeof(kOps_inside)/sizeof(kOps_inside[0]);
 
@@ -42,7 +42,7 @@ const UiOpHeader kOps_outside[] = {
     { OP_TEXT, 10, 1, 2, 0, 0, 0, 0, "OUTSIDE", NULL },
     { OP_TEMPGROUPCENTERED, 13, 0, 2, 0, 0, 0, 0, "outside_temp_f", NULL },
     { OP_ICONIN, 15, 0, 0, 0, 0, 0, 0, "weather", NULL },
-    { OP_TEXT, 12, 2, 0, 0, 3, 0, 0, "{outside_pressure_hpa:.0f} hPa", NULL },
+    { OP_TEXT, 12, 2, 0, 0, 3, 0, 0, "{outside_pressure_hpa:.0f} hPa", "outside_pressure_hpa" },
     { OP_TEXT, 11, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", NULL },
     { OP_TEXT, 14, 2, 0, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", NULL },
 };

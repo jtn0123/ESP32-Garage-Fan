@@ -370,8 +370,13 @@ void full_refresh() {
     display.print(out_rh);
     display.print("% RH");
 
-    // Draw outside pressure if available (note: OutsideReadings doesn't have pressure field)
-    // This would need to be added to the OutsideReadings struct if needed
+    // Draw outside pressure if available
+    if (outside.validPressure && isfinite(outside.pressureHPa)) {
+      char out_pressure[12];
+      snprintf(out_pressure, sizeof(out_pressure), "%.0f hPa", outside.pressureHPa);
+      display.setCursor(OUT_PRESSURE[0], OUT_PRESSURE[1] + OUT_PRESSURE[3] - 4);
+      display.print(out_pressure);
+    }
 
     // Draw wind speed if available (convert from m/s to mph)
     if (outside.validWind && isfinite(outside.windMps)) {

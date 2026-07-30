@@ -59,6 +59,7 @@ def main():
                 f"{args.sub_base}/hum": "55",
                 f"{args.sub_base}/weather": "Cloudy",
                 f"{args.sub_base}/wind_mps": "2.0",
+                f"{args.sub_base}/pressure_hpa": "1013.2",
             }
             for t, p in msgs.items():
                 client.publish(t, p, retain=True)

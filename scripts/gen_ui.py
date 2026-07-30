@@ -443,6 +443,10 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
     lines.append("};")
     lines.append("")
     # Simple op header (future: multiple op payload shapes)
+    lines.append("// s0: op payload (text template, field name, ...).")
+    lines.append("// s1: guard field from the spec's `when: has(<field>)` clause, or NULL when")
+    lines.append("//     the op is unconditional. Renderers must skip the op when the guard")
+    lines.append("//     field has no value.")
     lines.append(
         (
             "struct UiOpHeader { "
@@ -487,6 +491,30 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
 
 def _cxx_string_literal(s: str) -> str:
     return '"' + s.replace("\\", r"\\").replace('"', r"\"") + '"'
+
+
+# Ops may carry a `when` guard, e.g. "when": "has(outside_pressure_hpa)". Only the
+# has() form exists today; the firmware receives the bare field name in s1 and skips
+# the op when that field has no value (see spec_field_has() in main.cpp).
+_WHEN_HAS_RE = re.compile(r"^has\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$")
+
+
+def guard_field(op: Dict[str, Any], component: str) -> str | None:
+    """Return the field name guarding this op, or None when it is unconditional.
+
+    Unsupported `when` forms are a hard error: silently dropping the clause is
+    exactly how the device ended up drawing rows the simulator hides.
+    """
+    when = op.get("when")
+    if when is None:
+        return None
+    m = _WHEN_HAS_RE.match(str(when).strip())
+    if not m:
+        _fail(
+            f"unsupported 'when' clause {when!r} on {op.get('op')} op in component "
+            f"'{component}': only has(<field>) is supported"
+        )
+    return m.group(1)
 
 
 def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
@@ -548,7 +576,9 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
             f = font_id(str(op.get("font")))
             align = align_code(str(op.get("align")))
             p0 = p1 = p2 = p3 = 0
-            s0 = s1 = "NULL"
+            s0 = "NULL"
+            guard = guard_field(op, cname)
+            s1 = _cxx_string_literal(guard) if guard else "NULL"
             if kind == "line":
                 frm = op.get("from") or [0, 0]
                 to = op.get("to") or [0, 0]

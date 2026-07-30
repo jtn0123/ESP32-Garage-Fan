@@ -208,6 +208,15 @@ void mqtt_begin() {
         g_outside.temperatureC = temp_c;
         g_outside.validTemp = true;
       }
+    } else if (topic_ends_with(topic, "/pressure_hpa") || topic_ends_with(topic, "/pressure")) {
+      // Handle barometric pressure in hPa ("/pressure" is the legacy alias; both
+      // carry the same unit, so unlike temp_f/temp they need no conversion split)
+      char* endptr = nullptr;
+      float pressure_hpa = strtof(value_str, &endptr);
+      if (endptr != value_str && isfinite(pressure_hpa)) {
+        g_outside.pressureHPa = pressure_hpa;
+        g_outside.validPressure = true;
+      }
     } else if (topic_ends_with(topic, "/condition")) {
       // Handle weather condition text
       snprintf(g_outside.weather, sizeof(g_outside.weather), "%s", value_str);
@@ -299,10 +308,12 @@ bool mqtt_connect() {
     // Subscribe to alias topics for outdoor data
     String sub_topics[] = {
         outdoor_base + "/temp_f",          // Temperature in Fahrenheit
+        outdoor_base + "/pressure_hpa",    // Barometric pressure in hPa
         outdoor_base + "/condition",       // Weather condition text
         outdoor_base + "/condition_code",  // Weather condition code
         // Legacy topics for backward compatibility
         outdoor_base + "/temp",       // Temperature in Celsius
+        outdoor_base + "/pressure",   // Barometric pressure in hPa
         outdoor_base + "/weather",    // Weather description
         outdoor_base + "/weather_id"  // Weather ID
     };
