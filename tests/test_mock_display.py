@@ -54,3 +54,47 @@ def test_png_icon_loads_and_renders_centered():
     px = img.load()
     has_black = any(px[i, j] == 0 for i in range(x0, x1) for j in range(y0, y1))
     assert has_black
+
+
+def test_short_condition_label_mappings():
+    # Mirrors web/sim/sim.js shortConditionLabel and the firmware's
+    # spec_short_condition: all three renderers must agree on these.
+    cases = {
+        "clear-night": "Night",
+        "partlycloudy": "Partly",
+        "cloudy": "Cloudy",
+        "overcast skies": "Cloudy",
+        "lightning-rainy": "Storm",
+        "pouring": "Rain",
+        "drizzle": "Rain",
+        "hail": "Hail",
+        "snowy-sleet": "Snow",
+        "fog": "Fog",
+        "haze": "Fog",
+        "windy-variant": "Wind",
+        "sunny": "Sunny",
+        "": "Sunny",
+    }
+    for raw, expected in cases.items():
+        assert md.short_condition_label(raw) == expected, raw
+
+
+def test_pressure_rows_render_only_when_data_present():
+    base = {"room_name": "Office", "inside_temp": "72.5", "outside_temp": "68.4"}
+    without = md.render(base)
+    with_pressure = md.render({**base, "pressure_hpa": 1013.2, "outside_pressure_hpa": 1015.8})
+    assert md.image_md5(without) != md.image_md5(with_pressure)
+
+    rects = md.load_geometry()
+    px_with = with_pressure.load()
+    px_without = without.load()
+    for key in ("INSIDE_PRESSURE", "OUT_PRESSURE"):
+        x, y, w, h = rects[key]
+        has_with = any(px_with[i, j] == 0 for i in range(x, x + w) for j in range(y, y + h))
+        # Negative check skips the rect's top rows: glyph descenders from the
+        # row above (RH/wind) bleed a couple of pixels into the pressure rect.
+        has_without = any(
+            px_without[i, j] == 0 for i in range(x, x + w) for j in range(y + 3, y + h)
+        )
+        assert has_with, f"{key}: pressure text missing when data provided"
+        assert not has_without, f"{key}: pressure text drawn without data"

@@ -5,8 +5,8 @@
 
 // Layout identity for simulator ↔ firmware parity checks
 #define LAYOUT_VERSION 1
-#define LAYOUT_CRC 0xD601B413u
-#define LAYOUT_MD5 "3a67bd81077867cf3fea668af6cc7e6f"
+#define LAYOUT_CRC 0x307DFE54u
+#define LAYOUT_MD5 "c90b6ddf79da58553d805bcefe2e2a90"
 
 // Display dimensions
 #define DISPLAY_WIDTH 250
@@ -22,13 +22,13 @@ static constexpr int RECT_INSIDE_HUMIDITY[4] = {   6,  60, 118, 10};
 static constexpr int RECT_INSIDE_PRESSURE[4] = {   6,  70, 118, 10};
 static constexpr int RECT_OUTSIDE_LABEL[4] = { 129,  18,  70, 14};
 static constexpr int RECT_OUT_TEMP[4] = { 129,  36,  94, 28};
-static constexpr int RECT_WEATHER_ICON[4] = { 168,  90,  30, 32};
-static constexpr int RECT_OUT_PRESSURE[4] = { 177,  68,  64, 12};
-static constexpr int RECT_OUT_HUMIDITY[4] = { 131,  78,  44, 12};
-static constexpr int RECT_OUT_WIND[4] = { 177,  80,  44, 10};
-static constexpr int RECT_FOOTER_BATTERY[4] = {   6,  85, 118, 12};
-static constexpr int RECT_FOOTER_IP[4] = {   6, 107, 120, 14};
-static constexpr int RECT_FOOTER_WEATHER[4] = { 168,  90,  76, 32};
+static constexpr int RECT_WEATHER_ICON[4] = { 140,  90,  30, 30};
+static constexpr int RECT_OUT_PRESSURE[4] = { 131,  74, 110, 10};
+static constexpr int RECT_OUT_HUMIDITY[4] = { 131,  64,  44, 10};
+static constexpr int RECT_OUT_WIND[4] = { 177,  64,  64, 10};
+static constexpr int RECT_FOOTER_BATTERY[4] = {   6,  88, 118, 12};
+static constexpr int RECT_FOOTER_IP[4] = {   6, 104, 120, 14};
+static constexpr int RECT_FOOTER_WEATHER[4] = { 174,  90,  72, 30};
 
 enum WeatherIconId {
     ICON_CLEAR = 0,
@@ -69,24 +69,24 @@ static_assert(RECT_OUT_TEMP[0] >= 0 && RECT_OUT_TEMP[1] >= 0, "OUT_TEMP origin")
 static_assert(129 + 94 <= DISPLAY_WIDTH,  "OUT_TEMP width");
 static_assert(36 + 28 <= DISPLAY_HEIGHT, "OUT_TEMP height");
 static_assert(RECT_WEATHER_ICON[0] >= 0 && RECT_WEATHER_ICON[1] >= 0, "WEATHER_ICON origin");
-static_assert(168 + 30 <= DISPLAY_WIDTH,  "WEATHER_ICON width");
-static_assert(90 + 32 <= DISPLAY_HEIGHT, "WEATHER_ICON height");
+static_assert(140 + 30 <= DISPLAY_WIDTH,  "WEATHER_ICON width");
+static_assert(90 + 30 <= DISPLAY_HEIGHT, "WEATHER_ICON height");
 static_assert(RECT_OUT_PRESSURE[0] >= 0 && RECT_OUT_PRESSURE[1] >= 0, "OUT_PRESSURE origin");
-static_assert(177 + 64 <= DISPLAY_WIDTH,  "OUT_PRESSURE width");
-static_assert(68 + 12 <= DISPLAY_HEIGHT, "OUT_PRESSURE height");
+static_assert(131 + 110 <= DISPLAY_WIDTH,  "OUT_PRESSURE width");
+static_assert(74 + 10 <= DISPLAY_HEIGHT, "OUT_PRESSURE height");
 static_assert(RECT_OUT_HUMIDITY[0] >= 0 && RECT_OUT_HUMIDITY[1] >= 0, "OUT_HUMIDITY origin");
 static_assert(131 + 44 <= DISPLAY_WIDTH,  "OUT_HUMIDITY width");
-static_assert(78 + 12 <= DISPLAY_HEIGHT, "OUT_HUMIDITY height");
+static_assert(64 + 10 <= DISPLAY_HEIGHT, "OUT_HUMIDITY height");
 static_assert(RECT_OUT_WIND[0] >= 0 && RECT_OUT_WIND[1] >= 0, "OUT_WIND origin");
-static_assert(177 + 44 <= DISPLAY_WIDTH,  "OUT_WIND width");
-static_assert(80 + 10 <= DISPLAY_HEIGHT, "OUT_WIND height");
+static_assert(177 + 64 <= DISPLAY_WIDTH,  "OUT_WIND width");
+static_assert(64 + 10 <= DISPLAY_HEIGHT, "OUT_WIND height");
 static_assert(RECT_FOOTER_BATTERY[0] >= 0 && RECT_FOOTER_BATTERY[1] >= 0, "FOOTER_BATTERY origin");
 static_assert(6 + 118 <= DISPLAY_WIDTH,  "FOOTER_BATTERY width");
-static_assert(85 + 12 <= DISPLAY_HEIGHT, "FOOTER_BATTERY height");
+static_assert(88 + 12 <= DISPLAY_HEIGHT, "FOOTER_BATTERY height");
 static_assert(RECT_FOOTER_IP[0] >= 0 && RECT_FOOTER_IP[1] >= 0, "FOOTER_IP origin");
 static_assert(6 + 120 <= DISPLAY_WIDTH,  "FOOTER_IP width");
-static_assert(107 + 14 <= DISPLAY_HEIGHT, "FOOTER_IP height");
+static_assert(104 + 14 <= DISPLAY_HEIGHT, "FOOTER_IP height");
 static_assert(RECT_FOOTER_WEATHER[0] >= 0 && RECT_FOOTER_WEATHER[1] >= 0, "FOOTER_WEATHER origin");
-static_assert(168 + 76 <= DISPLAY_WIDTH,  "FOOTER_WEATHER width");
-static_assert(90 + 32 <= DISPLAY_HEIGHT, "FOOTER_WEATHER height");
+static_assert(174 + 72 <= DISPLAY_WIDTH,  "FOOTER_WEATHER width");
+static_assert(90 + 30 <= DISPLAY_HEIGHT, "FOOTER_WEATHER height");
 

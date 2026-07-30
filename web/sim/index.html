@@ -172,14 +172,14 @@
         </aside>
       </div>
     </div>
-    <!-- MQTT.js library from CDN -->
-    <script src="https://unpkg.com/mqtt@5.3.0/dist/mqtt.min.js"></script>
+    <!-- MQTT.js library (vendored from mqtt@5.3.0 npm dist; local so parsing never blocks on a CDN) -->
+    <script src="vendor/mqtt.min.js"></script>
     <script src="mqtt-client.js"></script>
     <script src="mqtt-ui.js"></script>
     <script src="device-bridge.js"></script>
-    <script src="ui_generated.js?v=9"></script>
+    <script src="ui_generated.js?v=10"></script>
     <script src="realistic-data.js?v=1"></script>
-    <script src="sim.js?v=17"></script>
+    <script src="sim.js?v=23"></script>
     <script src="debug-panel.js?v=2"></script>
     <script src="layout-editor.js?v=20251205h"></script>
     <div id="globalToast" class="global-toast" role="status" aria-live="polite" aria-atomic="true"></div>

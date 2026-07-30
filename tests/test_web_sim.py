@@ -23,6 +23,19 @@ def _start_http_server(root: str, port: int) -> subprocess.Popen:
     )
 
 
+def _wait_sim_settled(page, quiet_ms: int = 400):
+    """Wait until the sim has drawn and no redraw landed for quiet_ms.
+
+    The sim keeps drawing asynchronously after load (geometry and
+    sample_data fetches each trigger a redraw); a fixed sleep races those.
+    """
+    page.wait_for_function(
+        "(q) => window.__simReady === true && window.__lastDrawAt"
+        " && (Date.now() - window.__lastDrawAt) > q",
+        arg=quiet_ms,
+    )
+
+
 def _canvas_rgba(page, x: int, y: int):
     js = (
         "([x,y])=>{"
@@ -49,8 +62,7 @@ def test_web_sim_basic_pixels():
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 250, "height": 122})
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
-            # allow icons fetch & draw
-            page.wait_for_timeout(300)
+            _wait_sim_settled(page)
 
             # Corners should be black border
             for x, y in [(0, 0), (249, 0), (0, 121), (249, 121)]:

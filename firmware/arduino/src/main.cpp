@@ -108,6 +108,135 @@ GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display(
 
 // Now that display exists, provide the implementation using it
 #if USE_UI_SPEC
+// Short, user-facing label for a raw weather condition string. Mirrors the
+// web sim's shortConditionLabel keyword order so device and sim render the
+// same footer text for the same condition.
+static String spec_short_condition(const char* weather) {
+  String s(weather ? weather : "");
+  s.toLowerCase();
+  auto has = [&](const char* k) { return s.indexOf(k) >= 0; };
+  if (has("night") || has("moon"))
+    return String("Night");
+  if (has("part"))
+    return String("Partly");
+  if (has("cloud") || has("overcast"))
+    return String("Cloudy");
+  if (has("storm") || has("thunder") || has("lightning"))
+    return String("Storm");
+  if (has("rain") || has("pour") || has("shower") || has("drizzle"))
+    return String("Rain");
+  if (has("hail"))
+    return String("Hail");
+  if (has("snow") || has("sleet"))
+    return String("Snow");
+  if (has("fog") || has("mist") || has("haze"))
+    return String("Fog");
+  if (has("wind"))
+    return String("Wind");
+  return String("Sunny");
+}
+
+// Resolve one {placeholder} key from a ui_spec op template using live device
+// state. Shared by every templated op (OP_TEXT, OP_TEXTCENTEREDIN) so a
+// template like {weather} or {time_hhmm} never prints literally.
+static String spec_format_field(const String& key) {
+  static char buf[32];
+  if (key == "room_name")
+    return String(ROOM_NAME);
+  if (key == "ip") {
+    char ip_c[32];
+    net_ip_cstr(ip_c, sizeof(ip_c));
+    return String(ip_c);
+  }
+  if (key == "fw_version")
+    return String(FW_VERSION);
+  // Battery fields
+  if (key == "battery_percent" || key.startsWith("battery_voltage")) {
+    BatteryStatus bs = read_battery_status();
+    if (key == "battery_percent") {
+      snprintf(buf, sizeof(buf), "%d", bs.percent);
+      return String(buf);
+    }
+    // Handle battery_voltage:.2f format
+    snprintf(buf, sizeof(buf), "%.2f", bs.voltage);
+    return String(buf);
+  }
+  if (key == "days") {
+    BatteryStatus bs = read_battery_status();
+    snprintf(buf, sizeof(buf), "%d", bs.estimatedDays);
+    return String(buf);
+  }
+  // Inside sensor fields
+  if (key == "inside_hum_pct") {
+    InsideReadings ir = read_inside_sensors();
+    snprintf(buf, sizeof(buf), "%.0f", ir.humidityPct);
+    return String(buf);
+  }
+  if (key.startsWith("pressure_hpa")) {
+    InsideReadings ir = read_inside_sensors();
+    snprintf(buf, sizeof(buf), "%.1f", ir.pressureHPa);
+    return String(buf);
+  }
+  // Outside sensor fields
+  if (key == "outside_hum_pct") {
+    OutsideReadings o = net_get_outside();
+    snprintf(buf, sizeof(buf), "%.0f", o.humidityPct);
+    return String(buf);
+  }
+  // Distinct from the inside "pressure_hpa" case above: startsWith() is a prefix
+  // match, so neither key can match the other's branch.
+  if (key.startsWith("outside_pressure_hpa")) {
+    OutsideReadings o = net_get_outside();
+    if (!o.validPressure || !isfinite(o.pressureHPa))
+      return String("--");
+    snprintf(buf, sizeof(buf), "%.0f", o.pressureHPa);
+    return String(buf);
+  }
+  if (key.startsWith("wind_mps")) {
+    OutsideReadings o = net_get_outside();
+    float mph = o.windMps * 2.237f;
+    snprintf(buf, sizeof(buf), "%.1f", mph);
+    return String(buf);
+  }
+  if (key == "weather_short") {
+    OutsideReadings o = net_get_outside();
+    return spec_short_condition(o.weather);
+  }
+  if (key == "weather") {
+    OutsideReadings o = net_get_outside();
+    return String(o.weather);
+  }
+  if (key == "time_hhmm") {
+    net_time_hhmm(buf, sizeof(buf));
+    return String(buf);
+  }
+  return String("--");
+}
+
+// Expand every {placeholder} in a ui_spec op template.
+static String spec_expand_template(const String& templ) {
+  String out;
+  out.reserve(templ.length() + 8);
+  int start = 0;
+  while (true) {
+    int lb = templ.indexOf('{', start);
+    if (lb < 0) {
+      out += templ.substring(start);
+      break;
+    }
+    int rb = templ.indexOf('}', lb + 1);
+    if (rb < 0) {
+      out += templ.substring(start);
+      break;
+    }
+    out += templ.substring(start, lb);
+    String key = templ.substring(lb + 1, rb);
+    out += spec_format_field(key);
+    start = rb + 1;
+  }
+  return out;
+}
+
 // Evaluates a spec op's `when: has(<field>)` guard, which gen_ui.py emits into
 // UiOpHeader::s1. Mirrors the web simulator (web/sim/sim.js): a guarded op whose
 // field has no value is not drawn at all, so an absent reading leaves the rect
@@ -192,95 +321,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           const int* r = rect_ptr_by_id(op.rect);
           int16_t tx = op.p0;
           int16_t ty = op.p1;
-          auto fmt_field = [&](const String& key) -> String {
-            static char buf[32];
-            if (key == "room_name")
-              return String(ROOM_NAME);
-            if (key == "ip") {
-              char ip_c[32];
-              net_ip_cstr(ip_c, sizeof(ip_c));
-              return String(ip_c);
-            }
-            if (key == "fw_version")
-              return String(FW_VERSION);
-            // Battery fields
-            if (key == "battery_percent" || key.startsWith("battery_voltage")) {
-              BatteryStatus bs = read_battery_status();
-              if (key == "battery_percent") {
-                snprintf(buf, sizeof(buf), "%d", bs.percent);
-                return String(buf);
-              }
-              // Handle battery_voltage:.2f format
-              snprintf(buf, sizeof(buf), "%.2f", bs.voltage);
-              return String(buf);
-            }
-            if (key == "days") {
-              BatteryStatus bs = read_battery_status();
-              snprintf(buf, sizeof(buf), "%d", bs.estimatedDays);
-              return String(buf);
-            }
-            // Inside sensor fields
-            if (key == "inside_hum_pct") {
-              InsideReadings ir = read_inside_sensors();
-              snprintf(buf, sizeof(buf), "%.0f", ir.humidityPct);
-              return String(buf);
-            }
-            if (key.startsWith("pressure_hpa")) {
-              InsideReadings ir = read_inside_sensors();
-              snprintf(buf, sizeof(buf), "%.1f", ir.pressureHPa);
-              return String(buf);
-            }
-            // Outside sensor fields
-            if (key == "outside_hum_pct") {
-              OutsideReadings o = net_get_outside();
-              snprintf(buf, sizeof(buf), "%.0f", o.humidityPct);
-              return String(buf);
-            }
-            // Distinct from the inside "pressure_hpa" case above: startsWith() is a
-            // prefix match, so neither key can match the other's branch.
-            if (key.startsWith("outside_pressure_hpa")) {
-              OutsideReadings o = net_get_outside();
-              if (!o.validPressure || !isfinite(o.pressureHPa))
-                return String("--");
-              snprintf(buf, sizeof(buf), "%.0f", o.pressureHPa);
-              return String(buf);
-            }
-            if (key.startsWith("wind_mps")) {
-              OutsideReadings o = net_get_outside();
-              float mph = o.windMps * 2.237f;
-              snprintf(buf, sizeof(buf), "%.1f", mph);
-              return String(buf);
-            }
-            if (key == "weather") {
-              OutsideReadings o = net_get_outside();
-              return String(o.weather);
-            }
-            if (key == "time_hhmm") {
-              net_time_hhmm(buf, sizeof(buf));
-              return String(buf);
-            }
-            return String("--");
-          };
-          String templ = op.s0 ? op.s0 : "";
-          String out;
-          out.reserve(templ.length() + 8);
-          int start = 0;
-          while (true) {
-            int lb = templ.indexOf('{', start);
-            if (lb < 0) {
-              out += templ.substring(start);
-              break;
-            }
-            int rb = templ.indexOf('}', lb + 1);
-            if (rb < 0) {
-              out += templ.substring(start);
-              break;
-            }
-            out += templ.substring(start, lb);
-            String key = templ.substring(lb + 1, rb);
-            out += fmt_field(key);
-            start = rb + 1;
-          }
+          String out = spec_expand_template(op.s0 ? String(op.s0) : String(""));
           gfx.setTextColor(GxEPD_BLACK);
           gfx.setTextSize(1);
           // Handle rect-based positioning for all alignments (LEFT, RIGHT, CENTER)
@@ -360,17 +401,14 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           const int* r = rect_ptr_by_id(op.rect);
           if (!r)
             break;
-          String templ = op.s0 ? op.s0 : "";
-          char ip_c[32];
-          net_ip_cstr(ip_c, sizeof(ip_c));
-          templ.replace("{ip}", ip_c);
+          String out = spec_expand_template(op.s0 ? String(op.s0) : String(""));
           gfx.setTextColor(GxEPD_BLACK);
           gfx.setTextSize(1);
-          int16_t tw = text_width_default_font(templ.c_str(), 1);
+          int16_t tw = text_width_default_font(out.c_str(), 1);
           int16_t tx = r[0] + (r[2] - tw) / 2;
           int16_t ty = r[1] + op.p0;
           gfx.setCursor(tx, ty);
-          gfx.print(templ.c_str());
+          gfx.print(out.c_str());
           break;
         }
         case OP_BATTERYGLYPH: {

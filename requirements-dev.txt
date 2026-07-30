@@ -13,6 +13,9 @@ types-pyserial
 pytest-playwright>=0.4.0
 hypothesis>=6.0  # Property-based tests (tests/test_power_hypothesis.py, test_geometry_hypothesis.py)
 fastapi>=0.100  # Imported by device_manager tests (tests/test_device_manager_async.py)
+# Needed by tests/test_device_manager_async.py (@pytest.mark.asyncio); those
+# tests only run where the device-manager deps (fastapi etc.) are installed.
+pytest-asyncio>=1.0
 
 # Code coverage (optional)
 pytest-cov>=4.0

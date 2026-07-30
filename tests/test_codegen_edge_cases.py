@@ -564,3 +564,93 @@ class TestErrorRecovery:
                     assert not isinstance(rect, list)
             finally:
                 os.unlink(spec_file)
+
+
+class TestBatteryGlyphOpEmission:
+    """batteryGlyph firmware emission derives the glyph box from its rect.
+
+    Regression tests for the codegen bug where a rect-only batteryGlyph op
+    emitted p0..p3 = 0 and the device drew a 0x0 glyph at the origin while
+    the web sim drew a proper 13x7 icon inside the rect.
+    """
+
+    @staticmethod
+    def _spec(ops):
+        return {
+            "rects": {"FOOTER_BATTERY": [6, 88, 118, 12]},
+            "fonts": {"tokens": {"small": {"px": 10}}},
+            "components": {"footer": ops},
+            "variants": {"v2": ["footer"]},
+        }
+
+    def test_rect_only_op_derives_sim_matching_glyph_box(self):
+        import gen_ui
+
+        out = gen_ui.emit_fw_ops_cpp(
+            self._spec(
+                [
+                    {
+                        "op": "batteryGlyph",
+                        "rect": "FOOTER_BATTERY",
+                        "percent": "{battery_percent}",
+                    }
+                ]
+            )
+        )
+        # x = rect.x + 2, y = rect.y + (rect.h - 7) // 2, fixed 13x7 glyph:
+        # the same placement web/sim/sim.js uses for its default battery icon.
+        assert '{ OP_BATTERYGLYPH, 0, 0, 0, 8, 90, 13, 7, "battery_percent", NULL },' in out
+
+    def test_explicit_coords_win_over_rect(self):
+        import gen_ui
+
+        out = gen_ui.emit_fw_ops_cpp(
+            self._spec(
+                [
+                    {
+                        "op": "batteryGlyph",
+                        "rect": "FOOTER_BATTERY",
+                        "x": 3,
+                        "y": 4,
+                        "w": 10,
+                        "h": 6,
+                        "percent": "{battery_percent}",
+                    }
+                ]
+            )
+        )
+        assert '{ OP_BATTERYGLYPH, 0, 0, 0, 3, 4, 10, 6, "battery_percent", NULL },' in out
+
+    def test_unknown_rect_falls_back_to_origin_with_default_size(self):
+        import gen_ui
+
+        out = gen_ui.emit_fw_ops_cpp(
+            self._spec(
+                [
+                    {
+                        "op": "batteryGlyph",
+                        "rect": "NO_SUCH_RECT",
+                        "percent": "{battery_percent}",
+                    }
+                ]
+            )
+        )
+        # Unknown rect id is 255; no coords derivable, keep the default glyph size
+        assert '{ OP_BATTERYGLYPH, 255, 0, 0, 0, 0, 13, 7, "battery_percent", NULL },' in out
+
+    def test_malformed_coords_fall_back_to_default_glyph(self):
+        import gen_ui
+
+        out = gen_ui.emit_fw_ops_cpp(
+            self._spec(
+                [
+                    {
+                        "op": "batteryGlyph",
+                        "rect": "FOOTER_BATTERY",
+                        "x": "not-a-number",
+                        "percent": "{battery_percent}",
+                    }
+                ]
+            )
+        )
+        assert '{ OP_BATTERYGLYPH, 0, 0, 0, 0, 0, 13, 7, "battery_percent", NULL },' in out
