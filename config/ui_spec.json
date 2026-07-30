@@ -394,14 +394,16 @@
         "rect": "OUT_HUMIDITY",
         "font": "small",
         "align": "left",
-        "text": "{outside_hum_pct}% RH"
+        "text": "{outside_hum_pct}% RH",
+        "when": "has(outside_hum_pct)"
       },
       {
         "op": "text",
         "rect": "OUT_WIND",
         "font": "small",
         "align": "left",
-        "text": "{wind_mps->mph:.1f} mph"
+        "text": "{wind_mps->mph:.1f} mph",
+        "when": "has(wind_mps)"
       }
     ],
     "footer_split": [

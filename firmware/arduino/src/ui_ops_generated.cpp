@@ -43,8 +43,8 @@ const UiOpHeader kOps_outside[] = {
     { OP_TEMPGROUPCENTERED, 13, 0, 2, 0, 0, 0, 0, "outside_temp_f", NULL },
     { OP_ICONIN, 15, 0, 0, 0, 0, 0, 0, "weather", NULL },
     { OP_TEXT, 12, 2, 0, 0, 0, 0, 0, "{outside_pressure_hpa:.0f} hPa", "outside_pressure_hpa" },
-    { OP_TEXT, 11, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", NULL },
-    { OP_TEXT, 14, 2, 0, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", NULL },
+    { OP_TEXT, 11, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", "outside_hum_pct" },
+    { OP_TEXT, 14, 2, 0, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", "wind_mps" },
 };
 const int kOps_outside_count = sizeof(kOps_outside)/sizeof(kOps_outside[0]);
 

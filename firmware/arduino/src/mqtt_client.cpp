@@ -1,6 +1,7 @@
 // MQTT client implementation - extracted from net.h
 #include "mqtt_client.h"
 #include <Preferences.h>
+#include <strings.h>  // For strcasecmp
 #include <cstdio>
 #include "generated_config.h"
 #include "config.h"
@@ -33,6 +34,19 @@ static bool g_diagnostic_mode_request_value = false;
 // Rate limiting for MQTT commands (prevents flooding/DoS)
 static uint32_t g_last_command_ms = 0;
 static const uint32_t COMMAND_COOLDOWN_MS = 1000;  // 1 second between commands
+
+// The outdoor alias topics are retained, and Home Assistant publishes the literal
+// strings "unavailable"/"unknown" to them when the source entity loses its value
+// (see homeassistant/mqtt_outdoor_publish.yaml, which publishes raw states()).
+// Numeric handlers detect that through a failed strtof; text handlers have no such
+// signal, so they check the payload against these sentinels explicitly. An empty
+// payload (the retained-value clear) counts as "no value" too.
+static bool is_no_value_payload(const char* s) {
+  if (!s || s[0] == '\0')
+    return true;
+  return strcasecmp(s, "unavailable") == 0 || strcasecmp(s, "unknown") == 0 ||
+         strcasecmp(s, "none") == 0;
+}
 
 // Helper to build MQTT topic (buffer-based to avoid heap fragmentation)
 static void build_topic_buf(char* out, size_t out_size, const char* suffix) {
@@ -200,6 +214,13 @@ void mqtt_begin() {
         float temp_c = (temp_f - 32.0f) * 5.0f / 9.0f;
         g_outside.temperatureC = temp_c;
         g_outside.validTemp = true;
+      } else {
+        // Same retained-topic hazard as pressure below: an unparseable payload
+        // clears the reading rather than falling through, because leaving the last
+        // good value with validTemp still set renders a stale temperature as if it
+        // were current, indefinitely.
+        g_outside.temperatureC = NAN;
+        g_outside.validTemp = false;
       }
     } else if (topic_ends_with(topic, "/temp")) {
       // Handle temperature in Celsius (legacy)
@@ -208,6 +229,31 @@ void mqtt_begin() {
       if (endptr != value_str && isfinite(temp_c)) {
         g_outside.temperatureC = temp_c;
         g_outside.validTemp = true;
+      } else {
+        g_outside.temperatureC = NAN;
+        g_outside.validTemp = false;
+      }
+    } else if (topic_ends_with(topic, "/hum") || topic_ends_with(topic, "/rh")) {
+      // Handle relative humidity in percent
+      char* endptr = nullptr;
+      float hum_pct = strtof(value_str, &endptr);
+      if (endptr != value_str && isfinite(hum_pct)) {
+        g_outside.humidityPct = hum_pct;
+        g_outside.validHum = true;
+      } else {
+        g_outside.humidityPct = NAN;
+        g_outside.validHum = false;
+      }
+    } else if (topic_ends_with(topic, "/wind_mps") || topic_ends_with(topic, "/wind")) {
+      // Handle wind speed in metres per second (the renderer converts to mph)
+      char* endptr = nullptr;
+      float wind_mps = strtof(value_str, &endptr);
+      if (endptr != value_str && isfinite(wind_mps)) {
+        g_outside.windMps = wind_mps;
+        g_outside.validWind = true;
+      } else {
+        g_outside.windMps = NAN;
+        g_outside.validWind = false;
       }
     } else if (topic_ends_with(topic, "/pressure_hpa") || topic_ends_with(topic, "/pressure")) {
       // Handle barometric pressure in hPa ("/pressure" is the legacy alias; both
@@ -228,12 +274,24 @@ void mqtt_begin() {
       }
     } else if (topic_ends_with(topic, "/condition")) {
       // Handle weather condition text
-      snprintf(g_outside.weather, sizeof(g_outside.weather), "%s", value_str);
-      g_outside.validWeather = true;
+      if (is_no_value_payload(value_str)) {
+        // "unavailable" is not a weather condition: stored verbatim it would flow
+        // through the icon mapping's default arm and draw a confident sunny icon.
+        g_outside.weather[0] = '\0';
+        g_outside.validWeather = false;
+      } else {
+        snprintf(g_outside.weather, sizeof(g_outside.weather), "%s", value_str);
+        g_outside.validWeather = true;
+      }
     } else if (topic_ends_with(topic, "/weather")) {
       // Handle weather description (legacy)
-      snprintf(g_outside.weather, sizeof(g_outside.weather), "%s", value_str);
-      g_outside.validWeather = true;
+      if (is_no_value_payload(value_str)) {
+        g_outside.weather[0] = '\0';
+        g_outside.validWeather = false;
+      } else {
+        snprintf(g_outside.weather, sizeof(g_outside.weather), "%s", value_str);
+        g_outside.validWeather = true;
+      }
     } else if (topic_ends_with(topic, "/condition_code")) {
       // Handle weather condition code (currently not stored separately)
       // Weather code could be used to map to weather text if needed
@@ -321,11 +379,15 @@ bool mqtt_connect() {
       // Subscribe to alias topics for outdoor data
       String sub_topics[] = {
           outdoor_base + "/temp_f",          // Temperature in Fahrenheit
+          outdoor_base + "/rh",              // Relative humidity in percent
+          outdoor_base + "/wind_mps",        // Wind speed in metres per second
           outdoor_base + "/pressure_hpa",    // Barometric pressure in hPa
           outdoor_base + "/condition",       // Weather condition text
           outdoor_base + "/condition_code",  // Weather condition code
           // Legacy topics for backward compatibility
           outdoor_base + "/temp",       // Temperature in Celsius
+          outdoor_base + "/hum",        // Relative humidity in percent
+          outdoor_base + "/wind",       // Wind speed in metres per second
           outdoor_base + "/pressure",   // Barometric pressure in hPa
           outdoor_base + "/weather",    // Weather description
           outdoor_base + "/weather_id"  // Weather ID
