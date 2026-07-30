@@ -2,6 +2,7 @@
 // Tests the topic building logic extracted from mqtt_client.cpp
 
 #include <unity.h>
+#include <cstdarg>  // va_start/va_end used by safe_snprintf_rt below
 #include <cstring>
 #include <cstdint>
 #include <cstdio>

@@ -184,7 +184,7 @@ class ScopedTimer {
     // Log warning if slow
     if (elapsed > SLOW_THRESHOLD_US) {
       LOG_MODULE("PERF");
-      LOG_WARN("SLOW: %s took %u us (%.2f ms)", name_, elapsed, elapsed / 1000.0f);
+      LOGM_WARN("SLOW: %s took %u us (%.2f ms)", name_, elapsed, elapsed / 1000.0f);
     }
   }
 
@@ -214,8 +214,8 @@ class ScopedTimerConditional {
       PerformanceMonitor::getInstance().record(name_, elapsed);
 
       LOG_MODULE("PERF");
-      LOG_WARN("SLOW: %s took %u us (%.2f ms), threshold %u us", name_, elapsed, elapsed / 1000.0f,
-               threshold_);
+      LOGM_WARN("SLOW: %s took %u us (%.2f ms), threshold %u us", name_, elapsed, elapsed / 1000.0f,
+                threshold_);
     }
   }
 

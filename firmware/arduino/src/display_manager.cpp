@@ -12,6 +12,7 @@
 #include "power.h"
 #include "net.h"
 #include "generated_config.h"
+#include "runtime_config.h"
 
 // Check panel configuration
 #ifndef EINK_PANEL_DEPG0213BN
@@ -141,7 +142,7 @@ void draw_static_chrome() {
   display.setTextColor(GxEPD_BLACK);
   display.setTextSize(1);
   display.setCursor(6, 13 + HEADER_NAME_Y_ADJ);
-  display.print(ROOM_NAME);
+  display.print(rc_room_name());
 
   // Section labels: left 'INSIDE', right 'OUTSIDE'
   display.setCursor(6, 22);

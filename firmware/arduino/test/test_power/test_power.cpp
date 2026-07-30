@@ -1,7 +1,20 @@
 // Unit tests for power management module
 // Tests battery estimation, sleep interval calculation, and device mode logic
+//
+// CAUTION: the functions below are hand-copied from src/power.cpp rather than
+// compiled from it -- power.cpp pulls in Serial, Wire and the Adafruit fuel-gauge
+// drivers, none of which exist on platform = native. That copy is free to drift
+// from the real implementation, which is exactly what happened once already (see
+// is_dev_mode). Any change to the device-mode or sleep-interval logic in
+// src/power.cpp must be mirrored here.
+//
+// Prefer the pattern in src/config_merge.h + test/test_config_merge/ for new
+// logic: put the pure part in a dependency-free header the native test can
+// include directly, so no copy is possible.
 
 #include <unity.h>
+
+#include "../../src/power_pure.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -66,56 +79,25 @@ static SleepConfig g_sleep_config = {
 
 // === Device Mode Functions ===
 
-static uint8_t g_device_mode = 0;  // 0 = production, 1 = development
-static uint32_t g_dev_mode_start_ms = 0;
-static const uint32_t DEV_MODE_TIMEOUT_MS = 3600000UL;  // 1 hour
+// Device mode: exercised through the REAL implementation in src/power_pure.h,
+// not a copy of it. That header takes the clock as a parameter precisely so this
+// test can drive time without an Arduino runtime.
+static DevModeState g_dev_mode;
 
+void set_device_mode(const char* mode) { g_dev_mode.set(mode, millis()); }
+bool is_dev_mode() { return g_dev_mode.is_active(millis()); }
+uint32_t get_dev_mode_remaining_sec() { return g_dev_mode.remaining_sec(millis()); }
+const char* get_device_mode_str() { return is_dev_mode() ? "dev" : "production"; }
+
+// Custom sleep interval (set via MQTT, 0 = use adaptive). The floor comes from
+// clamp_sleep_interval_sec() in power_pure.h, the same helper power.cpp uses.
 static uint32_t g_custom_sleep_interval_sec = 0;
 
 void set_custom_sleep_interval(uint32_t sec) {
-    g_custom_sleep_interval_sec = (sec < 180) ? 180 : sec;
+    g_custom_sleep_interval_sec = clamp_sleep_interval_sec(sec);
 }
 
-uint32_t get_custom_sleep_interval() {
-    return g_custom_sleep_interval_sec;
-}
-
-void set_device_mode(const char* mode) {
-    if (strcmp(mode, "dev") == 0 || strcmp(mode, "development") == 0) {
-        g_device_mode = 1;
-        g_dev_mode_start_ms = millis();
-    } else {
-        g_device_mode = 0;
-        g_dev_mode_start_ms = 0;
-    }
-}
-
-bool is_dev_mode() {
-    if (g_device_mode == 0) return false;
-
-    if (g_dev_mode_start_ms > 0) {
-        uint32_t elapsed = millis() - g_dev_mode_start_ms;
-        if (elapsed >= DEV_MODE_TIMEOUT_MS) {
-            g_device_mode = 0;
-            g_dev_mode_start_ms = 0;
-            return false;
-        }
-    }
-    return true;
-}
-
-uint32_t get_dev_mode_remaining_sec() {
-    if (!is_dev_mode() || g_dev_mode_start_ms == 0) return 0;
-
-    uint32_t elapsed = millis() - g_dev_mode_start_ms;
-    if (elapsed >= DEV_MODE_TIMEOUT_MS) return 0;
-
-    return (DEV_MODE_TIMEOUT_MS - elapsed) / 1000;
-}
-
-const char* get_device_mode_str() {
-    return is_dev_mode() ? "dev" : "production";
-}
+uint32_t get_custom_sleep_interval() { return g_custom_sleep_interval_sec; }
 
 // Mock battery status for testing
 struct BatteryStatus {
@@ -171,8 +153,7 @@ uint32_t calculate_optimal_sleep_interval(const SleepConfig& config) {
 
 void setUp() {
     g_mock_millis = 0;
-    g_device_mode = 0;
-    g_dev_mode_start_ms = 0;
+    g_dev_mode = DevModeState();
     g_custom_sleep_interval_sec = 0;
     g_mock_battery = {4.0f, 80, 2};
     g_temp_changing_rapidly = false;

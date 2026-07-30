@@ -73,6 +73,41 @@ def parse_duration(s: str) -> int:
     return 3600
 
 
+# Sampling cadence bounds for ALWAYS_ON builds. These mirror
+# RC_MIN/MAX_SAMPLE_INTERVAL_SEC in firmware/arduino/src/runtime_config.h; keep
+# them in step. Below the minimum the BME280 self-heats and biases the
+# temperature reading upward.
+MIN_SAMPLE_INTERVAL_SEC = 60
+MAX_SAMPLE_INTERVAL_SEC = 3600
+DEFAULT_SAMPLE_INTERVAL_SEC = 300
+
+
+def resolve_sample_interval(data, env=None):
+    """Resolve the ALWAYS_ON sampling cadence, rejecting out-of-range values.
+
+    Distinct from wake_interval, which is how long the device deep sleeps
+    between wakes in the default mode. The firmware validates this again at
+    runtime, but catching it here surfaces the bad value at build time, while
+    whoever can still edit device.yaml is looking at it, rather than as a
+    warning on a node that is already deployed.
+    """
+    env = os.environ if env is None else env
+    env_sample = str(env.get("SAMPLE_INTERVAL", "")).strip()
+    if env_sample:
+        sample_interval = parse_duration(env_sample)
+    else:
+        sample_interval = parse_duration(data.get("sample_interval", "5m"))
+
+    if not (MIN_SAMPLE_INTERVAL_SEC <= sample_interval <= MAX_SAMPLE_INTERVAL_SEC):
+        print(
+            f"WARNING: sample_interval={sample_interval}s is outside "
+            f"{MIN_SAMPLE_INTERVAL_SEC}-{MAX_SAMPLE_INTERVAL_SEC}s; "
+            f"using {DEFAULT_SAMPLE_INTERVAL_SEC}s"
+        )
+        sample_interval = DEFAULT_SAMPLE_INTERVAL_SEC
+    return sample_interval
+
+
 def c_string(s: str) -> str:
     return '"' + str(s).replace("\\", r"\\").replace('"', r"\"") + '"'
 
@@ -103,6 +138,7 @@ def main():
     else:
         wake_interval = parse_duration(data.get("wake_interval", "2h"))
     full_refresh_every = int(data.get("full_refresh_every", 12) or 12)
+    sample_interval = resolve_sample_interval(data)
     outside_source = str(data.get("outside_source", "mqtt"))
     wifi = data.get("wifi", {}) or {}  # Ensure wifi is always a dict
     mqtt = data.get("mqtt", {}) or {}  # Ensure mqtt is always a dict
@@ -184,6 +220,11 @@ def main():
         f.write(f"#define ROOM_NAME {c_string(room_name)}\n")
         f.write(f"#define FW_VERSION {c_string(fw_version)}\n")
         f.write(f"#define WAKE_INTERVAL_SEC {wake_interval}\n")
+        # Guarded so a -DSAMPLE_INTERVAL_SEC build flag still wins, matching how
+        # the other tunables in config.h behave.
+        f.write("#ifndef SAMPLE_INTERVAL_SEC\n")
+        f.write(f"#define SAMPLE_INTERVAL_SEC {sample_interval}\n")
+        f.write("#endif\n")
         f.write(f"#define FULL_REFRESH_EVERY {full_refresh_every}\n")
         f.write(f"#define OUTSIDE_SOURCE {c_string(outside_source)}\n")
         f.write(f"#define WIFI_SSID {c_string(wifi_ssid)}\n")

@@ -2,8 +2,11 @@
 #include "app_controller.h"
 #include <ESPmDNS.h>
 #include <esp_task_wdt.h>  // Hardware watchdog
+#include <time.h>
+#include <cmath>
 #include <cstdio>
 #include "config.h"
+#include "runtime_config.h"
 #include "generated_config.h"
 #include "sensors.h"
 #include "power.h"
@@ -18,6 +21,8 @@
 #include "memory_tracking.h"
 #include "mqtt_batcher.h"
 #include "profiling.h"
+#include "ota_manager.h"
+#include "sd_store.h"
 
 // Diagnostic test functions (from diagnostic_test.cpp)
 extern void diagnostic_test_init();
@@ -31,7 +36,95 @@ static uint32_t g_wake_time_ms = 0;
 static uint32_t g_diagnostic_last_publish_ms = 0;
 #define DIAGNOSTIC_PUBLISH_INTERVAL_MS 30000
 
+#if ALWAYS_ON
+// --- always-on scheduling state ---------------------------------------------
+// Timestamps are millis()-based and compared with subtraction so the 49-day
+// rollover takes care of itself.
+static uint32_t g_last_sample_ms = 0;
+static uint32_t g_last_display_ms = 0;
+static uint32_t g_last_link_check_ms = 0;
+static uint32_t g_last_maintenance_ms = 0;
+static uint32_t g_sample_count = 0;
+static bool g_display_drawn_once = false;
+
+// Values as of the last panel draw, used to skip redundant refreshes.
+static float g_drawn_tempC = NAN;
+static float g_drawn_rhPct = NAN;
+static int g_drawn_batt_pct = -1;
+
+// Values as of the last panel draw for the outside half of the screen.
+static float g_drawn_outside_tempC = NAN;
+
+// How often to re-check WiFi/MQTT health.
+#define LINK_CHECK_INTERVAL_MS 30000UL
+// Cadence for uptime accounting, the NVS commit and the retention sweep.
+#define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
+
+static void record_sample_to_sd();
+#if USE_DISPLAY
+static void maybe_refresh_display();
+#endif
+#endif  // ALWAYS_ON
+
+// mDNS/OTA hostname. Derived unconditionally during setup rather than inside the
+// WiFi-connected branch: if WiFi is down at boot and only comes up later, the
+// OTA listener still needs a resolvable name to advertise.
+static char g_hostname[33] = {0};
+
+static void derive_hostname() {
+  String hostname = String(rc_room_name());
+  hostname.toLowerCase();
+  hostname.replace(" ", "-");
+  snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
+}
+
+// Bring up mDNS and the OTA listener. Safe to call repeatedly -- ota_begin()
+// returns immediately once running -- so callers can just retry while WiFi is up.
+static void start_network_services() {
+  if (!wifi_is_connected())
+    return;
+
+  if (MDNS.begin(g_hostname)) {
+    Serial.printf("[NET] mDNS started: %s.local\n", g_hostname);
+    MDNS.addService("espsensor", "tcp", 80);
+    MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
+    MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
+  } else {
+    Serial.println("[NET] mDNS failed to start");
+  }
+
+  // After mDNS, so the OTA service record lands in the responder set up above
+  // instead of ArduinoOTA re-initialising mDNS and discarding it.
+  ota_begin(g_hostname);
+}
+
 uint32_t get_wake_time_ms() { return g_wake_time_ms; }
+
+// millis() value up to which this session has already been counted.
+static uint32_t g_uptime_accounted_ms = 0;
+
+// Bring the cumulative uptime counter up to date with this session.
+//
+// The deep-sleep build could simply add millis()/1000 once, just before
+// sleeping. An always-on node never reaches that point, so uptime has to be
+// accounted incrementally, and tracking what has already been counted is what
+// keeps repeated calls from inflating the total.
+//
+// Kept in the millis() domain rather than in seconds: unsigned subtraction is
+// correct across the ~49.7-day rollover, which an always-on node WILL reach. A
+// seconds-based "now > last_counted" comparison silently stops being true after
+// the wrap and freezes the counter for good -- the deep-sleep build never hits
+// that because it reboots every cycle. Only whole seconds are consumed, so the
+// sub-second remainder carries forward instead of being repeatedly discarded.
+static void account_uptime() {
+  uint32_t elapsed_ms = millis() - g_uptime_accounted_ms;
+  uint32_t whole_s = elapsed_ms / 1000;
+  if (whole_s == 0)
+    return;
+
+  add_to_cumulative_uptime(whole_s);
+  g_uptime_accounted_ms += whole_s * 1000;
+}
 
 bool is_first_boot() { return esp_reset_reason() == ESP_RST_POWERON; }
 
@@ -106,11 +199,39 @@ void app_setup() {
   show_boot_stage(2);  // Yellow for display init
 #endif
 
+  // Seed the effective config from the compiled-in values before ANY consumer
+  // runs. display_manager_init() draws the header, which reads rc_room_name();
+  // with this call after it, that read hit a zero-initialised struct and the
+  // boot screen showed an empty room name. rc_begin() only copies macros, so it
+  // has nothing to wait for.
+  Serial.println("[2d] Resolving configuration...");
+  rc_begin();
+
 #if USE_DISPLAY
   Serial.println("[BOOT-2c] Initializing display...");
   display_manager_init();  // This will show "12:34" test pattern in debug mode
   Serial.println("[BOOT-2c] Display initialized");
 #endif
+
+  // The card is mounted only now: it shares the SPI bus with the panel, and the
+  // display driver is what brings that bus up. Overrides therefore land after
+  // the boot screen has already drawn -- the compiled-in room name is what shows
+  // until the first post-config refresh.
+#if FEATURE_SD_STORAGE
+  if (sd_begin()) {
+    sd_load_config();
+
+    // Apply a card-staged firmware image before doing any real work: if it
+    // succeeds this call reboots and never returns.
+    if (sd_has_staged_update()) {
+      Serial.println("[2e] Staged firmware image found on SD, applying...");
+      ota_apply_from_sd();
+      // Only reached when the image was rejected; ota_last_sd_result() says why.
+      Serial.printf("[2e] SD update not applied: %s\n", ota_last_sd_result());
+    }
+  }
+#endif
+  rc_log_summary();
 
   // Initialize state management with error checking
   Serial.println("[3] Initializing NVS cache...");
@@ -183,26 +304,10 @@ void app_setup() {
     show_boot_stage(4);  // Green for ready
   }
 
-  // Initialize mDNS for device discovery
-  if (wifi_is_connected()) {
-    // Create mDNS hostname from room name (convert spaces to dashes, lowercase)
-    String hostname = String(ROOM_NAME);
-    hostname.toLowerCase();
-    hostname.replace(" ", "-");
-
-    if (MDNS.begin(hostname.c_str())) {
-      Serial.printf("[BOOT-4a] mDNS started: %s.local\n", hostname.c_str());
-
-      // Add service advertisement for device discovery
-      MDNS.addService("espsensor", "tcp", 80);
-      MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
-      MDNS.addServiceTxt("espsensor", "tcp", "room", ROOM_NAME);
-
-      Serial.println("[BOOT-4a] mDNS service advertised");
-    } else {
-      Serial.println("[BOOT-4a] mDNS failed to start");
-    }
-  }
+  // mDNS hostname comes from the room name (spaces to dashes, lowercase) and is
+  // derived whether or not WiFi came up, so a later reconnect has it ready.
+  derive_hostname();
+  start_network_services();
 
   // Initialize MQTT
   if (wifi_is_connected()) {
@@ -218,13 +323,197 @@ void app_setup() {
   run_display_phase();
 #endif
 
+#if ALWAYS_ON
+  // Record the boot sample so the loop waits a full interval before the next
+  // one, and seed the "what is on screen" snapshot from the draw just made.
+  uint32_t now = millis();
+  g_last_sample_ms = now;
+  g_last_display_ms = now;
+  g_last_link_check_ms = now;
+  g_last_maintenance_ms = now;
+  g_sample_count = 1;
+  g_display_drawn_once = true;
+  g_drawn_tempC = get_last_published_inside_tempC();
+  g_drawn_rhPct = get_last_published_inside_rh();
+  g_drawn_batt_pct = read_battery_status().percent;
+
+  record_sample_to_sd();
+
+  Serial.printf("=== Always-on mode: sampling every %u s, panel redraw floor %d s ===\n",
+                rc_sample_interval_sec(), DISPLAY_MIN_REFRESH_INTERVAL_SEC);
+#endif
+
   run_sleep_phase();
 }
+
+#if ALWAYS_ON
+// Persist one row of sensor history to the card. Silent no-op when the card is
+// absent or history is turned off in config.
+static void record_sample_to_sd() {
+#if FEATURE_SD_STORAGE
+  if (!sd_is_mounted() || !rc_history_enabled())
+    return;
+
+  BatteryStatus bs = read_battery_status();
+  sd_append_history(time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
+                    get_last_published_inside_rh(), get_last_published_inside_pressureHPa(),
+                    bs.voltage, bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0);
+#endif
+}
+
+#if USE_DISPLAY
+// Decide whether the panel is worth redrawing.
+//
+// Sampling cadence and draw cadence are deliberately separate. A full refresh
+// flashes the panel and spends one of its finite refresh cycles, so a draw needs
+// both a meaningful change in the displayed values AND enough time since the
+// last one.
+static void maybe_refresh_display() {
+  const float tempC = get_last_published_inside_tempC();
+  const float rhPct = get_last_published_inside_rh();
+  const int batt_pct = read_battery_status().percent;
+  const OutsideReadings outside = net_get_outside();
+
+  // A reading only counts as "changed" once it is valid; going from a valid
+  // reading to NaN (a failed read) should not trigger a redraw that would just
+  // blank the field.
+  auto exceeded = [](float now_v, float drawn_v, float threshold) {
+    if (!isfinite(now_v))
+      return false;
+    if (!isfinite(drawn_v))
+      return true;
+    return fabsf(now_v - drawn_v) >= threshold;
+  };
+
+  bool changed = false;
+  if (exceeded(tempC, g_drawn_tempC, THRESH_TEMP_C))
+    changed = true;
+  if (exceeded(rhPct, g_drawn_rhPct, THRESH_RH_PCT))
+    changed = true;
+  if (outside.validTemp && exceeded(outside.temperatureC, g_drawn_outside_tempC, THRESH_TEMP_C))
+    changed = true;
+  // Battery is shown as a coarse indicator, so only sizeable steps matter.
+  // Written as an explicit range test rather than abs(), which Arduino.h defines
+  // as a macro that misbehaves on non-trivial arguments.
+  if (batt_pct >= 0 && g_drawn_batt_pct >= 0) {
+    const int delta = batt_pct - g_drawn_batt_pct;
+    if (delta >= 5 || delta <= -5)
+      changed = true;
+  }
+
+  if (!changed) {
+    Serial.println("Display: no significant change, skipping refresh");
+    return;
+  }
+
+  const uint32_t now = millis();
+  const uint32_t floor_ms = DISPLAY_MIN_REFRESH_INTERVAL_SEC * 1000UL;
+  if (g_display_drawn_once && (now - g_last_display_ms) < floor_ms) {
+    Serial.printf("Display: change pending, holding off (%lu s of %d s floor elapsed)\n",
+                  (now - g_last_display_ms) / 1000UL, DISPLAY_MIN_REFRESH_INTERVAL_SEC);
+    return;
+  }
+
+  run_display_phase();
+
+  g_last_display_ms = now;
+  g_display_drawn_once = true;
+  g_drawn_tempC = tempC;
+  g_drawn_rhPct = rhPct;
+  g_drawn_batt_pct = batt_pct;
+  if (outside.validTemp)
+    g_drawn_outside_tempC = outside.temperatureC;
+}
+#endif  // USE_DISPLAY
+#endif  // ALWAYS_ON
 
 // Main application loop (for diagnostic mode)
 void app_loop() {
   // Feed the hardware watchdog to prevent reboot
   esp_task_wdt_reset();
+
+#if ALWAYS_ON
+  // Service OTA first and unconditionally: it is the escape hatch if anything
+  // below turns out to be broken in a shipped build.
+  ota_loop();
+
+  // A transfer runs inside ota_loop(); starting a sensor read or a multi-second
+  // panel refresh underneath it would stall or fail the update.
+  if (ota_in_progress()) {
+    return;
+  }
+
+  const uint32_t now = millis();
+
+  if (now - g_last_link_check_ms >= LINK_CHECK_INTERVAL_MS) {
+    g_last_link_check_ms = now;
+
+    if (!wifi_is_connected()) {
+      Serial.println("[ALWAYS-ON] WiFi down, reconnecting...");
+      if (wifi_connect_with_exponential_backoff(2, 500)) {
+        Serial.printf("[ALWAYS-ON] WiFi back: %s\n", wifi_get_ip().c_str());
+      }
+    }
+
+    // Gate on whether the services are running, NOT on observing a reconnect
+    // here. If WiFi was down at boot and the IDF stack reconnected on its own,
+    // this check only ever sees an already-connected link, no transition
+    // happens, and OTA would stay dead for the whole session -- precisely when
+    // it is most needed. start_network_services() is cheap to retry.
+    if (wifi_is_connected() && !ota_is_active()) {
+      start_network_services();
+    }
+
+    ensure_mqtt_connected();
+  }
+
+  // Pump MQTT so retained outside data and commands are handled between samples.
+  net_loop();
+
+  bool diag_request = false;
+  if (net_check_diagnostic_mode_request(diag_request)) {
+    set_diagnostic_mode(diag_request);
+    mqtt_publish_diagnostic_mode(diag_request);
+    Serial.printf("DIAG: Mode changed to %s via MQTT\n", diag_request ? "active" : "inactive");
+  }
+
+  const uint32_t interval_ms = rc_sample_interval_sec() * 1000UL;
+  if (now - g_last_sample_ms >= interval_ms) {
+    g_last_sample_ms = now;
+    g_sample_count++;
+
+    Serial.printf("\n=== Sample %u (uptime %lu s) ===\n", g_sample_count, millis() / 1000UL);
+
+    run_sensor_phase();
+    run_network_phase();
+    record_sample_to_sd();
+#if USE_DISPLAY
+    maybe_refresh_display();
+#endif
+
+    // Periodic maintenance. An always-on node never reaches run_sleep_phase(),
+    // which is where the deep-sleep build accounts uptime and closes the NVS
+    // handle, so both have to happen on a timer here instead.
+    if (now - g_last_maintenance_ms >= MAINTENANCE_INTERVAL_MS) {
+      g_last_maintenance_ms = now;
+      account_uptime();
+      // Close and reopen so anything buffered in the Preferences handle is
+      // committed rather than sitting there until a brownout discards it.
+      nvs_end_cache();
+      nvs_begin_cache();
+#if FEATURE_SD_STORAGE
+      uint16_t pruned = sd_prune_history(rc_history_retention_days());
+      if (pruned > 0) {
+        Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
+      }
+#endif
+    }
+  }
+
+  // Yield to the WiFi/TCP stacks. Short enough that OTA stays responsive.
+  delay(20);
+  return;
+#endif  // ALWAYS_ON
 
 #if DEV_NO_SLEEP
   // In always-on mode, just print alive message periodically
@@ -253,6 +542,14 @@ void app_loop() {
     // Keep network alive
     net_loop();
 
+    // Diagnostic mode is the one place a deep-sleep build stays awake long
+    // enough to accept a network update, so service OTA here too. Without this
+    // the listener started at boot would never be polled.
+    ota_loop();
+    if (ota_in_progress()) {
+      return;
+    }
+
     // Publish diagnostics every interval
     if (millis() - g_diagnostic_last_publish_ms >= DIAGNOSTIC_PUBLISH_INTERVAL_MS) {
       g_diagnostic_last_publish_ms = millis();
@@ -265,8 +562,10 @@ void app_loop() {
         net_publish_memory_diagnostics(mem_diag.free_heap, mem_diag.min_free_heap,
                                        mem_diag.largest_free_block, mem_diag.fragmentation_pct);
 
-        // Update uptime
-        uint32_t current_uptime = get_cumulative_uptime_sec() + (millis() / 1000);
+        // Update uptime. account_uptime() folds this session in, so the counter
+        // already includes it -- adding millis() again here would double count.
+        account_uptime();
+        uint32_t current_uptime = get_cumulative_uptime_sec();
         net_publish_uptime(current_uptime);
 
         // Publish other diagnostic info
@@ -443,6 +742,14 @@ void run_display_phase() {
 void run_sleep_phase() {
   Serial.println("=== Sleep Phase ===");
 
+#if ALWAYS_ON
+  // Always-on mode never deep sleeps; loop() drives sampling from here on. This
+  // is what keeps the device reachable for network OTA.
+  Serial.println("ALWAYS_ON: staying awake, sampling from loop()");
+  Serial.flush();
+  return;
+#endif
+
 #if DEV_NO_SLEEP
   Serial.println("DEV_NO_SLEEP: Staying awake in loop()");
   Serial.println("Device will print [ALIVE] message every 5 seconds");
@@ -463,7 +770,7 @@ void run_sleep_phase() {
 #endif
 
   // Update cumulative uptime before sleep
-  add_to_cumulative_uptime(millis() / 1000);
+  account_uptime();
 
   // Prepare for sleep
   power_prepare_sleep();

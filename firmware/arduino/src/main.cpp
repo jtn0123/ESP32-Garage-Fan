@@ -11,6 +11,7 @@
 #include <Preferences.h>
 
 #include "config.h"
+#include "runtime_config.h"
 #ifdef LOG_ENABLED
 #include "logging/logger.h"
 #include "logging/log_mqtt.h"
@@ -142,7 +143,7 @@ static String spec_short_condition(const char* weather) {
 static String spec_format_field(const String& key) {
   static char buf[32];
   if (key == "room_name")
-    return String(ROOM_NAME);
+    return String(rc_room_name());
   if (key == "ip") {
     char ip_c[32];
     net_ip_cstr(ip_c, sizeof(ip_c));
@@ -499,7 +500,7 @@ static inline void net_publish_layout_identity() {
   if (!mqtt_is_connected())
     return;
   char topic[128];
-  snprintf(topic, sizeof(topic), "%s/layout", MQTT_PUB_BASE);
+  snprintf(topic, sizeof(topic), "%s/layout", rc_mqtt_pub_base());
   char payload[96];
   snprintf(payload, sizeof(payload), "{\"layout_version\":%u,\"layout_crc\":\"0x%08X\"}",
            static_cast<unsigned>(LAYOUT_VERSION), static_cast<unsigned>(LAYOUT_CRC));
@@ -773,10 +774,8 @@ static inline bool maybe_redraw_status(const BatteryStatus& bs, const char* ip_c
 // Function moved to display_updates module
 #endif  // USE_DISPLAY && DEV_NO_SLEEP
 
-// Module registration for logging
-#ifdef LOG_ENABLED
-LOG_MODULE("MAIN");
-#endif
+// No LOG_MODULE("MAIN") here: this file makes no LOGM_* calls, so registering a
+// module id would just be an unused file-scope static.
 
 // Original setup has been moved to app_controller.cpp
 // The full implementation is now in app_controller.cpp

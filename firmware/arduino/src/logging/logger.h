@@ -121,14 +121,30 @@ class Logger {
   bool initialized_ = false;
 };
 
+// This module's macros are prefixed LOGM_ ("module log") rather than LOG_.
+//
+// They used to be called LOG_TRACE/LOG_DEBUG/... which collided with the
+// Serial.printf-based macros of the same name in ../logging.h. Any translation
+// unit that pulled in both — easily done, since safe_strings.h includes
+// logging.h and profiling.h includes this header — got 20 "macro redefined"
+// warnings, and whichever header happened to be included second silently
+// decided which logging backend every subsequent LOG_ call in that file used.
+//
+// The two APIs are not interchangeable, so they must not share names:
+//   LOG_*  (logging.h) unconditional Serial.printf, filtered at compile time by
+//          LOG_LEVEL, and LOG_ERROR prefixes __FUNCTION__:__LINE__.
+//   LOGM_* (here)      routed through Logger, needs a LOG_MODULE("name") in
+//          scope, filtered at *runtime* by Logger's min_level, and additionally
+//          feeds the ring buffer / NVS / MQTT sinks. Messages are truncated to
+//          LogEntry::message (48 bytes).
 #define LOG_MODULE(name) static uint8_t log_module_id = Logger::getInstance().registerModule(name)
 
-#define LOG_TRACE(fmt, ...) Logger::getInstance().trace(log_module_id, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...) Logger::getInstance().debug(log_module_id, fmt, ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...) Logger::getInstance().info(log_module_id, fmt, ##__VA_ARGS__)
-#define LOG_WARN(fmt, ...) Logger::getInstance().warn(log_module_id, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) Logger::getInstance().error(log_module_id, fmt, ##__VA_ARGS__)
-#define LOG_FATAL(fmt, ...) Logger::getInstance().fatal(log_module_id, fmt, ##__VA_ARGS__)
+#define LOGM_TRACE(fmt, ...) Logger::getInstance().trace(log_module_id, fmt, ##__VA_ARGS__)
+#define LOGM_DEBUG(fmt, ...) Logger::getInstance().debug(log_module_id, fmt, ##__VA_ARGS__)
+#define LOGM_INFO(fmt, ...) Logger::getInstance().info(log_module_id, fmt, ##__VA_ARGS__)
+#define LOGM_WARN(fmt, ...) Logger::getInstance().warn(log_module_id, fmt, ##__VA_ARGS__)
+#define LOGM_ERROR(fmt, ...) Logger::getInstance().error(log_module_id, fmt, ##__VA_ARGS__)
+#define LOGM_FATAL(fmt, ...) Logger::getInstance().fatal(log_module_id, fmt, ##__VA_ARGS__)
 
 #define LOG_LEVEL_SET(level) Logger::getInstance().setLevel(level)
 #define LOG_FLUSH() Logger::getInstance().flush()
