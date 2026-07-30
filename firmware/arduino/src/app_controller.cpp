@@ -162,18 +162,24 @@ void app_setup() {
   show_boot_stage(2);  // Yellow for display init
 #endif
 
+  // Seed the effective config from the compiled-in values before ANY consumer
+  // runs. display_manager_init() draws the header, which reads rc_room_name();
+  // with this call after it, that read hit a zero-initialised struct and the
+  // boot screen showed an empty room name. rc_begin() only copies macros, so it
+  // has nothing to wait for.
+  Serial.println("[2d] Resolving configuration...");
+  rc_begin();
+
 #if USE_DISPLAY
   Serial.println("[BOOT-2c] Initializing display...");
   display_manager_init();  // This will show "12:34" test pattern in debug mode
   Serial.println("[BOOT-2c] Display initialized");
 #endif
 
-  // Configuration must be resolved before anything consumes it (WiFi, MQTT,
-  // hostname). Start from the compiled-in values, then let the SD card override
-  // them. The card is mounted after display_manager_init() because both share
-  // the SPI bus and the display driver is what brings it up.
-  Serial.println("[2d] Resolving configuration...");
-  rc_begin();
+  // The card is mounted only now: it shares the SPI bus with the panel, and the
+  // display driver is what brings that bus up. Overrides therefore land after
+  // the boot screen has already drawn -- the compiled-in room name is what shows
+  // until the first post-config refresh.
 #if FEATURE_SD_STORAGE
   if (sd_begin()) {
     sd_load_config();

@@ -110,6 +110,14 @@ def main():
         sample_interval = parse_duration(env_sample)
     else:
         sample_interval = parse_duration(data.get("sample_interval", "5m"))
+    # Bounds match RC_MIN/MAX_SAMPLE_INTERVAL_SEC in runtime_config.h. The
+    # firmware re-checks this, but catching it here reports the bad value at
+    # build time with the source in hand, rather than as a runtime warning on a
+    # device that is already deployed. Below the minimum the BME280 self-heats
+    # and biases the temperature reading.
+    if not (60 <= sample_interval <= 3600):
+        print(f"WARNING: sample_interval={sample_interval}s is outside 60-3600s; using 300s")
+        sample_interval = 300
     outside_source = str(data.get("outside_source", "mqtt"))
     wifi = data.get("wifi", {}) or {}  # Ensure wifi is always a dict
     mqtt = data.get("mqtt", {}) or {}  # Ensure mqtt is always a dict
