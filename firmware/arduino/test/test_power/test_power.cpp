@@ -13,6 +13,8 @@
 // include directly, so no copy is possible.
 
 #include <unity.h>
+
+#include "../../src/power_pure.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -77,60 +79,25 @@ static SleepConfig g_sleep_config = {
 
 // === Device Mode Functions ===
 
-static uint8_t g_device_mode = 0;  // 0 = production, 1 = development
-static uint32_t g_dev_mode_start_ms = 0;
-static const uint32_t DEV_MODE_TIMEOUT_MS = 3600000UL;  // 1 hour
+// Device mode: exercised through the REAL implementation in src/power_pure.h,
+// not a copy of it. That header takes the clock as a parameter precisely so this
+// test can drive time without an Arduino runtime.
+static DevModeState g_dev_mode;
 
+void set_device_mode(const char* mode) { g_dev_mode.set(mode, millis()); }
+bool is_dev_mode() { return g_dev_mode.is_active(millis()); }
+uint32_t get_dev_mode_remaining_sec() { return g_dev_mode.remaining_sec(millis()); }
+const char* get_device_mode_str() { return is_dev_mode() ? "dev" : "production"; }
+
+// Custom sleep interval (set via MQTT, 0 = use adaptive). The floor comes from
+// clamp_sleep_interval_sec() in power_pure.h, the same helper power.cpp uses.
 static uint32_t g_custom_sleep_interval_sec = 0;
 
 void set_custom_sleep_interval(uint32_t sec) {
-    g_custom_sleep_interval_sec = (sec < 180) ? 180 : sec;
+    g_custom_sleep_interval_sec = clamp_sleep_interval_sec(sec);
 }
 
-uint32_t get_custom_sleep_interval() {
-    return g_custom_sleep_interval_sec;
-}
-
-void set_device_mode(const char* mode) {
-    if (strcmp(mode, "dev") == 0 || strcmp(mode, "development") == 0) {
-        g_device_mode = 1;
-        g_dev_mode_start_ms = millis();
-    } else {
-        g_device_mode = 0;
-        g_dev_mode_start_ms = 0;
-    }
-}
-
-bool is_dev_mode() {
-    if (g_device_mode == 0) return false;
-
-    // g_device_mode is the authoritative flag; g_dev_mode_start_ms is only the
-    // timestamp. Gating this on `g_dev_mode_start_ms > 0` treated 0 as "unset",
-    // but millis() really is 0 for the first millisecond after boot, so dev mode
-    // entered that early never expired. The tests below start at millis()==0 and
-    // caught exactly that -- the fix belongs in src/power.cpp, which had the same
-    // defect.
-    uint32_t elapsed = millis() - g_dev_mode_start_ms;
-    if (elapsed >= DEV_MODE_TIMEOUT_MS) {
-        g_device_mode = 0;
-        g_dev_mode_start_ms = 0;
-        return false;
-    }
-    return true;
-}
-
-uint32_t get_dev_mode_remaining_sec() {
-    if (!is_dev_mode()) return 0;
-
-    uint32_t elapsed = millis() - g_dev_mode_start_ms;
-    if (elapsed >= DEV_MODE_TIMEOUT_MS) return 0;
-
-    return (DEV_MODE_TIMEOUT_MS - elapsed) / 1000;
-}
-
-const char* get_device_mode_str() {
-    return is_dev_mode() ? "dev" : "production";
-}
+uint32_t get_custom_sleep_interval() { return g_custom_sleep_interval_sec; }
 
 // Mock battery status for testing
 struct BatteryStatus {
@@ -186,8 +153,7 @@ uint32_t calculate_optimal_sleep_interval(const SleepConfig& config) {
 
 void setUp() {
     g_mock_millis = 0;
-    g_device_mode = 0;
-    g_dev_mode_start_ms = 0;
+    g_dev_mode = DevModeState();
     g_custom_sleep_interval_sec = 0;
     g_mock_battery = {4.0f, 80, 2};
     g_temp_changing_rapidly = false;

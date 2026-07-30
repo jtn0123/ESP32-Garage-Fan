@@ -42,18 +42,27 @@ a redraw needs both a meaningful change in the displayed values *and*
 | `FEATURE_OTA` | `1` | Network OTA and apply-from-SD |
 | `SD_CS_PIN` | `5` | Card chip select (D5 on the eInk FeatherWing) |
 | `OTA_PORT` | `3232` | ArduinoOTA / espota listener port |
-| `OTA_REQUIRE_PASSWORD` | `0` | Set to 1 to refuse to start OTA without a password |
+| `OTA_REQUIRE_PASSWORD` | `1` | Refuse to start network OTA unless a password is set |
 
 `SAMPLE_INTERVAL_SEC` can also come from `sample_interval` in
-`config/device.yaml`, or from `sample_interval_sec` in the card's config.
-Precedence is: build flag > `device.yaml` > card > default. (The card wins at
-runtime for the sampling loop specifically, since it is read after boot.)
+`config/device.yaml`, or from `sample_interval_sec` in the card's config. Highest
+precedence first:
+
+1. `sample_interval_sec` on the SD card — applied at boot, after the compiled-in
+   value, so it overrides whatever the binary was built with.
+2. A `-DSAMPLE_INTERVAL_SEC=` build flag.
+3. `sample_interval` in `config/device.yaml`, which the generator bakes in unless
+   the build flag already defined it.
+4. The 300-second default in `config.h`.
+
+Values outside 60–3600 seconds are rejected at every level and the 300-second
+default is used instead.
 
 ## microSD card
 
 ### Layout
 
-```
+```text
 /config/device.json   runtime settings; blank fields fall back to the firmware
 /data/YYYY-MM-DD.csv  one row per sample
 /logs/logN.txt        rotating log, log0..log4, with index.txt naming the active one
@@ -153,9 +162,15 @@ watchdog is fed from the progress callback. A failed or interrupted upload leave
 the running firmware untouched — the image goes to the inactive slot and the
 bootloader only swaps on a verified `Update.end()`.
 
-Leaving `ota.password` empty means anyone on the LAN can reflash the device. The
-firmware warns loudly at boot when this is the case; set
-`-DOTA_REQUIRE_PASSWORD=1` to make it refuse instead.
+**Network OTA does not start until `ota.password` is set.** An unauthenticated
+listener would let anyone on the LAN reflash the device, and an always-on node
+advertises itself over mDNS, so this defaults to closed: set `ota.password` in
+`/config/device.json` (the same file you are already editing for WiFi) and power
+cycle. The boot log says explicitly when OTA is disabled for this reason.
+
+Build with `-DOTA_REQUIRE_PASSWORD=0` to allow the passwordless listener on a
+network you trust; the firmware then prints a warning at every boot. Updating
+from the SD card never requires a password.
 
 ### Update from the card
 
@@ -174,7 +189,7 @@ Works regardless of sleep mode and needs no network.
 
 Each sample appends a row to `/data/YYYY-MM-DD.csv`:
 
-```
+```text
 iso_time,uptime_s,temp_c,rh_pct,press_hpa,batt_v,batt_pct,rssi_dbm
 ```
 

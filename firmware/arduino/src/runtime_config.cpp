@@ -13,10 +13,26 @@
 
 static RuntimeConfig g_rc;
 static uint8_t g_override_count = 0;
+static bool g_wifi_overridden = false;
+
+// Replace characters that cannot appear raw inside a JSON string literal. Done
+// in place; the room name is display text, so substitution is preferable to
+// rejecting the value or growing the buffer with escapes.
+static void sanitize_for_json(char* s) {
+  if (!s)
+    return;
+  for (char* c = s; *c; ++c) {
+    unsigned char u = static_cast<unsigned char>(*c);
+    if (*c == '"' || *c == '\\' || u < 0x20 || u == 0x7F) {
+      *c = ' ';
+    }
+  }
+}
 
 void rc_begin() {
   memset(&g_rc, 0, sizeof(g_rc));
   g_override_count = 0;
+  g_wifi_overridden = false;
 
   // Compile-time defaults. merge_str() is used rather than strncpy so the
   // truncation and NUL-termination rules stay in exactly one place.
@@ -35,7 +51,18 @@ void rc_begin() {
 #endif
   g_rc.ota_enabled = (FEATURE_OTA != 0);
 
-  g_rc.sample_interval_sec = SAMPLE_INTERVAL_SEC;
+  // Start from a known-good value, then accept the compile-time one only if it
+  // is in range. A build flag or device.yaml entry of 0 would otherwise make the
+  // always-on loop sample every iteration and cook the temperature reading; the
+  // JSON path already validates, this closes the same hole for the other two
+  // sources.
+  g_rc.sample_interval_sec = RC_DEFAULT_SAMPLE_INTERVAL_SEC;
+  if (!merge_u32(&g_rc.sample_interval_sec, SAMPLE_INTERVAL_SEC, RC_MIN_SAMPLE_INTERVAL_SEC,
+                 RC_MAX_SAMPLE_INTERVAL_SEC)) {
+    LOG_WARN("Config: SAMPLE_INTERVAL_SEC=%d out of range [%d,%d], using %d", SAMPLE_INTERVAL_SEC,
+             RC_MIN_SAMPLE_INTERVAL_SEC, RC_MAX_SAMPLE_INTERVAL_SEC,
+             RC_DEFAULT_SAMPLE_INTERVAL_SEC);
+  }
   g_rc.history_enabled = true;
   g_rc.logs_enabled = true;
   g_rc.history_retention_days = SD_HISTORY_RETENTION_DAYS;
@@ -65,14 +92,25 @@ bool rc_apply_json(const char* json, char* err, size_t err_size) {
   // wrong type. -1 is used as the "absent" sentinel for numbers because every
   // valid range below starts above zero. The int64_t cast keeps an absurdly
   // large value in the file from wrapping during conversion.
-  applied += merge_str(g_rc.room_name, sizeof(g_rc.room_name), doc["room_name"] | "");
+  if (merge_str(g_rc.room_name, sizeof(g_rc.room_name), doc["room_name"] | "")) {
+    // The room name is interpolated into hand-built JSON payloads (MQTT
+    // discovery, Home Assistant discovery). A quote or backslash from the card
+    // would produce malformed JSON, so neutralise them here, once, rather than
+    // escaping at every consumer.
+    sanitize_for_json(g_rc.room_name);
+    applied++;
+  }
   applied +=
       merge_u32(&g_rc.sample_interval_sec, doc["sample_interval_sec"] | static_cast<int64_t>(-1),
                 RC_MIN_SAMPLE_INTERVAL_SEC, RC_MAX_SAMPLE_INTERVAL_SEC);
 
   JsonObject wifi = doc["wifi"];
   if (!wifi.isNull()) {
-    applied += merge_str(g_rc.wifi_ssid, sizeof(g_rc.wifi_ssid), wifi["ssid"] | "");
+    bool ssid_overridden = merge_str(g_rc.wifi_ssid, sizeof(g_rc.wifi_ssid), wifi["ssid"] | "");
+    if (ssid_overridden) {
+      g_wifi_overridden = true;
+    }
+    applied += ssid_overridden;
     applied += merge_str(g_rc.wifi_pass, sizeof(g_rc.wifi_pass), wifi["password"] | "");
   }
 
@@ -89,15 +127,15 @@ bool rc_apply_json(const char* json, char* err, size_t err_size) {
 
   JsonObject ota = doc["ota"];
   if (!ota.isNull()) {
-    applied += merge_bool(&g_rc.ota_enabled, !ota["enabled"].isNull(), ota["enabled"] | false);
+    applied += merge_bool(&g_rc.ota_enabled, ota["enabled"].is<bool>(), ota["enabled"] | false);
     applied += merge_str(g_rc.ota_password, sizeof(g_rc.ota_password), ota["password"] | "");
   }
 
   JsonObject storage = doc["storage"];
   if (!storage.isNull()) {
-    applied += merge_bool(&g_rc.history_enabled, !storage["history_enabled"].isNull(),
+    applied += merge_bool(&g_rc.history_enabled, storage["history_enabled"].is<bool>(),
                           storage["history_enabled"] | true);
-    applied += merge_bool(&g_rc.logs_enabled, !storage["logs_enabled"].isNull(),
+    applied += merge_bool(&g_rc.logs_enabled, storage["logs_enabled"].is<bool>(),
                           storage["logs_enabled"] | true);
     applied += merge_u16(&g_rc.history_retention_days,
                          storage["history_retention_days"] | static_cast<int64_t>(-1), 0, 3650);
@@ -108,6 +146,8 @@ bool rc_apply_json(const char* json, char* err, size_t err_size) {
 }
 
 bool rc_has_overrides() { return g_override_count > 0; }
+
+bool rc_wifi_overridden() { return g_wifi_overridden; }
 
 uint8_t rc_override_count() { return g_override_count; }
 

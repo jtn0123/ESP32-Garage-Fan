@@ -172,9 +172,14 @@
 #ifndef OTA_PORT
 #define OTA_PORT 3232
 #endif
-// Set to 1 to refuse to start the network OTA listener unless a password is
-// configured. Defaults to 0 so OTA works out of the box on a trusted LAN; the
-// firmware logs a prominent warning whenever it runs unauthenticated.
+// Refuse to start the network OTA listener unless a password is configured.
+//
+// Defaults to ON: an unauthenticated listener lets any host on the LAN replace
+// this device's firmware, and an always-on node advertises itself over mDNS.
+// Set ota.password in /config/device.json on the SD card (or -DOTA_PASSWORD=...)
+// to enable network OTA. Build with -DOTA_REQUIRE_PASSWORD=0 to allow the
+// unauthenticated listener on a trusted network; the firmware then warns loudly
+// at every boot. Updating from the SD card needs no password either way.
 #ifndef OTA_REQUIRE_PASSWORD
-#define OTA_REQUIRE_PASSWORD 0
+#define OTA_REQUIRE_PASSWORD 1
 #endif

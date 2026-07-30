@@ -9,7 +9,11 @@
 #include "logging/logger.h"
 #include "mqtt_client.h"
 
-static uint8_t log_module_id = 0;  // Will be registered in getInstance
+// Registered during static initialisation rather than inside getInstance().
+// The singleton's constructor logs, and so does display_capture_handle() before
+// it ever calls getInstance() -- with lazy registration both of those went out
+// under module id 0 instead of "DispCap".
+static const uint8_t log_module_id = Logger::getInstance().registerModule("DispCap");
 
 // Base64 encoding table
 static const char base64_chars[] =
@@ -36,11 +40,6 @@ DisplayCapture::~DisplayCapture() {
 
 DisplayCapture& DisplayCapture::getInstance() {
   static DisplayCapture instance;
-  static bool registered = false;
-  if (!registered) {
-    log_module_id = Logger::getInstance().registerModule("DispCap");
-    registered = true;
-  }
   return instance;
 }
 

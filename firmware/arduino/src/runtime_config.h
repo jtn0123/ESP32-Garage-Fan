@@ -25,8 +25,12 @@ struct RuntimeConfig {
   uint16_t mqtt_port;
   char mqtt_user[33];
   char mqtt_pass[65];
-  char mqtt_pub_base[97];
-  char mqtt_sub_base[97];
+  // Bounded well below MQTT_TOPIC_SIZE (128) on purpose: these bases have topic
+  // suffixes appended ("/debug/boot_count" is the longest at 17 chars), and a
+  // base long enough to force truncation would silently publish to a topic
+  // nobody is subscribed to.
+  char mqtt_pub_base[65];
+  char mqtt_sub_base[65];
   char ota_password[33];
   bool ota_enabled;
   uint32_t sample_interval_sec;
@@ -38,6 +42,7 @@ struct RuntimeConfig {
 // Bounds shared with the validator and the MQTT command handler.
 #define RC_MIN_SAMPLE_INTERVAL_SEC 60
 #define RC_MAX_SAMPLE_INTERVAL_SEC 3600
+#define RC_DEFAULT_SAMPLE_INTERVAL_SEC 300
 
 // Populate the effective config from the compile-time defaults. Safe to call
 // more than once; later calls reset to defaults.
@@ -50,6 +55,11 @@ bool rc_apply_json(const char* json, char* err, size_t err_size);
 
 // True once rc_apply_json() has successfully applied at least one override.
 bool rc_has_overrides();
+
+// True when the SSID came from the SD card rather than the build. Callers must
+// not then apply build-time AP hints such as WIFI_BSSID/WIFI_CHANNEL, which
+// describe a different network.
+bool rc_wifi_overridden();
 
 // Number of individual fields overridden by the last successful apply.
 uint8_t rc_override_count();

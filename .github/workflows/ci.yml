@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Read-only by default: no job here writes through GITHUB_TOKEN (they build,
+# test and lint, then upload artifacts, which needs no repo scope). A job that
+# later needs more should widen it at job scope rather than here.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

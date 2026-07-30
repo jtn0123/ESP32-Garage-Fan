@@ -43,7 +43,7 @@ static uint32_t g_diagnostic_last_publish_ms = 0;
 static uint32_t g_last_sample_ms = 0;
 static uint32_t g_last_display_ms = 0;
 static uint32_t g_last_link_check_ms = 0;
-static uint32_t g_last_prune_ms = 0;
+static uint32_t g_last_maintenance_ms = 0;
 static uint32_t g_sample_count = 0;
 static bool g_display_drawn_once = false;
 
@@ -57,8 +57,8 @@ static float g_drawn_outside_tempC = NAN;
 
 // How often to re-check WiFi/MQTT health.
 #define LINK_CHECK_INTERVAL_MS 30000UL
-// Retention sweep cadence.
-#define PRUNE_INTERVAL_MS (12UL * 3600UL * 1000UL)
+// Cadence for uptime accounting, the NVS commit and the retention sweep.
+#define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
 
 // mDNS/OTA hostname, kept so the OTA listener can be started later if WiFi only
 // comes up after boot.
@@ -71,6 +71,23 @@ static void maybe_refresh_display();
 #endif  // ALWAYS_ON
 
 uint32_t get_wake_time_ms() { return g_wake_time_ms; }
+
+// Seconds of this session already folded into the RTC cumulative counter.
+static uint32_t g_uptime_accounted_s = 0;
+
+// Bring the cumulative uptime counter up to date with this session.
+//
+// The deep-sleep build could simply add millis()/1000 once, just before
+// sleeping. An always-on node never reaches that point, so uptime has to be
+// accounted incrementally -- and tracking what has already been counted is what
+// keeps repeated calls from inflating the total.
+static void account_uptime() {
+  uint32_t session_s = millis() / 1000;
+  if (session_s > g_uptime_accounted_s) {
+    add_to_cumulative_uptime(session_s - g_uptime_accounted_s);
+    g_uptime_accounted_s = session_s;
+  }
+}
 
 bool is_first_boot() { return esp_reset_reason() == ESP_RST_POWERON; }
 
@@ -294,7 +311,7 @@ void app_setup() {
   g_last_sample_ms = now;
   g_last_display_ms = now;
   g_last_link_check_ms = now;
-  g_last_prune_ms = now;
+  g_last_maintenance_ms = now;
   g_sample_count = 1;
   g_display_drawn_once = true;
   g_drawn_tempC = get_last_published_inside_tempC();
@@ -448,15 +465,23 @@ void app_loop() {
     maybe_refresh_display();
 #endif
 
+    // Periodic maintenance. An always-on node never reaches run_sleep_phase(),
+    // which is where the deep-sleep build accounts uptime and closes the NVS
+    // handle, so both have to happen on a timer here instead.
+    if (now - g_last_maintenance_ms >= MAINTENANCE_INTERVAL_MS) {
+      g_last_maintenance_ms = now;
+      account_uptime();
+      // Close and reopen so anything buffered in the Preferences handle is
+      // committed rather than sitting there until a brownout discards it.
+      nvs_end_cache();
+      nvs_begin_cache();
 #if FEATURE_SD_STORAGE
-    if (now - g_last_prune_ms >= PRUNE_INTERVAL_MS) {
-      g_last_prune_ms = now;
       uint16_t pruned = sd_prune_history(rc_history_retention_days());
       if (pruned > 0) {
         Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
       }
-    }
 #endif
+    }
   }
 
   // Yield to the WiFi/TCP stacks. Short enough that OTA stays responsive.
@@ -511,8 +536,10 @@ void app_loop() {
         net_publish_memory_diagnostics(mem_diag.free_heap, mem_diag.min_free_heap,
                                        mem_diag.largest_free_block, mem_diag.fragmentation_pct);
 
-        // Update uptime
-        uint32_t current_uptime = get_cumulative_uptime_sec() + (millis() / 1000);
+        // Update uptime. account_uptime() folds this session in, so the counter
+        // already includes it -- adding millis() again here would double count.
+        account_uptime();
+        uint32_t current_uptime = get_cumulative_uptime_sec();
         net_publish_uptime(current_uptime);
 
         // Publish other diagnostic info
@@ -717,7 +744,7 @@ void run_sleep_phase() {
 #endif
 
   // Update cumulative uptime before sleep
-  add_to_cumulative_uptime(millis() / 1000);
+  account_uptime();
 
   // Prepare for sleep
   power_prepare_sleep();

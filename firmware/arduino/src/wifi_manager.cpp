@@ -49,9 +49,17 @@ bool wifi_connect_with_timeout(uint32_t timeout_ms) {
   bool has_bssid = false;
 
 #ifdef WIFI_BSSID
-  has_bssid = parse_bssid(WIFI_BSSID, bssid_bytes);
-  if (!has_bssid || is_all_zero_bssid(bssid_bytes)) {
-    has_bssid = false;
+  // WIFI_BSSID pins the connection to one specific access point of the network
+  // that was compiled in. If the SD card has since pointed us at a *different*
+  // SSID, that BSSID belongs to the old network and forcing it guarantees the
+  // override cannot connect.
+  if (rc_wifi_overridden()) {
+    Serial.println("[WiFi] SSID overridden by config; ignoring compiled-in BSSID");
+  } else {
+    has_bssid = parse_bssid(WIFI_BSSID, bssid_bytes);
+    if (!has_bssid || is_all_zero_bssid(bssid_bytes)) {
+      has_bssid = false;
+    }
   }
 #endif
 
