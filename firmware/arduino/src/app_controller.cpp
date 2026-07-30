@@ -60,33 +60,70 @@ static float g_drawn_outside_tempC = NAN;
 // Cadence for uptime accounting, the NVS commit and the retention sweep.
 #define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
 
-// mDNS/OTA hostname, kept so the OTA listener can be started later if WiFi only
-// comes up after boot.
-static char g_hostname[33] = {0};
-
 static void record_sample_to_sd();
 #if USE_DISPLAY
 static void maybe_refresh_display();
 #endif
 #endif  // ALWAYS_ON
 
+// mDNS/OTA hostname. Derived unconditionally during setup rather than inside the
+// WiFi-connected branch: if WiFi is down at boot and only comes up later, the
+// OTA listener still needs a resolvable name to advertise.
+static char g_hostname[33] = {0};
+
+static void derive_hostname() {
+  String hostname = String(rc_room_name());
+  hostname.toLowerCase();
+  hostname.replace(" ", "-");
+  snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
+}
+
+// Bring up mDNS and the OTA listener. Safe to call repeatedly -- ota_begin()
+// returns immediately once running -- so callers can just retry while WiFi is up.
+static void start_network_services() {
+  if (!wifi_is_connected())
+    return;
+
+  if (MDNS.begin(g_hostname)) {
+    Serial.printf("[NET] mDNS started: %s.local\n", g_hostname);
+    MDNS.addService("espsensor", "tcp", 80);
+    MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
+    MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
+  } else {
+    Serial.println("[NET] mDNS failed to start");
+  }
+
+  // After mDNS, so the OTA service record lands in the responder set up above
+  // instead of ArduinoOTA re-initialising mDNS and discarding it.
+  ota_begin(g_hostname);
+}
+
 uint32_t get_wake_time_ms() { return g_wake_time_ms; }
 
-// Seconds of this session already folded into the RTC cumulative counter.
-static uint32_t g_uptime_accounted_s = 0;
+// millis() value up to which this session has already been counted.
+static uint32_t g_uptime_accounted_ms = 0;
 
 // Bring the cumulative uptime counter up to date with this session.
 //
 // The deep-sleep build could simply add millis()/1000 once, just before
 // sleeping. An always-on node never reaches that point, so uptime has to be
-// accounted incrementally -- and tracking what has already been counted is what
+// accounted incrementally, and tracking what has already been counted is what
 // keeps repeated calls from inflating the total.
+//
+// Kept in the millis() domain rather than in seconds: unsigned subtraction is
+// correct across the ~49.7-day rollover, which an always-on node WILL reach. A
+// seconds-based "now > last_counted" comparison silently stops being true after
+// the wrap and freezes the counter for good -- the deep-sleep build never hits
+// that because it reboots every cycle. Only whole seconds are consumed, so the
+// sub-second remainder carries forward instead of being repeatedly discarded.
 static void account_uptime() {
-  uint32_t session_s = millis() / 1000;
-  if (session_s > g_uptime_accounted_s) {
-    add_to_cumulative_uptime(session_s - g_uptime_accounted_s);
-    g_uptime_accounted_s = session_s;
-  }
+  uint32_t elapsed_ms = millis() - g_uptime_accounted_ms;
+  uint32_t whole_s = elapsed_ms / 1000;
+  if (whole_s == 0)
+    return;
+
+  add_to_cumulative_uptime(whole_s);
+  g_uptime_accounted_ms += whole_s * 1000;
 }
 
 bool is_first_boot() { return esp_reset_reason() == ESP_RST_POWERON; }
@@ -267,34 +304,10 @@ void app_setup() {
     show_boot_stage(4);  // Green for ready
   }
 
-  // Initialize mDNS for device discovery
-  if (wifi_is_connected()) {
-    // Create mDNS hostname from room name (convert spaces to dashes, lowercase)
-    String hostname = String(rc_room_name());
-    hostname.toLowerCase();
-    hostname.replace(" ", "-");
-#if ALWAYS_ON
-    snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
-#endif
-
-    if (MDNS.begin(hostname.c_str())) {
-      Serial.printf("[BOOT-4a] mDNS started: %s.local\n", hostname.c_str());
-
-      // Add service advertisement for device discovery
-      MDNS.addService("espsensor", "tcp", 80);
-      MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
-      MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
-
-      Serial.println("[BOOT-4a] mDNS service advertised");
-    } else {
-      Serial.println("[BOOT-4a] mDNS failed to start");
-    }
-
-    // Started after mDNS so the OTA service record is added to the responder
-    // this block just set up, rather than ArduinoOTA re-initialising mDNS and
-    // discarding the espsensor record above.
-    ota_begin(hostname.c_str());
-  }
+  // mDNS hostname comes from the room name (spaces to dashes, lowercase) and is
+  // derived whether or not WiFi came up, so a later reconnect has it ready.
+  derive_hostname();
+  start_network_services();
 
   // Initialize MQTT
   if (wifi_is_connected()) {
@@ -439,11 +452,18 @@ void app_loop() {
       Serial.println("[ALWAYS-ON] WiFi down, reconnecting...");
       if (wifi_connect_with_exponential_backoff(2, 500)) {
         Serial.printf("[ALWAYS-ON] WiFi back: %s\n", wifi_get_ip().c_str());
-        // WiFi may not have been up at boot, in which case the OTA listener
-        // never started. ota_begin() is a no-op once it is running.
-        ota_begin(g_hostname);
       }
     }
+
+    // Gate on whether the services are running, NOT on observing a reconnect
+    // here. If WiFi was down at boot and the IDF stack reconnected on its own,
+    // this check only ever sees an already-connected link, no transition
+    // happens, and OTA would stay dead for the whole session -- precisely when
+    // it is most needed. start_network_services() is cheap to retry.
+    if (wifi_is_connected() && !ota_is_active()) {
+      start_network_services();
+    }
+
     ensure_mqtt_connected();
   }
 

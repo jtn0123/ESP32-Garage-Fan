@@ -37,6 +37,11 @@ void rc_begin() {
   // Compile-time defaults. merge_str() is used rather than strncpy so the
   // truncation and NUL-termination rules stay in exactly one place.
   merge_str(g_rc.room_name, sizeof(g_rc.room_name), ROOM_NAME);
+  // Consumers treat rc_room_name() as safe to drop straight into hand-built JSON
+  // (ha_discovery, mqtt_client). That invariant has to hold for the compile-time
+  // value too: a room_name in device.yaml containing a quote reaches ROOM_NAME
+  // unescaped, and only the JSON-overlay path was sanitising.
+  sanitize_for_json(g_rc.room_name);
   merge_str(g_rc.wifi_ssid, sizeof(g_rc.wifi_ssid), WIFI_SSID);
   merge_str(g_rc.wifi_pass, sizeof(g_rc.wifi_pass), WIFI_PASS);
   merge_str(g_rc.mqtt_host, sizeof(g_rc.mqtt_host), MQTT_HOST);
@@ -44,7 +49,13 @@ void rc_begin() {
   merge_str(g_rc.mqtt_pass, sizeof(g_rc.mqtt_pass), MQTT_PASS);
   merge_str(g_rc.mqtt_pub_base, sizeof(g_rc.mqtt_pub_base), MQTT_PUB_BASE);
   merge_str(g_rc.mqtt_sub_base, sizeof(g_rc.mqtt_sub_base), MQTT_SUB_BASE);
-  g_rc.mqtt_port = MQTT_PORT;
+  // Compile-time numerics get the same bounds as the JSON path. Assigning
+  // MQTT_PORT straight through would let a bad -D flag wrap the uint16_t
+  // narrowing conversion instead of falling back to something usable.
+  g_rc.mqtt_port = 1883;
+  if (!merge_u16(&g_rc.mqtt_port, MQTT_PORT, 1, 65535)) {
+    LOG_WARN("Config: MQTT_PORT=%d out of range [1,65535], using 1883", MQTT_PORT);
+  }
 
 #ifdef OTA_PASSWORD
   merge_str(g_rc.ota_password, sizeof(g_rc.ota_password), OTA_PASSWORD);
@@ -65,7 +76,11 @@ void rc_begin() {
   }
   g_rc.history_enabled = true;
   g_rc.logs_enabled = true;
-  g_rc.history_retention_days = SD_HISTORY_RETENTION_DAYS;
+  g_rc.history_retention_days = 90;
+  if (!merge_u16(&g_rc.history_retention_days, SD_HISTORY_RETENTION_DAYS, 0, 3650)) {
+    LOG_WARN("Config: SD_HISTORY_RETENTION_DAYS=%d out of range [0,3650], using 90",
+             SD_HISTORY_RETENTION_DAYS);
+  }
 }
 
 bool rc_apply_json(const char* json, char* err, size_t err_size) {

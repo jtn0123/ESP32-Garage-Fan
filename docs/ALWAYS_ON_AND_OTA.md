@@ -42,7 +42,7 @@ a redraw needs both a meaningful change in the displayed values *and*
 | `FEATURE_OTA` | `1` | Network OTA and apply-from-SD |
 | `SD_CS_PIN` | `5` | Card chip select (D5 on the eInk FeatherWing) |
 | `OTA_PORT` | `3232` | ArduinoOTA / espota listener port |
-| `OTA_REQUIRE_PASSWORD` | `1` | Refuse to start network OTA unless a password is set |
+| `OTA_REQUIRE_PASSWORD` | `0` | Set to 1 to refuse network OTA unless a password is set |
 
 `SAMPLE_INTERVAL_SEC` can also come from `sample_interval` in
 `config/device.yaml`, or from `sample_interval_sec` in the card's config. Highest
@@ -131,18 +131,15 @@ Partitioning needs no changes: the board's stock table already provides two
 ```bash
 # one-time, over USB
 cd firmware/arduino
-python ../../scripts/gen_device_header.py     # use the project venv, see below
+../../venv/bin/python ../../scripts/gen_device_header.py
 pio run -e feather_esp32s2_always_on -t upload
 ```
 
-`gen_device_header.py` needs PyYAML and python-dotenv to read
-`config/device.yaml` and `.env`. Without them it silently falls back to defaults
-and produces a binary with **empty WiFi credentials**, which will not connect —
-and therefore cannot be reached by OTA. Run it with the project venv:
-
-```bash
-../../venv/bin/python ../../scripts/gen_device_header.py
-```
+The venv path is not incidental: `gen_device_header.py` needs PyYAML and
+python-dotenv to read `config/device.yaml` and `.env`, and without them it
+silently falls back to defaults and produces a binary with **empty WiFi
+credentials**. That device never joins the network — so it cannot be reached by
+OTA either, and recovering it means another USB flash.
 
 ### Network OTA
 
@@ -153,8 +150,22 @@ pio run -e feather_esp32s2_always_on -t upload \
 ```
 
 Find the device with `dns-sd -B _arduino._tcp` (macOS) or by its
-`<room-name>.local` hostname. If `ota.password` is set on the card, add
-`--project-option="upload_flags=--auth=<password>"`.
+`<room-name>.local` hostname.
+
+If `ota.password` is set on the card, the password has to reach `espota`
+somehow. Prefer keeping it out of your shell history and out of the argument
+list where a shared machine's `ps` would show it:
+
+```bash
+read -rs OTA_PASSWORD && export OTA_PASSWORD   # prompts without echoing
+pio run -e feather_esp32s2_always_on -t upload \
+  --upload-port <device-ip> --project-option="upload_protocol=espota" \
+  --project-option="upload_flags=--auth=\${sysenv.OTA_PASSWORD}"
+```
+
+Passing `--auth=<password>` literally also works, but it persists in shell
+history, in the process list, and in CI logs. Since this password authorises
+firmware replacement, do not type it inline on a shared or logged machine.
 
 Progress is logged to serial in 10% steps. The transfer runs inside
 `ArduinoOTA.handle()` for longer than the 30-second watchdog timeout, so the
@@ -162,15 +173,17 @@ watchdog is fed from the progress callback. A failed or interrupted upload leave
 the running firmware untouched — the image goes to the inactive slot and the
 bootloader only swaps on a verified `Update.end()`.
 
-**Network OTA does not start until `ota.password` is set.** An unauthenticated
-listener would let anyone on the LAN reflash the device, and an always-on node
-advertises itself over mDNS, so this defaults to closed: set `ota.password` in
-`/config/device.json` (the same file you are already editing for WiFi) and power
-cycle. The boot log says explicitly when OTA is disabled for this reason.
+**Network OTA runs unauthenticated by default** (`OTA_REQUIRE_PASSWORD=0`), a
+deliberate choice for this project's private home network: OTA then works with
+no setup step. Know what it costs before reusing it elsewhere — any host on the
+LAN can replace this device's firmware, and an always-on node advertises itself
+over mDNS. The firmware prints a prominent warning at every boot while running
+this way.
 
-Build with `-DOTA_REQUIRE_PASSWORD=0` to allow the passwordless listener on a
-network you trust; the firmware then prints a warning at every boot. Updating
-from the SD card never requires a password.
+To authenticate, set `ota.password` in `/config/device.json` (the same file you
+are already editing for WiFi) and power cycle. Build with
+`-DOTA_REQUIRE_PASSWORD=1` to turn an unset password into a hard failure instead
+of a warning. Updating from the SD card never uses a password either way.
 
 ### Update from the card
 

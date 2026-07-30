@@ -174,12 +174,17 @@
 #endif
 // Refuse to start the network OTA listener unless a password is configured.
 //
-// Defaults to ON: an unauthenticated listener lets any host on the LAN replace
-// this device's firmware, and an always-on node advertises itself over mDNS.
-// Set ota.password in /config/device.json on the SD card (or -DOTA_PASSWORD=...)
-// to enable network OTA. Build with -DOTA_REQUIRE_PASSWORD=0 to allow the
-// unauthenticated listener on a trusted network; the firmware then warns loudly
-// at every boot. Updating from the SD card needs no password either way.
+// Defaults to OFF, which is the repository owner's deliberate choice for a
+// private, trusted home network: OTA then works with no setup step. Understand
+// what it means before copying this elsewhere — an unauthenticated listener lets
+// any host on the LAN replace this device's firmware, and an always-on node
+// advertises itself over mDNS. The firmware logs a prominent warning at every
+// boot while running this way.
+//
+// Set ota.password in /config/device.json (or -DOTA_PASSWORD=...) to
+// authenticate, and -DOTA_REQUIRE_PASSWORD=1 to make an unset password a hard
+// failure rather than a warning. Updating from the SD card is unaffected either
+// way; it never uses a password.
 #ifndef OTA_REQUIRE_PASSWORD
-#define OTA_REQUIRE_PASSWORD 1
+#define OTA_REQUIRE_PASSWORD 0
 #endif
