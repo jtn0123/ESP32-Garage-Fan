@@ -13,6 +13,7 @@
 #include "config.h"
 #include "logging.h"
 #include "runtime_config.h"
+#include "safe_strings.h"
 #include "sd_store.h"
 
 namespace {
@@ -22,10 +23,7 @@ bool g_in_progress = false;
 uint8_t g_last_logged_pct = 0;
 char g_sd_result[64] = "not attempted";
 
-void set_sd_result(const char* msg) {
-  strncpy(g_sd_result, msg, sizeof(g_sd_result) - 1);
-  g_sd_result[sizeof(g_sd_result) - 1] = '\0';
-}
+void set_sd_result(const char* msg) { safe_strcpy(g_sd_result, msg); }
 
 // An ESP32 application image always starts with this magic byte. Checking it up
 // front turns "garbage file on the card" into a clear log line instead of a

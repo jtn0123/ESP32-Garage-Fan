@@ -9,6 +9,7 @@
 #include "feature_flags.h"
 #include "generated_config.h"
 #include "logging.h"
+#include "safe_strings.h"
 
 static RuntimeConfig g_rc;
 static uint8_t g_override_count = 0;
@@ -43,8 +44,7 @@ void rc_begin() {
 bool rc_apply_json(const char* json, char* err, size_t err_size) {
   auto fail = [&](const char* msg) {
     if (err && err_size > 0) {
-      strncpy(err, msg, err_size - 1);
-      err[err_size - 1] = '\0';
+      safe_strcpy_rt(err, err_size, msg);
     }
     return false;
   };

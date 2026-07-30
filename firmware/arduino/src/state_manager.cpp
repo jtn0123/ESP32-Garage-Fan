@@ -1,5 +1,9 @@
 // State management implementation
 #include "state_manager.h"
+// std::isfinite, not bare isfinite(): <cmath> only guarantees the std-qualified
+// name. Clang/libc++ happens to inject the unqualified one too, so the bare call
+// built fine on the ESP32 toolchain and on macOS, but GCC rejects it -- which is
+// what the native unit tests build with on Linux CI.
 #include <cmath>
 
 // RTC_DATA_ATTR variables persist across deep sleep but not power cycles
@@ -122,13 +126,13 @@ void nvs_load_cache_if_unset() {
 
   nvs_begin_cache();
 
-  if (!isfinite(last_inside_f))
+  if (!std::isfinite(last_inside_f))
     last_inside_f = nvs_load_float("li_f", NAN);
-  if (!isfinite(last_inside_rh))
+  if (!std::isfinite(last_inside_rh))
     last_inside_rh = nvs_load_float("li_rh", NAN);
-  if (!isfinite(last_outside_f))
+  if (!std::isfinite(last_outside_f))
     last_outside_f = nvs_load_float("lo_f", NAN);
-  if (!isfinite(last_outside_rh))
+  if (!std::isfinite(last_outside_rh))
     last_outside_rh = nvs_load_float("lo_rh", NAN);
   if (last_icon_id < 0) {
     // Use UINT32_MAX (0xFFFFFFFF) as sentinel which becomes -1 when cast to int32_t
@@ -137,11 +141,11 @@ void nvs_load_cache_if_unset() {
   }
   if (last_status_crc == 0)
     last_status_crc = nvs_load_uint("st_crc", 0);
-  if (!isfinite(last_published_inside_tempC))
+  if (!std::isfinite(last_published_inside_tempC))
     last_published_inside_tempC = nvs_load_float("pi_t", NAN);
-  if (!isfinite(last_published_inside_rh))
+  if (!std::isfinite(last_published_inside_rh))
     last_published_inside_rh = nvs_load_float("pi_rh", NAN);
-  if (!isfinite(last_published_inside_pressureHPa))
+  if (!std::isfinite(last_published_inside_pressureHPa))
     last_published_inside_pressureHPa = nvs_load_float("pi_p", NAN);
   uint16_t pc = nvs_load_ushort("pcount", 0);
   if (pc > 0)

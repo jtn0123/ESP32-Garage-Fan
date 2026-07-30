@@ -14,6 +14,7 @@
 #include <SD.h>
 #include <SPI.h>
 #include "logging.h"
+#include "safe_strings.h"
 #include "runtime_config.h"
 
 // At file scope rather than in the anonymous namespace below: cpplint reads the
@@ -38,10 +39,7 @@ bool g_mounted = false;
 uint8_t g_log_index = 0;
 bool g_log_index_loaded = false;
 
-void set_error(const char* msg) {
-  strncpy(g_info.last_error, msg, sizeof(g_info.last_error) - 1);
-  g_info.last_error[sizeof(g_info.last_error) - 1] = '\0';
-}
+void set_error(const char* msg) { safe_strcpy(g_info.last_error, msg); }
 
 // A year below 2020 means NTP has not landed yet and the RTC is at its epoch
 // default; timestamps derived from it would be worse than useless.

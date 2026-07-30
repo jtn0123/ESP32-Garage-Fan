@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 // Copy `src` over `dst` only when `src` is a non-empty string. Always leaves
@@ -23,8 +24,12 @@ inline bool merge_str(char* dst, size_t dst_size, const char* src) {
   if (!src || src[0] == '\0')
     return false;
 
-  std::strncpy(dst, src, dst_size - 1);
-  dst[dst_size - 1] = '\0';
+  // snprintf rather than safe_strcpy_rt(): this header is deliberately free of
+  // Arduino/ESP dependencies so the native unit tests can include it directly,
+  // and safe_strings.h pulls in logging.h -> Arduino.h. snprintf truncates and
+  // NUL-terminates, which is the same guarantee, and strncpy is banned repo-wide
+  // precisely because it does not.
+  std::snprintf(dst, dst_size, "%s", src);
   return true;
 }
 
