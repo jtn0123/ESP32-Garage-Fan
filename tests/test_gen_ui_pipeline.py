@@ -4,6 +4,7 @@ Comprehensive test suite for UI code generation pipeline (gen_ui.py).
 Tests the transformation from UI specifications to C++ code.
 """
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -71,6 +72,20 @@ def run_gen_ui(spec_file: str, output_dir: str) -> Optional[subprocess.Completed
     )
 
 
+def load_gen_ui_module():
+    """Import scripts/gen_ui.py as a fresh module instance.
+
+    A fresh instance per test keeps --spec's module-global mutations test-local,
+    and in-process execution lets CI's `pytest --cov=scripts` measure the
+    generator (subprocess runs are invisible to coverage).
+    """
+    script = get_gen_ui_script()
+    spec = importlib.util.spec_from_file_location("gen_ui_under_test", script)
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
 def write_minimal_ui_spec(path: Path, rect_name: str = "TESTBOX") -> Path:
     """Write a minimal spec that passes gen_ui.py's validation."""
     spec = {
@@ -135,6 +150,96 @@ class TestArgumentHandling:
             assert a == b, f"{rel} differs between identical runs"
         js = (tmp_path / "out1" / "web/sim/ui_generated.js").read_text()
         assert re.search(r'window\.UI_FW_VERSION = "[^"]+";', js)
+
+
+class TestInProcessGeneration:
+    """Run gen_ui.py's entry points in-process (see load_gen_ui_module)."""
+
+    def test_main_with_spec_and_output(self, tmp_path):
+        gen_ui = load_gen_ui_module()
+        spec_path = write_minimal_ui_spec(tmp_path / "spec.json", rect_name="INPROC")
+        out_dir = tmp_path / "out"
+        gen_ui.main(["--spec", str(spec_path), "--output", str(out_dir)])
+        for rel in GENERATED_REL_PATHS:
+            assert (out_dir / rel).exists(), f"missing redirected output {rel}"
+        layout = (out_dir / "firmware/arduino/src/display_layout.h").read_text()
+        assert "RECT_INPROC" in layout
+        assert str(spec_path) in layout, "source comment should echo the --spec path"
+
+    def test_main_default_spec_redirected(self, tmp_path):
+        gen_ui = load_gen_ui_module()
+        out_dir = tmp_path / "out"
+        gen_ui.main(["--output", str(out_dir)])
+        js = (out_dir / "web/sim/ui_generated.js").read_text()
+        assert "window.UI_SPEC" in js
+        assert "window.UI_LAYOUT_CRC" in js
+
+    def test_main_rejects_invalid_spec(self, tmp_path):
+        gen_ui = load_gen_ui_module()
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps({"schema": "not-a-ui-spec"}))
+        with pytest.raises(SystemExit):
+            gen_ui.main(["--spec", str(bad), "--output", str(tmp_path / "out")])
+
+    def test_parse_args_warns_on_unknown_args(self, capsys):
+        """PlatformIO pre-script safety: SCons-owned argv must not abort the run."""
+        gen_ui = load_gen_ui_module()
+        args = gen_ui.parse_args(["-Q", "--jobs", "8", "stray"])
+        assert args.spec is None
+        assert args.output is None
+        assert args.git_version is False
+        assert "ignoring unrecognized arguments" in capsys.readouterr().err
+
+
+class TestFwVersionResolution:
+    """UI_FW_VERSION must come from committed config, not a git-describe stamp."""
+
+    @staticmethod
+    def _isolated(gen_ui, tmp_path, monkeypatch):
+        """Point the module's config/output paths into tmp_path."""
+        monkeypatch.delenv("FW_VERSION", raising=False)
+        gen_ui.FW_OUT_DIR = tmp_path / "fw"
+        gen_ui.DEVICE_YAML = tmp_path / "device.yaml"
+        gen_ui.DEVICE_SAMPLE_YAML = tmp_path / "device.sample.yaml"
+        return gen_ui
+
+    def test_generated_config_header_wins(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        gen_ui.FW_OUT_DIR.mkdir()
+        (gen_ui.FW_OUT_DIR / "generated_config.h").write_text('#define FW_VERSION "9.9.9"\n')
+        gen_ui.DEVICE_YAML.write_text('fw_version: "1.2.3"\n')
+        assert gen_ui.resolve_fw_version() == "9.9.9"
+
+    def test_device_yaml_when_no_generated_config(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        gen_ui.DEVICE_YAML.write_text('fw_version: "1.2.3"\n')
+        assert gen_ui.resolve_fw_version() == "1.2.3"
+
+    def test_sample_yaml_fallback(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        gen_ui.DEVICE_SAMPLE_YAML.write_text('fw_version: "1.0.0"\n')
+        assert gen_ui.resolve_fw_version() == "1.0.0"
+
+    def test_regex_fallback_without_yaml_module(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        gen_ui.yaml = None
+        gen_ui.DEVICE_SAMPLE_YAML.write_text('room_name: "Den"\nfw_version: "2.0.0"\n')
+        assert gen_ui.resolve_fw_version() == "2.0.0"
+
+    def test_env_var_fallback(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        monkeypatch.setenv("FW_VERSION", "env-4.5.6")
+        assert gen_ui.resolve_fw_version() == "env-4.5.6"
+
+    def test_dev_without_git_opt_in(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        assert gen_ui.resolve_fw_version() == "dev"
+        assert gen_ui.resolve_fw_version(allow_git=False) == "dev"
+
+    def test_git_describe_only_on_opt_in(self, tmp_path, monkeypatch):
+        gen_ui = self._isolated(load_gen_ui_module(), tmp_path, monkeypatch)
+        version = gen_ui.resolve_fw_version(allow_git=True)
+        assert version and version != "dev", "opt-in git stamping should describe the repo"
 
 
 class TestUISpecStructure:
