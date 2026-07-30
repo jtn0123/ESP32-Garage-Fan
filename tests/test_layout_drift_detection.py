@@ -1,6 +1,8 @@
 import json
 import os
 import subprocess
+import sys
+import tempfile
 from typing import Any, Dict
 
 import pytest
@@ -359,33 +361,47 @@ def _load_ui_spec() -> Dict[str, Any]:
         pytest.fail(f"Failed to load UI spec: {e}")
 
 
-def _generate_layout_header() -> str:
-    """Generate layout header content (mock for testing)"""
-    # This would normally run the actual generator script
-    # For testing, we'll simulate the output
+def _run_gen_ui_redirected() -> Dict[str, str]:
+    """Run gen_ui.py with all outputs redirected to a temp dir.
 
-    try:
-        # Try to run the actual generator
-        scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
-        gen_script = os.path.join(scripts_dir, "gen_layout_header.py")
+    Returns the generated file contents keyed by repo-relative path, or {} if
+    the generator is unavailable or failed. Never writes into the repo itself.
+    """
+    root = os.path.dirname(os.path.dirname(__file__))
+    gen_script = os.path.join(root, "scripts", "gen_ui.py")
+    if not os.path.exists(gen_script):
+        return {}
 
-        if os.path.exists(gen_script):
+    contents: Dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        try:
             result = subprocess.run(
-                [
-                    "python3",
-                    gen_script,
-                    "--config",
-                    os.path.join(os.path.dirname(scripts_dir), "config", "display_geometry.json"),
-                ],
+                [sys.executable, gen_script, "--output", tmp_dir],
                 capture_output=True,
                 text=True,
-                cwd=scripts_dir,
             )
+        except Exception:
+            return {}
+        if result.returncode != 0:
+            return {}
+        for rel in (
+            "firmware/arduino/src/display_layout.h",
+            "firmware/arduino/src/ui_generated.cpp",
+            "firmware/arduino/src/ui_ops_generated.h",
+            "web/sim/ui_generated.js",
+        ):
+            path = os.path.join(tmp_dir, rel)
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    contents[rel] = f.read()
+    return contents
 
-            if result.returncode == 0:
-                return result.stdout
-    except Exception:
-        pass
+
+def _generate_layout_header() -> str:
+    """Generate layout header content (mock for testing)"""
+    generated = _run_gen_ui_redirected().get("firmware/arduino/src/display_layout.h", "")
+    if generated:
+        return generated
 
     # Fallback: return mock content for testing
     return """
@@ -407,20 +423,9 @@ def _generate_layout_header() -> str:
 
 def _generate_ui_components() -> str:
     """Generate UI components content (mock for testing)"""
-    try:
-        # Try to run the actual generator
-        scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
-        gen_script = os.path.join(scripts_dir, "gen_ui.py")
-
-        if os.path.exists(gen_script):
-            result = subprocess.run(
-                ["python3", gen_script], capture_output=True, text=True, cwd=scripts_dir
-            )
-
-            if result.returncode == 0:
-                return result.stdout
-    except Exception:
-        pass
+    generated = _run_gen_ui_redirected()
+    if generated:
+        return "\n".join(generated.values())
 
     # Fallback: return mock content for testing
     return """
