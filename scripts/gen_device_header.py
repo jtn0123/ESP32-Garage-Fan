@@ -73,6 +73,41 @@ def parse_duration(s: str) -> int:
     return 3600
 
 
+# Sampling cadence bounds for ALWAYS_ON builds. These mirror
+# RC_MIN/MAX_SAMPLE_INTERVAL_SEC in firmware/arduino/src/runtime_config.h; keep
+# them in step. Below the minimum the BME280 self-heats and biases the
+# temperature reading upward.
+MIN_SAMPLE_INTERVAL_SEC = 60
+MAX_SAMPLE_INTERVAL_SEC = 3600
+DEFAULT_SAMPLE_INTERVAL_SEC = 300
+
+
+def resolve_sample_interval(data, env=None):
+    """Resolve the ALWAYS_ON sampling cadence, rejecting out-of-range values.
+
+    Distinct from wake_interval, which is how long the device deep sleeps
+    between wakes in the default mode. The firmware validates this again at
+    runtime, but catching it here surfaces the bad value at build time, while
+    whoever can still edit device.yaml is looking at it, rather than as a
+    warning on a node that is already deployed.
+    """
+    env = os.environ if env is None else env
+    env_sample = str(env.get("SAMPLE_INTERVAL", "")).strip()
+    if env_sample:
+        sample_interval = parse_duration(env_sample)
+    else:
+        sample_interval = parse_duration(data.get("sample_interval", "5m"))
+
+    if not (MIN_SAMPLE_INTERVAL_SEC <= sample_interval <= MAX_SAMPLE_INTERVAL_SEC):
+        print(
+            f"WARNING: sample_interval={sample_interval}s is outside "
+            f"{MIN_SAMPLE_INTERVAL_SEC}-{MAX_SAMPLE_INTERVAL_SEC}s; "
+            f"using {DEFAULT_SAMPLE_INTERVAL_SEC}s"
+        )
+        sample_interval = DEFAULT_SAMPLE_INTERVAL_SEC
+    return sample_interval
+
+
 def c_string(s: str) -> str:
     return '"' + str(s).replace("\\", r"\\").replace('"', r"\"") + '"'
 
@@ -103,21 +138,7 @@ def main():
     else:
         wake_interval = parse_duration(data.get("wake_interval", "2h"))
     full_refresh_every = int(data.get("full_refresh_every", 12) or 12)
-    # Sampling cadence for ALWAYS_ON builds. Distinct from wake_interval, which
-    # is how long the device deep sleeps between wakes in the default mode.
-    env_sample = str(os.environ.get("SAMPLE_INTERVAL", "")).strip()
-    if env_sample:
-        sample_interval = parse_duration(env_sample)
-    else:
-        sample_interval = parse_duration(data.get("sample_interval", "5m"))
-    # Bounds match RC_MIN/MAX_SAMPLE_INTERVAL_SEC in runtime_config.h. The
-    # firmware re-checks this, but catching it here reports the bad value at
-    # build time with the source in hand, rather than as a runtime warning on a
-    # device that is already deployed. Below the minimum the BME280 self-heats
-    # and biases the temperature reading.
-    if not (60 <= sample_interval <= 3600):
-        print(f"WARNING: sample_interval={sample_interval}s is outside 60-3600s; using 300s")
-        sample_interval = 300
+    sample_interval = resolve_sample_interval(data)
     outside_source = str(data.get("outside_source", "mqtt"))
     wifi = data.get("wifi", {}) or {}  # Ensure wifi is always a dict
     mqtt = data.get("mqtt", {}) or {}  # Ensure mqtt is always a dict
