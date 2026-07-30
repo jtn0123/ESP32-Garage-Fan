@@ -1,5 +1,16 @@
 // Unit tests for power management module
 // Tests battery estimation, sleep interval calculation, and device mode logic
+//
+// CAUTION: the functions below are hand-copied from src/power.cpp rather than
+// compiled from it -- power.cpp pulls in Serial, Wire and the Adafruit fuel-gauge
+// drivers, none of which exist on platform = native. That copy is free to drift
+// from the real implementation, which is exactly what happened once already (see
+// is_dev_mode). Any change to the device-mode or sleep-interval logic in
+// src/power.cpp must be mirrored here.
+//
+// Prefer the pattern in src/config_merge.h + test/test_config_merge/ for new
+// logic: put the pure part in a dependency-free header the native test can
+// include directly, so no copy is possible.
 
 #include <unity.h>
 #include <cstring>
@@ -93,19 +104,23 @@ void set_device_mode(const char* mode) {
 bool is_dev_mode() {
     if (g_device_mode == 0) return false;
 
-    if (g_dev_mode_start_ms > 0) {
-        uint32_t elapsed = millis() - g_dev_mode_start_ms;
-        if (elapsed >= DEV_MODE_TIMEOUT_MS) {
-            g_device_mode = 0;
-            g_dev_mode_start_ms = 0;
-            return false;
-        }
+    // g_device_mode is the authoritative flag; g_dev_mode_start_ms is only the
+    // timestamp. Gating this on `g_dev_mode_start_ms > 0` treated 0 as "unset",
+    // but millis() really is 0 for the first millisecond after boot, so dev mode
+    // entered that early never expired. The tests below start at millis()==0 and
+    // caught exactly that -- the fix belongs in src/power.cpp, which had the same
+    // defect.
+    uint32_t elapsed = millis() - g_dev_mode_start_ms;
+    if (elapsed >= DEV_MODE_TIMEOUT_MS) {
+        g_device_mode = 0;
+        g_dev_mode_start_ms = 0;
+        return false;
     }
     return true;
 }
 
 uint32_t get_dev_mode_remaining_sec() {
-    if (!is_dev_mode() || g_dev_mode_start_ms == 0) return 0;
+    if (!is_dev_mode()) return 0;
 
     uint32_t elapsed = millis() - g_dev_mode_start_ms;
     if (elapsed >= DEV_MODE_TIMEOUT_MS) return 0;

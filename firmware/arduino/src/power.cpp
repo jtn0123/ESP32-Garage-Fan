@@ -249,21 +249,26 @@ bool is_dev_mode() {
   if (g_device_mode == 0)
     return false;
 
-  // Check for auto-timeout
-  if (g_dev_mode_start_ms > 0) {
-    uint32_t elapsed = millis() - g_dev_mode_start_ms;
-    if (elapsed >= DEV_MODE_TIMEOUT_MS) {
-      Serial.println("[Power] Dev mode auto-expired, reverting to production");
-      g_device_mode = 0;
-      g_dev_mode_start_ms = 0;
-      return false;
-    }
+  // Check for auto-timeout.
+  //
+  // g_device_mode is the authoritative flag; g_dev_mode_start_ms is only the
+  // timestamp. These used to be conflated by gating this check on
+  // `g_dev_mode_start_ms > 0`, treating 0 as "unset" -- but millis() genuinely
+  // returns 0 for the first millisecond after boot, so dev mode entered that
+  // early never expired and reported 0 seconds remaining forever. Unsigned
+  // subtraction handles the millis() rollover on its own.
+  uint32_t elapsed = millis() - g_dev_mode_start_ms;
+  if (elapsed >= DEV_MODE_TIMEOUT_MS) {
+    Serial.println("[Power] Dev mode auto-expired, reverting to production");
+    g_device_mode = 0;
+    g_dev_mode_start_ms = 0;
+    return false;
   }
   return true;
 }
 
 uint32_t get_dev_mode_remaining_sec() {
-  if (!is_dev_mode() || g_dev_mode_start_ms == 0)
+  if (!is_dev_mode())
     return 0;
 
   uint32_t elapsed = millis() - g_dev_mode_start_ms;
