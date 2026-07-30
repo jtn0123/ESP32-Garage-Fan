@@ -373,10 +373,24 @@ void test_hash_collision_resistance() {
 
     size_t num_strings = sizeof(strings) / sizeof(strings[0]);
 
+    // A distinctive value used to reset the region between outer iterations.
+    // Non-printable lead byte so it cannot equal any string under test.
+    const char* kBaseline = "\x01<baseline>";
+
     for (size_t i = 0; i < num_strings; i++) {
+        // markClean() clears the dirty flag but intentionally KEEPS the stored
+        // content hash -- that is what lets an unchanged value be skipped. So the
+        // assertion below is only about hashing if the region is first parked on a
+        // value known to differ from strings[i]. Without this, state leaks between
+        // outer iterations: after i=12 the stored hash is hash("+0"), and
+        // strings[13] is "+0", so the check correctly reported "unchanged" and the
+        // assertion failed on the implementation being right.
         g_refresh.markClean(1);
+        g_refresh.hasContentChanged(1, kBaseline);
+        g_refresh.markClean(1);
+
         TEST_ASSERT_TRUE_MESSAGE(g_refresh.hasContentChanged(1, strings[i]),
-                                  "First check should always detect change");
+                                  "Change from baseline should be detected");
 
         for (size_t j = 0; j < num_strings; j++) {
             if (i != j) {

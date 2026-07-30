@@ -22,12 +22,21 @@ bool g_sensors_initialized = false;
 float g_last_temp = 25.0f;
 float g_last_humidity = 50.0f;
 
+// Controllable clock. The native shim declares millis() but leaves it to each
+// test so time can be driven deterministically; delay() is a no-op on the host,
+// so mocked work advances this counter instead. Without that, every duration
+// below would be 0 and the timing assertions would pass vacuously.
+static uint32_t g_mock_millis = 0;
+uint32_t millis() { return g_mock_millis; }
+static void advance_millis(uint32_t ms) { g_mock_millis += ms; }
+
 // Mock WiFi functions
 namespace {
     bool wifi_is_connected() { return g_wifi_connected; }
     bool wifi_connect_with_timeout(uint32_t timeout_ms) {
-        // Simulate connection
-        delay(100);
+        (void)timeout_ms;
+        // Simulate the time a connection takes.
+        advance_millis(100);
         g_wifi_connected = true;
         return true;
     }
@@ -231,8 +240,11 @@ void test_timing_constraints() {
     TEST_ASSERT_LESS_THAN(2000, duration_ms);
 }
 
-// Main test runner
-void setup() {
+// Native entry point. These tests run on platform = native, which has no
+// Arduino setup()/loop() runtime to call into.
+int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     // Initialize serial for test output
     Serial.begin(115200);
     delay(100);
@@ -248,10 +260,5 @@ void setup() {
     RUN_TEST(test_phase_sequencing);
     RUN_TEST(test_error_handling);
     RUN_TEST(test_timing_constraints);
-    
-    UNITY_END();
-}
-
-void loop() {
-    // Empty loop
+    return UNITY_END();
 }
