@@ -64,6 +64,10 @@ def test_spec_when_clauses_use_supported_form():
     assert fields, "expected at least one guarded op (e.g. OUT_PRESSURE)"
     assert "outside_pressure_hpa" in fields
     assert "pressure_hpa" in fields
+    # OUT_HUMIDITY and OUT_WIND read retained aliases that can go "unavailable",
+    # and their "%.0f"/"%.1f" formats would print "nan" for a missing reading.
+    assert "outside_hum_pct" in fields
+    assert "wind_mps" in fields
 
 
 def test_generated_ops_carry_guard_fields():

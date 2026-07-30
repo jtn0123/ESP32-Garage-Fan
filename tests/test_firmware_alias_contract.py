@@ -2,10 +2,24 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 
+MQTT_CLIENT = os.path.join(ROOT, "firmware", "arduino", "src", "mqtt_client.cpp")
+MAIN_CPP = os.path.join(ROOT, "firmware", "arduino", "src", "main.cpp")
+
 
 def _read(path: str) -> str:
     with open(path, "r") as f:
         return f.read()
+
+
+def _alias_branch(txt: str, suffix: str) -> str:
+    """Return the body of the callback branch that handles `suffix`.
+
+    The branches are one if/else-if chain, so a branch runs from its topic match
+    to whichever `else if (topic_ends_with(` starts the next one.
+    """
+    marker = 'topic_ends_with(topic, "%s")' % suffix
+    assert marker in txt, "no callback branch handles %s" % suffix
+    return txt.split(marker, 1)[1].split("else if (topic_ends_with(", 1)[0]
 
 
 def test_alias_subscriptions_and_callbacks_present():
@@ -15,6 +29,8 @@ def test_alias_subscriptions_and_callbacks_present():
 
     # Subscription checks - look for the subscription to alias topics
     assert '"/temp_f"' in txt, "Should subscribe to temp_f alias"
+    assert '"/rh"' in txt, "Should subscribe to rh alias"
+    assert '"/wind_mps"' in txt, "Should subscribe to wind_mps alias"
     assert '"/pressure_hpa"' in txt, "Should subscribe to pressure_hpa alias"
     assert '"/condition"' in txt, "Should subscribe to condition alias"
     assert '"/condition_code"' in txt, "Should subscribe to condition_code alias"
@@ -31,6 +47,8 @@ def test_alias_subscriptions_and_callbacks_present():
 
     # Verify legacy topic support
     assert '"/temp"' in txt, "Should support legacy temp topic"
+    assert '"/hum"' in txt, "Should support legacy hum topic"
+    assert '"/wind"' in txt, "Should support legacy wind topic"
     assert '"/pressure"' in txt, "Should support legacy pressure topic"
     assert '"/weather"' in txt, "Should support legacy weather topic"
     assert '"/weather_id"' in txt, "Should support legacy weather_id topic"
@@ -62,6 +80,88 @@ def test_unavailable_pressure_payload_clears_validity():
     branch = branch.split("} else if", 1)[0]
     assert "g_outside.validPressure = false;" in branch, "invalid payload must clear validity"
     assert "g_outside.pressureHPa = NAN;" in branch, "invalid payload must clear the reading"
+
+
+def test_unavailable_temperature_payload_clears_validity():
+    """Same retained-topic hazard as pressure. Temperature only assigned on a good
+    parse, so "unavailable" left the previous reading in place with validTemp still
+    set and the display kept rendering a stale number as if it were current."""
+    txt = _read(MQTT_CLIENT)
+    for suffix in ("/temp_f", "/temp"):
+        branch = _alias_branch(txt, suffix)
+        assert "g_outside.validTemp = false;" in branch, (
+            "%s: invalid payload must clear validity" % suffix
+        )
+        assert "g_outside.temperatureC = NAN;" in branch, (
+            "%s: invalid payload must clear the reading" % suffix
+        )
+
+
+def test_unavailable_condition_payload_clears_weather_validity():
+    """A failed strtof is what catches the sentinel for numeric topics; the text
+    topics have no such signal. Stored verbatim, "unavailable" became the weather
+    condition and fell through iconMap's default arm as a confident sunny icon."""
+    txt = _read(MQTT_CLIENT)
+    assert "static bool is_no_value_payload(" in txt, "text aliases need a sentinel check"
+    sentinel = txt.split("static bool is_no_value_payload(", 1)[1].split("\n}\n", 1)[0]
+    assert 'strcasecmp(s, "unavailable")' in sentinel
+    assert 'strcasecmp(s, "unknown")' in sentinel
+    assert "s[0] == '\\0'" in sentinel, "an empty (cleared) retained payload is also no value"
+
+    for suffix in ("/condition", "/weather"):
+        branch = _alias_branch(txt, suffix)
+        assert "is_no_value_payload(value_str)" in branch, "%s: should reject sentinels" % suffix
+        assert "g_outside.validWeather = false;" in branch, (
+            "%s: sentinel payload must clear validity" % suffix
+        )
+        assert "g_outside.weather[0] = '\\0';" in branch, (
+            "%s: sentinel payload must clear the stored condition" % suffix
+        )
+
+
+def test_sim_and_firmware_agree_on_no_value_sentinels():
+    """web/sim/sim.js already skips these sentinels via its UNAVAILABLE list. The
+    firmware has to reject the same set or the two renderers disagree about
+    whether a row has a value."""
+    sim_js = _read(os.path.join(ROOT, "web", "sim", "sim.js"))
+    sentinel = _read(MQTT_CLIENT).split("static bool is_no_value_payload(", 1)[1]
+    sentinel = sentinel.split("\n}\n", 1)[0]
+    for word in ("unavailable", "unknown", "none"):
+        assert "'%s'" % word in sim_js or '"%s"' % word in sim_js, "sim.js should skip %s" % word
+        assert '"%s"' % word in sentinel, "firmware should skip %s" % word
+
+
+def test_outside_humidity_and_wind_are_ingested():
+    """The OUT_HUMIDITY and OUT_WIND rows were dead: nothing wrote humidityPct or
+    windMps, so validHum/validWind were never set, even though the topics are
+    published by homeassistant/mqtt_outdoor_publish.yaml and seeded by
+    scripts/mqtt_headless_check.py."""
+    txt = _read(MQTT_CLIENT)
+
+    hum = _alias_branch(txt, "/hum")
+    assert "g_outside.humidityPct = hum_pct;" in hum
+    assert "g_outside.validHum = true;" in hum
+
+    wind = _alias_branch(txt, "/wind_mps")
+    assert "g_outside.windMps = wind_mps;" in wind
+    assert "g_outside.validWind = true;" in wind
+
+    # The alternate spellings share a branch with the canonical ones.
+    assert 'topic_ends_with(topic, "/rh")' in txt, "Should handle the /rh humidity alias"
+    assert 'topic_ends_with(topic, "/wind")' in txt, "Should handle the /wind alias"
+
+
+def test_unavailable_humidity_and_wind_payloads_clear_validity():
+    """Same retained-topic hazard as temperature, for the two rows just wired up."""
+    txt = _read(MQTT_CLIENT)
+
+    hum = _alias_branch(txt, "/hum")
+    assert "g_outside.validHum = false;" in hum
+    assert "g_outside.humidityPct = NAN;" in hum
+
+    wind = _alias_branch(txt, "/wind_mps")
+    assert "g_outside.validWind = false;" in wind
+    assert "g_outside.windMps = NAN;" in wind
 
 
 def test_debug_state_json_is_valid_before_first_reading():

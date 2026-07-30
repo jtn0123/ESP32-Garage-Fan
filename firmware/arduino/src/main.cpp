@@ -258,6 +258,14 @@ static bool spec_field_has(const char* field) {
     OutsideReadings o = net_get_outside();
     return o.validPressure && isfinite(o.pressureHPa);
   }
+  if (strcmp(field, "outside_hum_pct") == 0) {
+    OutsideReadings o = net_get_outside();
+    return o.validHum && isfinite(o.humidityPct);
+  }
+  if (strcmp(field, "wind_mps") == 0) {
+    OutsideReadings o = net_get_outside();
+    return o.validWind && isfinite(o.windMps);
+  }
   return false;
 }
 
