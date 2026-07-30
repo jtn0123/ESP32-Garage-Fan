@@ -146,10 +146,16 @@ def test_gen_layout_header_is_not_a_prescript():
 
 @pytest.mark.parametrize("name", sorted(PRESCRIPTS))
 def test_prescript_entry_point_accepts_scons_name(name):
-    """Guard against someone dropping the SCons arm of the entry point again."""
+    """Guard against someone dropping the SCons arm of the entry point again.
+
+    Only the name is pinned, not the shape of the guard: gen_device_header.py runs
+    the same body for both names so it uses `if __name__ in (...)`, while gen_ui.py
+    passes an empty argv under SCons and needs a separate arm.
+    """
     source = (ROOT / "scripts" / name).read_text()
+    entry = source.split("\nif __name__", 1)[-1]
     assert (
-        'elif __name__ == "SCons.Script":' in source
+        '"SCons.Script"' in entry
     ), f"scripts/{name} must run under SCons, which sets __name__ to 'SCons.Script'"
 
 

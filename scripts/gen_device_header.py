@@ -234,14 +234,12 @@ def main():
     print(f"Wrote {out_path}")
 
 
-if __name__ == "__main__":
-    main()
-elif __name__ == "SCons.Script":
-    # PlatformIO runs this file as a SCons pre-script (see extra_scripts in
-    # firmware/arduino/platformio.ini). SCons exec()s pre-scripts against
-    # SCons.Script's globals, so __name__ is "SCons.Script" and never "__main__":
-    # with only the guard above this generator silently did nothing and every build
-    # from a clean checkout failed on a missing generated_config.h. Any name other
-    # than these two means an importer (a test) loaded the module to call into it,
-    # which must not write generated files as a side effect.
+# "SCons.Script" is how PlatformIO reaches this file: it runs the generator as a
+# SCons pre-script (see extra_scripts in firmware/arduino/platformio.ini), and SCons
+# exec()s pre-scripts against SCons.Script's globals, so __name__ is "SCons.Script"
+# and never "__main__". With only the __main__ guard this generator silently did
+# nothing and every build from a clean checkout failed on a missing
+# generated_config.h. Any name other than these two means an importer (a test)
+# loaded the module to call into it, which must not write files as a side effect.
+if __name__ in ("__main__", "SCons.Script"):
     main()

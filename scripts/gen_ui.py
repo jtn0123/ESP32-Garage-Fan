@@ -505,7 +505,9 @@ def _cxx_string_literal(s: str) -> str:
 # Ops may carry a `when` guard, e.g. "when": "has(outside_pressure_hpa)". Only the
 # has() form exists today; the firmware receives the bare field name in s1 and skips
 # the op when that field has no value (see spec_field_has() in main.cpp).
-_WHEN_HAS_RE = re.compile(r"^has\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$")
+# re.ASCII keeps \w at [A-Za-z0-9_]: a guard field has to be usable as a C
+# identifier, so Unicode word characters must not slip through.
+_WHEN_HAS_RE = re.compile(r"^has\(\s*([A-Za-z_]\w*)\s*\)$", re.ASCII)
 
 
 def guard_field(op: Dict[str, Any], component: str) -> str | None:

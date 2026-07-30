@@ -2046,7 +2046,7 @@
   function specFieldHasValue(v){
     if (v === undefined || v === null) return false;
     const s = String(v).trim();
-    if (UNAVAILABLE.indexOf(s.toLowerCase()) >= 0) return false;
+    if (UNAVAILABLE.includes(s.toLowerCase())) return false;
     const n = Number(s);
     // Number('cloudy') is NaN, i.e. not numeric at all: keep those as present.
     return Number.isNaN(n) ? true : Number.isFinite(n);
