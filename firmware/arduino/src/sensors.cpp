@@ -41,7 +41,7 @@ void sensors_begin() {
   if (g_bme280_initialized)
     return;
 
-  // Explicitly initialize I2C on known pins when available
+    // Explicitly initialize I2C on known pins when available
 #if defined(SDA) && defined(SCL)
   Serial.printf("I2C: using pins SDA=%d SCL=%d\n", SDA, SCL);
 #if I2C_DEBUG_SCAN
