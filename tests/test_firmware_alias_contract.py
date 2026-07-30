@@ -49,3 +49,31 @@ def test_outside_pressure_is_ingested_and_stored():
     struct_txt = _read(common_types)
     assert "float pressureHPa" in struct_txt, "OutsideReadings needs a pressure field"
     assert "bool validPressure" in struct_txt, "OutsideReadings needs a pressure validity flag"
+
+
+def test_unavailable_pressure_payload_clears_validity():
+    """The alias topics are retained and Home Assistant publishes
+    "unavailable"/"unknown" when the source entity loses its value. An unparseable
+    payload must clear validity, or the last good reading stays on screen forever."""
+    mqtt_client = os.path.join(ROOT, "firmware", "arduino", "src", "mqtt_client.cpp")
+    txt = _read(mqtt_client)
+    # The pressure branch's else arm invalidates rather than falling through.
+    branch = txt.split('topic_ends_with(topic, "/pressure_hpa")', 1)[1]
+    branch = branch.split("} else if", 1)[0]
+    assert "g_outside.validPressure = false;" in branch, "invalid payload must clear validity"
+    assert "g_outside.pressureHPa = NAN;" in branch, "invalid payload must clear the reading"
+
+
+def test_debug_state_json_is_valid_before_first_reading():
+    """Sensor floats start as NAN and "%.1f" prints "nan", which is not valid JSON:
+    a consumer cannot even parse the document to see the value is missing."""
+    debug = os.path.join(ROOT, "firmware", "arduino", "src", "debug_commands.cpp")
+    txt = _read(debug)
+    assert "static void json_number(" in txt, "debug JSON needs a null-emitting number helper"
+    assert 'snprintf(out, out_size, "null");' in txt
+    # No raw float conversions left in the two payloads that carry sensor readings.
+    for cmd in ("cmdState", "cmdSensors"):
+        body = txt.split(f"void DebugCommands::{cmd}(", 1)[1].split("\n}\n", 1)[0]
+        assert (
+            "%.1f" not in body and "%.0f" not in body
+        ), f"{cmd} still formats a sensor float directly; route it through json_number()"

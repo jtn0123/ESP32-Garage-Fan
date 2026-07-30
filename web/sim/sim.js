@@ -2035,14 +2035,29 @@
   // Evaluates a spec op's `when` clause. Only `has(<field>)` exists today, and
   // gen_ui.py rejects any other form so the firmware and this renderer cannot
   // diverge. DEFAULTS counts as a source, matching the sim's value lookup below.
+  //
+  // "Has a value" has to mean the same thing here as in the firmware's
+  // spec_field_has(), which requires isfinite() on the reading. So a numeric field
+  // that arrives as NaN/Infinity, as an empty string, or as one of Home
+  // Assistant's unavailable sentinels counts as absent - otherwise the sim would
+  // render a row the device leaves blank. Non-numeric fields (a weather string,
+  // say) only have to be non-empty.
+  const UNAVAILABLE = ['', 'nan', 'none', 'null', 'unavailable', 'unknown'];
+  function specFieldHasValue(v){
+    if (v === undefined || v === null) return false;
+    const s = String(v).trim();
+    if (UNAVAILABLE.indexOf(s.toLowerCase()) >= 0) return false;
+    const n = Number(s);
+    // Number('cloudy') is NaN, i.e. not numeric at all: keep those as present.
+    return Number.isNaN(n) ? true : Number.isFinite(n);
+  }
   function specFieldHas(when, data){
     const whenStr = String(when || '');
     if (!(whenStr.startsWith('has(') && whenStr.endsWith(')'))) return true;
     const field = whenStr.slice(4, -1).trim();
-    const present = (v) => !(v === undefined || v === null);
-    if (data && present(data[field])) return true;
+    if (data && specFieldHasValue(data[field])) return true;
     return (typeof window !== 'undefined' && window.DEFAULTS)
-      ? present(window.DEFAULTS[field])
+      ? specFieldHasValue(window.DEFAULTS[field])
       : false;
   }
 

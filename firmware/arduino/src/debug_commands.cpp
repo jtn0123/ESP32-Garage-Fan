@@ -20,6 +20,18 @@
 #include "display_capture.h"
 #endif
 
+// Serialize a sensor reading as a JSON number, or null when it has no value.
+// Sensor floats default to NAN until the first reading lands, and "%.1f" prints
+// those as "nan", which is not valid JSON - a consumer cannot even parse the
+// document to discover the value is missing.
+static void json_number(char* out, size_t out_size, float value, int decimals) {
+  if (!isfinite(value)) {
+    snprintf(out, out_size, "null");
+    return;
+  }
+  snprintf(out, out_size, "%.*f", decimals, value);
+}
+
 DebugCommands& DebugCommands::getInstance() {
   static DebugCommands instance;
   return instance;
@@ -145,14 +157,17 @@ void DebugCommands::cmdState(PubSubClient* client) {
   // Get outside readings from MQTT
   OutsideReadings outside = mqtt_get_outside_readings();
 
+  char temp_c[16], humidity[16], pressure_hpa[16];
+  json_number(temp_c, sizeof(temp_c), outside.temperatureC, 1);
+  json_number(humidity, sizeof(humidity), outside.humidityPct, 0);
+  json_number(pressure_hpa, sizeof(pressure_hpa), outside.pressureHPa, 1);
+
   char response[384];
-  snprintf(
-      response, sizeof(response),
-      "{\"cmd\":\"state\",\"outside\":{\"temp_c\":%.1f,\"humidity\":%.0f,\"pressure_hpa\":%.1f,"
-      "\"valid_temp\":%s,\"valid_humidity\":%s,\"valid_pressure\":%s}}",
-      outside.temperatureC, outside.humidityPct, outside.pressureHPa,
-      outside.validTemp ? "true" : "false", outside.validHum ? "true" : "false",
-      outside.validPressure ? "true" : "false");
+  snprintf(response, sizeof(response),
+           "{\"cmd\":\"state\",\"outside\":{\"temp_c\":%s,\"humidity\":%s,\"pressure_hpa\":%s,"
+           "\"valid_temp\":%s,\"valid_humidity\":%s,\"valid_pressure\":%s}}",
+           temp_c, humidity, pressure_hpa, outside.validTemp ? "true" : "false",
+           outside.validHum ? "true" : "false", outside.validPressure ? "true" : "false");
 
   publishResponse(client, response);
 }
@@ -245,18 +260,21 @@ void DebugCommands::cmdSensors(PubSubClient* client) {
   // Read current sensor values
   InsideReadings readings = read_inside_sensors();
 
+  char temp_c[16], temp_f[16], humidity[16], pressure[16];
+  json_number(temp_c, sizeof(temp_c), readings.temperatureC, 1);
+  json_number(temp_f, sizeof(temp_f), readings.temperatureC * 9.0f / 5.0f + 32.0f, 1);
+  json_number(humidity, sizeof(humidity), readings.humidityPct, 0);
+  json_number(pressure, sizeof(pressure), readings.pressureHPa, 1);
+
   char response[256];
   snprintf(response, sizeof(response),
            "{\"cmd\":\"sensors\","
-           "\"temp_c\":%.1f,"
-           "\"temp_f\":%.1f,"
-           "\"humidity\":%.0f,"
-           "\"pressure\":%.1f,"
+           "\"temp_c\":%s,"
+           "\"temp_f\":%s,"
+           "\"humidity\":%s,"
+           "\"pressure\":%s,"
            "\"valid\":%s}",
-           readings.temperatureC,
-           readings.temperatureC * 9.0f / 5.0f + 32.0f,  // Convert to F
-           readings.humidityPct, readings.pressureHPa,
-           isfinite(readings.temperatureC) ? "true" : "false");
+           temp_c, temp_f, humidity, pressure, isfinite(readings.temperatureC) ? "true" : "false");
 
   publishResponse(client, response);
 }

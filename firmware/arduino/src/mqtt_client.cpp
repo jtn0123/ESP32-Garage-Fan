@@ -210,12 +210,20 @@ void mqtt_begin() {
       }
     } else if (topic_ends_with(topic, "/pressure_hpa") || topic_ends_with(topic, "/pressure")) {
       // Handle barometric pressure in hPa ("/pressure" is the legacy alias; both
-      // carry the same unit, so unlike temp_f/temp they need no conversion split)
+      // carry the same unit, so unlike temp_f/temp they need no conversion split).
+      //
+      // An unparseable payload clears validity instead of leaving the last good
+      // reading in place: these topics are retained, and Home Assistant publishes
+      // "unavailable"/"unknown" when the source entity loses its value. Keeping
+      // the stale number would render it as current pressure indefinitely.
       char* endptr = nullptr;
       float pressure_hpa = strtof(value_str, &endptr);
       if (endptr != value_str && isfinite(pressure_hpa)) {
         g_outside.pressureHPa = pressure_hpa;
         g_outside.validPressure = true;
+      } else {
+        g_outside.pressureHPa = NAN;
+        g_outside.validPressure = false;
       }
     } else if (topic_ends_with(topic, "/condition")) {
       // Handle weather condition text

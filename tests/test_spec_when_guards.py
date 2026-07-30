@@ -173,16 +173,29 @@ def extract_sim_function(name: str) -> str:
     raise AssertionError(f"unbalanced braces extracting {name}")
 
 
+def extract_sim_guard_source() -> str:
+    """The simulator's guard predicate plus the sentinel list it depends on."""
+    txt = SIM_JS.read_text()
+    m = re.search(r"^\s*const UNAVAILABLE = \[[^\]]*\];", txt, re.M)
+    assert m, "UNAVAILABLE sentinel list not found in sim.js"
+    return "\n".join(
+        [
+            m.group(0).strip(),
+            extract_sim_function("specFieldHasValue"),
+            extract_sim_function("specFieldHas"),
+        ]
+    )
+
+
 @pytest.mark.skipif(
     subprocess.run(["which", "node"], capture_output=True).returncode != 0,
     reason="node not installed",
 )
 def test_sim_spec_field_has_semantics():
     """Absent in both data and DEFAULTS -> skip; present in either -> draw."""
-    fn = extract_sim_function("specFieldHas")
     script = f"""
 global.window = {{ DEFAULTS: {{ pressure_hpa: 1013 }} }};
-{fn}
+{extract_sim_guard_source()}
 const cases = [
   specFieldHas('has(outside_pressure_hpa)', {{ outside_pressure_hpa: 1016 }}),
   specFieldHas('has(outside_pressure_hpa)', {{}}),
@@ -193,3 +206,25 @@ const cases = [
 console.log(cases.map(String).join(','));
 """
     assert _run_node(script) == "true,false,false,true,true"
+
+
+@pytest.mark.skipif(
+    subprocess.run(["which", "node"], capture_output=True).returncode != 0,
+    reason="node not installed",
+)
+def test_sim_guard_rejects_non_finite_and_unavailable():
+    """The firmware guards on isfinite(), so the sim must not treat NaN, Infinity,
+    an empty string, or Home Assistant's unavailable sentinels as a value -- it
+    would render a row the device leaves blank."""
+    script = f"""
+global.window = {{}};
+{extract_sim_guard_source()}
+const absent = ['', '   ', NaN, 'NaN', Infinity, -Infinity, 'unavailable', 'unknown', 'none'];
+const present = [1016, '1016', '1016.5', 0, '0', -3];
+const bad = absent.filter(v => specFieldHas('has(f)', {{ f: v }}) !== false);
+const missed = present.filter(v => specFieldHas('has(f)', {{ f: v }}) !== true);
+// A non-numeric string is a real value for a non-numeric field (e.g. weather).
+const str = specFieldHas('has(f)', {{ f: 'cloudy' }});
+console.log(JSON.stringify({{ bad: bad.map(String), missed: missed.map(String), str }}));
+"""
+    assert json.loads(_run_node(script)) == {"bad": [], "missed": [], "str": True}
