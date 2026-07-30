@@ -235,12 +235,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-firmware.txt
 
-      - name: Generate config header
-        run: python scripts/gen_device_header.py
-
-      - name: Build Arduino firmware
+      # No manual header generation step here on purpose. platformio.ini's
+      # extra_scripts must produce src/generated_config.h during the build, and a
+      # manual `python scripts/gen_device_header.py` step masked the fact that the
+      # pre-scripts never ran (their entry points only fired for __name__ ==
+      # "__main__", which SCons never sets). Deleting the header first makes that
+      # failure mode break this job instead of hiding behind the manual step.
+      - name: Build Arduino firmware from a clean checkout
         working-directory: firmware/arduino
-        run: pio run
+        run: |
+          rm -f src/generated_config.h
+          pio run
+          test -s src/generated_config.h
 
       - name: Upload build artifacts
         if: ${{ always() }}

@@ -3,6 +3,7 @@
 #include <esp_timer.h>
 #include <esp_heap_caps.h>
 #include <cstdio>
+#include <cstring>
 
 // Copyright 2024 Justin
 
@@ -182,6 +183,15 @@ static String spec_format_field(const String& key) {
     snprintf(buf, sizeof(buf), "%.0f", o.humidityPct);
     return String(buf);
   }
+  // Distinct from the inside "pressure_hpa" case above: startsWith() is a prefix
+  // match, so neither key can match the other's branch.
+  if (key.startsWith("outside_pressure_hpa")) {
+    OutsideReadings o = net_get_outside();
+    if (!o.validPressure || !isfinite(o.pressureHPa))
+      return String("--");
+    snprintf(buf, sizeof(buf), "%.0f", o.pressureHPa);
+    return String(buf);
+  }
   if (key.startsWith("wind_mps")) {
     OutsideReadings o = net_get_outside();
     float mph = o.windMps * 2.237f;
@@ -227,6 +237,29 @@ static String spec_expand_template(const String& templ) {
   return out;
 }
 
+// Evaluates a spec op's `when: has(<field>)` guard, which gen_ui.py emits into
+// UiOpHeader::s1. Mirrors the web simulator (web/sim/sim.js): a guarded op whose
+// field has no value is not drawn at all, so an absent reading leaves the rect
+// blank instead of printing a "-- hPa" placeholder.
+//
+// Fields with no case below report absent, because the firmware has no validity
+// signal for them and a blank rect matches the simulator while "--" would not.
+// Every has() field in config/ui_spec.json must therefore appear here;
+// tests/test_spec_when_guards.py fails when one is missing.
+static bool spec_field_has(const char* field) {
+  if (!field)
+    return true;
+  if (strcmp(field, "pressure_hpa") == 0) {
+    InsideReadings ir = read_inside_sensors();
+    return isfinite(ir.pressureHPa);
+  }
+  if (strcmp(field, "outside_pressure_hpa") == 0) {
+    OutsideReadings o = net_get_outside();
+    return o.validPressure && isfinite(o.pressureHPa);
+  }
+  return false;
+}
+
 // Non-static so display_renderer.cpp can call it
 void draw_from_spec_full_impl(uint8_t variantId) {
   // TOP_Y_OFFSET removed for spec alignment
@@ -260,6 +293,9 @@ void draw_from_spec_full_impl(uint8_t variantId) {
     const ComponentOps& co = comps[ci];
     for (int i = 0; i < co.count; ++i) {
       const UiOpHeader& op = co.ops[i];
+      // s1 holds the spec's `when: has(<field>)` guard; skip the op when absent.
+      if (op.s1 && !spec_field_has(op.s1))
+        continue;
       switch (op.kind) {
         case ui::OP_LINE: {
           int16_t x0 = op.p0, y0 = op.p1, x1 = op.p2, y1 = op.p3;

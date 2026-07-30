@@ -2032,6 +2032,35 @@
     }
   }
 
+  // Evaluates a spec op's `when` clause. Only `has(<field>)` exists today, and
+  // gen_ui.py rejects any other form so the firmware and this renderer cannot
+  // diverge. DEFAULTS counts as a source, matching the sim's value lookup below.
+  //
+  // "Has a value" has to mean the same thing here as in the firmware's
+  // spec_field_has(), which requires isfinite() on the reading. So a numeric field
+  // that arrives as NaN/Infinity, as an empty string, or as one of Home
+  // Assistant's unavailable sentinels counts as absent - otherwise the sim would
+  // render a row the device leaves blank. Non-numeric fields (a weather string,
+  // say) only have to be non-empty.
+  const UNAVAILABLE = ['', 'nan', 'none', 'null', 'unavailable', 'unknown'];
+  function specFieldHasValue(v){
+    if (v === undefined || v === null) return false;
+    const s = String(v).trim();
+    if (UNAVAILABLE.includes(s.toLowerCase())) return false;
+    const n = Number(s);
+    // Number('cloudy') is NaN, i.e. not numeric at all: keep those as present.
+    return Number.isNaN(n) ? true : Number.isFinite(n);
+  }
+  function specFieldHas(when, data){
+    const whenStr = String(when || '');
+    if (!(whenStr.startsWith('has(') && whenStr.endsWith(')'))) return true;
+    const field = whenStr.slice(4, -1).trim();
+    if (data && specFieldHasValue(data[field])) return true;
+    return (typeof window !== 'undefined' && window.DEFAULTS)
+      ? specFieldHasValue(window.DEFAULTS[field])
+      : false;
+  }
+
   console.log('Defining drawFromSpec function...');
   function drawFromSpec(ctx, data, variantName){
     try{
@@ -2050,6 +2079,10 @@
         const ops = (spec.components || {})[cname] || [];
         for (const op of ops){
           try{
+          // Spec `when: has(<field>)` guard - skip the op when the field has no
+          // value. Applies to every op kind, matching spec_field_has() in the
+          // firmware (firmware/arduino/src/main.cpp).
+          if (op.when && !specFieldHas(op.when, data)) continue;
           switch(op.op){
             case 'line': {
               const fx = (op.from && op.from[0]) || 0;
@@ -2062,21 +2095,6 @@
               break;
             }
             case 'text': {
-              // Check "when" condition if present (treat DEFAULTS as fallback source)
-              if (op.when) {
-                const whenStr = String(op.when);
-                if (whenStr.startsWith('has(') && whenStr.endsWith(')')) {
-                  const field = whenStr.slice(4, -1);
-                  let present = !(data[field] === undefined || data[field] === null);
-                  if (!present && typeof window !== 'undefined' && window.DEFAULTS) {
-                    const dv = window.DEFAULTS[field];
-                    present = !(dv === undefined || dv === null);
-                  }
-                  if (!present) {
-                    break; // Skip this operation
-                  }
-                }
-              }
               const r = op.rect ? rects[op.rect] : null;
               const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';

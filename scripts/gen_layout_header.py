@@ -8,9 +8,11 @@ import sys
 from typing import Any, Dict, List
 import zlib
 
-# Support both direct CLI and PlatformIO pre-script execution where __file__
-# may
-# not be defined. Fall back to the project root from the working directory.
+# Standalone CLI tool only. This is NOT a PlatformIO pre-script: gen_ui.py owns
+# firmware/arduino/src/display_layout.h and emits the RECT_-prefixed names the
+# firmware expects, whereas this script emits unprefixed ones (see the extra_scripts
+# comment in firmware/arduino/platformio.ini). The __file__ fallback below is kept
+# for callers that exec() this file rather than importing it.
 try:
     THIS = pathlib.Path(__file__).resolve()
     ROOT = THIS.parents[1]

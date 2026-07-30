@@ -1,9 +1,35 @@
 import os
 import re
+import shutil
 import subprocess
 import sys
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(__file__))
+GENERATED_CONFIG = os.path.join(ROOT, "firmware", "arduino", "src", "generated_config.h")
+
+
+@pytest.fixture(autouse=True)
+def preserve_generated_config():
+    """Restore firmware/arduino/src/generated_config.h after each test.
+
+    Unlike the other generators, gen_device_header.py has no --output flag, so the
+    tests below have to run it in place and read the real header back. That leaves a
+    header built from this test's environment behind, and gen_ui.py takes
+    UI_FW_VERSION from it: the next build would stamp that value into the tracked
+    web/sim/ui_generated.js and dirty the tree. The header is gitignored, so nothing
+    else notices the swap.
+    """
+    saved = None
+    if os.path.exists(GENERATED_CONFIG):
+        saved = GENERATED_CONFIG + ".pytest-backup"
+        shutil.copy2(GENERATED_CONFIG, saved)
+    try:
+        yield
+    finally:
+        if saved:
+            shutil.move(saved, GENERATED_CONFIG)
 
 
 def _run(cmd: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
@@ -40,7 +66,7 @@ def _gen_device_header_with_env(env_overrides: dict[str, str]) -> str:
     # Run generator with a clean environment overriding only what we need
     base_env = os.environ.copy()
     base_env.update(env_overrides)
-    r = _run(["python3", os.path.join(ROOT, "scripts", "gen_device_header.py")], env=base_env)
+    r = _run([sys.executable, os.path.join(ROOT, "scripts", "gen_device_header.py")], env=base_env)
     assert r.returncode == 0, r.stdout + r.stderr
     hdr = os.path.join(ROOT, "firmware", "arduino", "src", "generated_config.h")
     return _read(hdr)
@@ -70,7 +96,7 @@ def test_mqtt_subscribe_base_matches_device_yaml():
     # Ensure config/device.yaml.subscribe base matches generated_config.h MQTT_SUB_BASE
     # This prevents topic drift that would blank the Outside/weather blocks
     # Generate header fresh
-    r = _run(["python3", os.path.join(ROOT, "scripts", "gen_device_header.py")])
+    r = _run([sys.executable, os.path.join(ROOT, "scripts", "gen_device_header.py")])
     assert r.returncode == 0, r.stdout + r.stderr
     hdr = _read(os.path.join(ROOT, "firmware", "arduino", "src", "generated_config.h"))
     sub_base_define = _extract_define(hdr, "MQTT_SUB_BASE")
@@ -120,7 +146,7 @@ def test_flash_mode_always_sets_no_sleep_flag(tmp_path):
             "raise SystemExit(flash.main())\n"
         )
     )
-    proc = subprocess.run(["python3", str(harness)], cwd=ROOT, capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, str(harness)], cwd=ROOT, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     # Verify the always mode programs no-sleep via EXTRA_FLAGS
     lines = proc.stdout.strip().splitlines()

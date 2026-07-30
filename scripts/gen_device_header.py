@@ -8,17 +8,32 @@ try:
 except Exception:
     yaml = None
 
+
+def repo_root() -> Path:
+    """Repository root, resolved as a CLI script or as a PlatformIO pre-script.
+
+    SCons deletes __file__ from the globals it exec()s pre-scripts with, so when it
+    is missing walk up from the working directory (PlatformIO leaves it wherever pio
+    was launched) until the repo's layout markers appear.
+    """
+    try:
+        return Path(__file__).resolve().parents[1]
+    except NameError:
+        pass
+    here = Path(os.getcwd()).resolve()
+    for candidate in (here, *here.parents):
+        if (candidate / "config").is_dir() and (candidate / "scripts").is_dir():
+            return candidate
+    raise RuntimeError(f"cannot locate repo root from {here}; run from inside the repository")
+
+
+ROOT = repo_root()
+
 # Try to load environment variables from .env file
 try:
     from dotenv import load_dotenv
 
-    # Look for .env in project root
-    # Handle case where __file__ is not defined (e.g., when run from PlatformIO)
-    try:
-        script_dir = Path(__file__).parent
-    except NameError:
-        script_dir = Path(os.getcwd())
-    env_path = script_dir.parent / ".env"
+    env_path = ROOT / ".env"
     if env_path.exists():
         load_dotenv(env_path)
         print(f"Loaded environment variables from {env_path}")
@@ -63,7 +78,7 @@ def c_string(s: str) -> str:
 
 
 def main():
-    prj = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    prj = str(ROOT)
     cfg_dir = os.path.join(prj, "config")
     y_path = os.path.join(cfg_dir, "device.yaml")
     if not os.path.exists(y_path):
@@ -219,5 +234,12 @@ def main():
     print(f"Wrote {out_path}")
 
 
-if __name__ == "__main__":
+# "SCons.Script" is how PlatformIO reaches this file: it runs the generator as a
+# SCons pre-script (see extra_scripts in firmware/arduino/platformio.ini), and SCons
+# exec()s pre-scripts against SCons.Script's globals, so __name__ is "SCons.Script"
+# and never "__main__". With only the __main__ guard this generator silently did
+# nothing and every build from a clean checkout failed on a missing
+# generated_config.h. Any name other than these two means an importer (a test)
+# loaded the module to call into it, which must not write files as a side effect.
+if __name__ in ("__main__", "SCons.Script"):
     main()

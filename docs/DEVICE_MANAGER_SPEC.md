@@ -378,6 +378,8 @@ class MqttSimulator:
 |-------|-----------------|-------|
 | `{MQTT_SUB_BASE}/temp_f` | `72.5` | Outside temperature °F |
 | `{MQTT_SUB_BASE}/temp` | `22.5` | Outside temperature °C (legacy) |
+| `{MQTT_SUB_BASE}/pressure_hpa` | `1013.2` | Outside barometric pressure hPa |
+| `{MQTT_SUB_BASE}/pressure` | `1013.2` | Outside barometric pressure hPa (legacy) |
 | `{MQTT_SUB_BASE}/condition` | `sunny` | Weather condition text |
 | `{MQTT_SUB_BASE}/humidity` | `45` | Outside humidity % |
 | `{MQTT_SUB_BASE}/wind_mph` | `5.2` | Wind speed |

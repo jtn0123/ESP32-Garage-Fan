@@ -15,14 +15,23 @@ except Exception:
     yaml = None
 
 
-# Resolve repository root similarly to other generators
+# Resolve repository root similarly to other generators.
+# SCons deletes __file__ from the globals it exec()s pre-scripts with, so when it is
+# missing walk up from the working directory (PlatformIO leaves it wherever pio was
+# launched, e.g. firmware/arduino) until the repo's layout markers appear.
 try:
     THIS = pathlib.Path(__file__).resolve()
     ROOT = THIS.parents[1]
-except Exception:
-    ROOT = pathlib.Path(os.getcwd())
-    if (ROOT / "platformio.ini").exists():
-        ROOT = ROOT.parent.parent
+except NameError:
+    _here = pathlib.Path(os.getcwd()).resolve()
+    ROOT = next(
+        (
+            c
+            for c in (_here, *_here.parents)
+            if (c / "config").is_dir() and (c / "scripts").is_dir()
+        ),
+        _here,
+    )
 
 UI_SPEC_PATH = ROOT / "config" / "ui_spec.json"
 # Repo-relative so generated files are identical regardless of checkout location.
@@ -443,6 +452,10 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
     lines.append("};")
     lines.append("")
     # Simple op header (future: multiple op payload shapes)
+    lines.append("// s0: op payload (text template, field name, ...).")
+    lines.append("// s1: guard field from the spec's `when: has(<field>)` clause, or NULL when")
+    lines.append("//     the op is unconditional. Renderers must skip the op when the guard")
+    lines.append("//     field has no value.")
     lines.append(
         (
             "struct UiOpHeader { "
@@ -487,6 +500,32 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
 
 def _cxx_string_literal(s: str) -> str:
     return '"' + s.replace("\\", r"\\").replace('"', r"\"") + '"'
+
+
+# Ops may carry a `when` guard, e.g. "when": "has(outside_pressure_hpa)". Only the
+# has() form exists today; the firmware receives the bare field name in s1 and skips
+# the op when that field has no value (see spec_field_has() in main.cpp).
+# re.ASCII keeps \w at [A-Za-z0-9_]: a guard field has to be usable as a C
+# identifier, so Unicode word characters must not slip through.
+_WHEN_HAS_RE = re.compile(r"^has\(\s*([A-Za-z_]\w*)\s*\)$", re.ASCII)
+
+
+def guard_field(op: Dict[str, Any], component: str) -> str | None:
+    """Return the field name guarding this op, or None when it is unconditional.
+
+    Unsupported `when` forms are a hard error: silently dropping the clause is
+    exactly how the device ended up drawing rows the simulator hides.
+    """
+    when = op.get("when")
+    if when is None:
+        return None
+    m = _WHEN_HAS_RE.match(str(when).strip())
+    if not m:
+        _fail(
+            f"unsupported 'when' clause {when!r} on {op.get('op')} op in component "
+            f"'{component}': only has(<field>) is supported"
+        )
+    return m.group(1)
 
 
 def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
@@ -548,7 +587,9 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
             f = font_id(str(op.get("font")))
             align = align_code(str(op.get("align")))
             p0 = p1 = p2 = p3 = 0
-            s0 = s1 = "NULL"
+            s0 = "NULL"
+            guard = guard_field(op, cname)
+            s1 = _cxx_string_literal(guard) if guard else "NULL"
             if kind == "line":
                 frm = op.get("from") or [0, 0]
                 to = op.get("to") or [0, 0]
@@ -743,3 +784,14 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+elif __name__ == "SCons.Script":
+    # PlatformIO runs this file as a SCons pre-script (see extra_scripts in
+    # firmware/arduino/platformio.ini). SCons exec()s pre-scripts against
+    # SCons.Script's globals, so __name__ is "SCons.Script" and never "__main__" --
+    # with only the guard above this generator silently did nothing during builds.
+    # Any other name means an importer (a test) loaded the module to call into it,
+    # which must not write generated files as a side effect.
+    #
+    # sys.argv belongs to SCons here, so generate with defaults rather than letting
+    # parse_known_args() sift through SCons's own flags.
+    main([])

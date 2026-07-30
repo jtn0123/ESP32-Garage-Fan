@@ -45,6 +45,10 @@ enum UiOpKind {
     OP_TIMERIGHT,
 };
 
+// s0: op payload (text template, field name, ...).
+// s1: guard field from the spec's `when: has(<field>)` clause, or NULL when
+//     the op is unconditional. Renderers must skip the op when the guard
+//     field has no value.
 struct UiOpHeader { uint8_t kind; uint8_t rect; uint8_t font; uint8_t align; int16_t p0; int16_t p1; int16_t p2; int16_t p3; const char* s0; const char* s1; };
 
 static constexpr const char* kVariantNames[] = {
