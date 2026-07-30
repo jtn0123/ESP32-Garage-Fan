@@ -2,6 +2,10 @@
 #pragma once
 
 #include <Arduino.h>
+// Included directly rather than relied on transitively via safe_strings.h:
+// SAFE_LOG_CONNECTION below expands LOG_INFO at its *use* site, so the simple
+// LOG_* macros must be the ones in scope there.
+#include "logging.h"
 #include "safe_strings.h"
 
 // Sanitize sensitive strings for logging

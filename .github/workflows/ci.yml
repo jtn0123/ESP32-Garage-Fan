@@ -243,10 +243,36 @@ jobs:
       # failure mode break this job instead of hiding behind the manual step.
       - name: Build Arduino firmware from a clean checkout
         working-directory: firmware/arduino
+        shell: bash
         run: |
+          # pipefail matters: without it `tee` supplies the exit status and a
+          # failed build would pass this step.
+          set -euo pipefail
+          # Deleting the generated header first proves the PlatformIO pre-scripts
+          # really do regenerate it, so a clean checkout builds.
           rm -f src/generated_config.h
-          pio run
+          pio run 2>&1 | tee build.log
           test -s src/generated_config.h
+
+      # The firmware build is warning-free; keep it that way. Anchored to ^src/
+      # so this only covers our own sources -- a dependency that warns from
+      # .pio/libdeps/<env>/<lib>/src/... must not fail an unrelated PR.
+      #
+      # This gate exists because logging.h and logging/logger.h once defined the
+      # same LOG_* macro names, producing 20 redefinition warnings on every build
+      # and letting include order decide which logging backend a file used.
+      # 20 warnings were easy to stop reading; one is not.
+      - name: Check for firmware warnings in our sources
+        working-directory: firmware/arduino
+        shell: bash
+        run: |
+          set -uo pipefail
+          if grep -E '^src/.*: warning:' build.log > src-warnings.txt; then
+            echo "::error::Firmware build produced warnings in src/ (see below)"
+            cat src-warnings.txt
+            exit 1
+          fi
+          echo "No warnings in firmware/arduino/src"
 
       - name: Upload build artifacts
         if: ${{ always() }}
@@ -437,9 +463,27 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-firmware.txt
 
+      # Every native env is listed explicitly. This job used to run only
+      # `pio test -e native`, whose test_filter is test_rounding -- so six of the
+      # eight native test suites were never executed by CI and had rotted: four
+      # could not compile at all, one asserted against a real bug in
+      # src/power.cpp, and one was written against an API that never existed.
+      #
+      # There is no "native_all" env to use instead: the suites need different
+      # build_src_filter settings (see the note in platformio.ini). When adding a
+      # native test env, add it here too.
       - name: Run native unit tests
         working-directory: firmware/arduino
-        run: pio test -e native -v
+        run: |
+          pio test -v \
+            -e native \
+            -e native_config_merge \
+            -e native_mqtt_topics \
+            -e native_power \
+            -e native_smart_refresh \
+            -e native_state_manager \
+            -e native_system_manager \
+            -e native_app_controller
 
   manager-build:
     name: Device manager UI build

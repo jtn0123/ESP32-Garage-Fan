@@ -4,6 +4,7 @@
 #include <esp_sleep.h>
 #include "config.h"
 #include "generated_config.h"
+#include "system_pure.h"
 #ifdef LOG_ENABLED
 #include "logging/logger.h"
 #include "logging/log_buffer.h"
@@ -66,7 +67,7 @@ void print_boot_diagnostics() {
 #ifdef LOG_ENABLED
   // Check for crash and dump logs if needed
   if (reset_reason_is_crash(reset_reason)) {
-    LOG_FATAL("System crashed with reason: %s", get_reset_reason_string(reset_reason));
+    LOGM_FATAL("System crashed with reason: %s", get_reset_reason_string(reset_reason));
 
     // Check if we have crash logs in NVS
     LogStorage* storage = LogStorage::getInstance();
@@ -90,45 +91,22 @@ void print_boot_diagnostics() {
 }
 
 // Get reset reason as string
+// Both of these now live in system_pure.h so the native unit tests can exercise
+// the real logic instead of a copy of it. These wrappers keep the existing
+// call sites unchanged.
 const char* get_reset_reason_string(esp_reset_reason_t reason) {
-  switch (reason) {
-    case ESP_RST_UNKNOWN:
-      return "UNKNOWN";
-    case ESP_RST_POWERON:
-      return "POWERON";
-    case ESP_RST_EXT:
-      return "EXTERNAL";
-    case ESP_RST_SW:
-      return "SOFTWARE";
-    case ESP_RST_PANIC:
-      return "PANIC";
-    case ESP_RST_INT_WDT:
-      return "INT_WATCHDOG";
-    case ESP_RST_TASK_WDT:
-      return "TASK_WATCHDOG";
-    case ESP_RST_WDT:
-      return "WATCHDOG";
-    case ESP_RST_DEEPSLEEP:
-      return "DEEPSLEEP";
-    case ESP_RST_BROWNOUT:
-      return "BROWNOUT";
-    case ESP_RST_SDIO:
-      return "SDIO";
-    default:
-      return "UNKNOWN";
-  }
+  return reset_reason_to_string(reason);
 }
 
 // Check if reset reason indicates a crash
 bool reset_reason_is_crash(esp_reset_reason_t reason) {
-  return (reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT || reason == ESP_RST_TASK_WDT ||
-          reason == ESP_RST_WDT || reason == ESP_RST_BROWNOUT);
+  return reset_reason_indicates_crash(reason);
 }
 
 // Go to deep sleep with wake tracking
 void go_deep_sleep_with_tracking(uint32_t seconds) {
 #ifdef LOG_ENABLED
-  LOG_INFO("Entering deep sleep for %u seconds. Wake count: %u", seconds, rtc_wake_count);
+  LOGM_INFO("Entering deep sleep for %u seconds. Wake count: %u", seconds, rtc_wake_count);
   Logger::getInstance().flush();
 #endif
 
@@ -199,11 +177,11 @@ void handle_serial_command_line(const String& line) {
   // Test logging commands
   if (line == "log test") {
     Serial.println(F("Running logging test..."));
-    LOG_TRACE("Test TRACE message");
-    LOG_DEBUG("Test DEBUG message");
-    LOG_INFO("Test INFO message with number: %d", 42);
-    LOG_WARN("Test WARNING message");
-    LOG_ERROR("Test ERROR message with code: %d", 500);
+    LOGM_TRACE("Test TRACE message");
+    LOGM_DEBUG("Test DEBUG message");
+    LOGM_INFO("Test INFO message with number: %d", 42);
+    LOGM_WARN("Test WARNING message");
+    LOGM_ERROR("Test ERROR message with code: %d", 500);
     Serial.println(F("Logging test complete - check serial output"));
     return;
   }
@@ -254,18 +232,8 @@ void handle_serial_command_line(const String& line) {
 
 // CRC32 calculation utility
 uint32_t fast_crc32(const uint8_t* data, size_t len) {
-  // Tiny CRC32 (polynomial 0xEDB88320),
-  // suitable for short status strings
-  uint32_t crc = 0xFFFFFFFFu;
-  for (size_t i = 0; i < len; ++i) {
-    uint32_t byte = data[i];
-    crc ^= byte;
-    for (int k = 0; k < 8; ++k) {
-      uint32_t mask = -(crc & 1u);
-      crc = (crc >> 1) ^ (0xEDB88320u & mask);
-    }
-  }
-  return ~crc;
+  // Implementation lives in system_pure.h so it is unit-testable on the host.
+  return crc32_bytes(data, len);
 }
 
 // Template implementations for conditional redraws

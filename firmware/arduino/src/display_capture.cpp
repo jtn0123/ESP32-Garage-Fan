@@ -21,9 +21,9 @@ DisplayCapture::DisplayCapture() {
   canvas_ = new GFXcanvas1(WIDTH, HEIGHT);
   if (canvas_) {
     canvas_->fillScreen(1);  // White background (1 = white for GFXcanvas1)
-    LOG_INFO("Screenshot canvas allocated: %dx%d (%d bytes)", WIDTH, HEIGHT, BUFFER_SIZE);
+    LOGM_INFO("Screenshot canvas allocated: %dx%d (%d bytes)", WIDTH, HEIGHT, BUFFER_SIZE);
   } else {
-    LOG_ERROR("Failed to allocate screenshot canvas");
+    LOGM_ERROR("Failed to allocate screenshot canvas");
   }
 }
 
@@ -46,43 +46,43 @@ DisplayCapture& DisplayCapture::getInstance() {
 
 const uint8_t* DisplayCapture::capture(size_t* out_size) {
   if (!out_size) {
-    LOG_ERROR("out_size is null");
+    LOGM_ERROR("out_size is null");
     return nullptr;
   }
 
   if (!canvas_) {
-    LOG_ERROR("Canvas not initialized");
+    LOGM_ERROR("Canvas not initialized");
     *out_size = 0;
     return nullptr;
   }
 
   if (!has_content_) {
-    LOG_WARN("Canvas has no content - display may not have synced drawing");
+    LOGM_WARN("Canvas has no content - display may not have synced drawing");
   }
 
   // GFXcanvas1 stores buffer internally, we can access it via getBuffer()
   const uint8_t* buffer = canvas_->getBuffer();
   if (!buffer) {
-    LOG_ERROR("Canvas buffer is null");
+    LOGM_ERROR("Canvas buffer is null");
     *out_size = 0;
     return nullptr;
   }
 
   *out_size = BUFFER_SIZE;
-  LOG_DEBUG("Captured %d bytes from canvas (%dx%d)", BUFFER_SIZE, WIDTH, HEIGHT);
+  LOGM_DEBUG("Captured %d bytes from canvas (%dx%d)", BUFFER_SIZE, WIDTH, HEIGHT);
   return buffer;
 }
 
 size_t DisplayCapture::captureBase64(char* out_buffer, size_t buffer_size) {
   if (!out_buffer || buffer_size < BASE64_SIZE) {
-    LOG_ERROR("Invalid output buffer (size=%d, need=%d)", buffer_size, BASE64_SIZE);
+    LOGM_ERROR("Invalid output buffer (size=%d, need=%d)", buffer_size, BASE64_SIZE);
     return 0;
   }
 
   size_t size;
   const uint8_t* data = capture(&size);
   if (!data || size == 0) {
-    LOG_ERROR("Failed to capture display");
+    LOGM_ERROR("Failed to capture display");
     return 0;
   }
 
@@ -94,7 +94,7 @@ size_t DisplayCapture::base64Encode(const uint8_t* input, size_t input_len, char
   size_t output_len = ((input_len + 2) / 3) * 4;
 
   if (output_size < output_len + 1) {
-    LOG_ERROR("Output buffer too small");
+    LOGM_ERROR("Output buffer too small");
     return 0;
   }
 
@@ -154,30 +154,31 @@ void display_capture_fill_screen(uint16_t color) {
 
 // C linkage for MQTT command handler
 extern "C" void display_capture_handle(const char* payload, size_t length) {
-  LOG_INFO("Screenshot command received");
+  LOGM_INFO("Screenshot command received");
 
   DisplayCapture& cap = DisplayCapture::getInstance();
 
   if (!cap.hasContent()) {
-    LOG_WARN("No display content captured yet");
+    LOGM_WARN("No display content captured yet");
   }
 
   // Allocate buffer for base64 data on heap (it's large ~5KB)
   char* base64_buffer = new char[DisplayCapture::BASE64_SIZE];
   if (!base64_buffer) {
-    LOG_ERROR("Failed to allocate base64 buffer");
+    LOGM_ERROR("Failed to allocate base64 buffer");
     return;
   }
 
   size_t base64_len = cap.captureBase64(base64_buffer, DisplayCapture::BASE64_SIZE);
   if (base64_len == 0) {
-    LOG_ERROR("Failed to capture and encode display");
+    LOGM_ERROR("Failed to capture and encode display");
     delete[] base64_buffer;
     return;
   }
 
-  // Build JSON response
-  StaticJsonDocument<256> meta_doc;
+  // Build JSON response. JsonDocument (ArduinoJson 7) replaces the deprecated
+  // StaticJsonDocument<N>; it sizes itself, and this payload is five scalars.
+  JsonDocument meta_doc;
   meta_doc["width"] = DisplayCapture::WIDTH;
   meta_doc["height"] = DisplayCapture::HEIGHT;
   meta_doc["format"] = "1bit";
@@ -195,7 +196,7 @@ extern "C" void display_capture_handle(const char* payload, size_t length) {
   PubSubClient* client = mqtt_get_client();
   if (client && client->connected()) {
     client->publish(topic, (const uint8_t*)meta_buffer, meta_len, false);
-    LOG_INFO("Published screenshot metadata");
+    LOGM_INFO("Published screenshot metadata");
 
     // Publish base64 data to /debug/screenshot/data
     snprintf(topic, sizeof(topic), "espsensor/%s/debug/screenshot/data", client_id);
@@ -216,9 +217,9 @@ extern "C" void display_capture_handle(const char* payload, size_t length) {
           client->publish(topic, (const uint8_t*)(base64_buffer + offset), chunk_len, false);
 
       if (success) {
-        LOG_DEBUG("Published chunk %d (%d bytes, offset=%d)", chunk_num, chunk_len, offset);
+        LOGM_DEBUG("Published chunk %d (%d bytes, offset=%d)", chunk_num, chunk_len, offset);
       } else {
-        LOG_ERROR("Failed to publish chunk %d", chunk_num);
+        LOGM_ERROR("Failed to publish chunk %d", chunk_num);
         break;
       }
 
@@ -230,9 +231,9 @@ extern "C" void display_capture_handle(const char* payload, size_t length) {
       }
     }
 
-    LOG_INFO("Screenshot capture complete: %d bytes in %d chunks", base64_len, chunk_num);
+    LOGM_INFO("Screenshot capture complete: %d bytes in %d chunks", base64_len, chunk_num);
   } else {
-    LOG_ERROR("MQTT client not connected");
+    LOGM_ERROR("MQTT client not connected");
   }
 
   delete[] base64_buffer;
