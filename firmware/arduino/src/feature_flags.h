@@ -70,6 +70,17 @@
 #define FEATURE_BUFFER_POOL 1
 #endif
 
+// microSD storage: sensor history CSV, rotating log files, config overrides and
+// staged firmware images.
+#ifndef FEATURE_SD_STORAGE
+#define FEATURE_SD_STORAGE 1
+#endif
+
+// Over-the-air firmware updates (network via ArduinoOTA, plus apply-from-SD).
+#ifndef FEATURE_OTA
+#define FEATURE_OTA 1
+#endif
+
 // Helper macros
 #define FEATURE_ENABLED(x) (FEATURE_##x == 1)
 #define FEATURE_DISABLED(x) (FEATURE_##x == 0)

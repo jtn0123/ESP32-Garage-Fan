@@ -1,5 +1,8 @@
 room_name: "Office"
-wake_interval: "2h"           # 1h|2h|4h
+wake_interval: "2h"           # 1h|2h|4h — deep-sleep gap in the default mode
+# Sampling cadence for ALWAYS_ON builds, where the device stays powered instead
+# of deep sleeping. Minimum 60s (the BME280 self-heats if polled harder).
+sample_interval: "5m"
 full_refresh_every: 12         # partials between full clears
 # Optional: firmware version string for HA device registry (sw_version). If not set,
 # it falls back to FW_VERSION env var, then `git describe` or short commit, else 'dev'.

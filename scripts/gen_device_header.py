@@ -103,6 +103,13 @@ def main():
     else:
         wake_interval = parse_duration(data.get("wake_interval", "2h"))
     full_refresh_every = int(data.get("full_refresh_every", 12) or 12)
+    # Sampling cadence for ALWAYS_ON builds. Distinct from wake_interval, which
+    # is how long the device deep sleeps between wakes in the default mode.
+    env_sample = str(os.environ.get("SAMPLE_INTERVAL", "")).strip()
+    if env_sample:
+        sample_interval = parse_duration(env_sample)
+    else:
+        sample_interval = parse_duration(data.get("sample_interval", "5m"))
     outside_source = str(data.get("outside_source", "mqtt"))
     wifi = data.get("wifi", {}) or {}  # Ensure wifi is always a dict
     mqtt = data.get("mqtt", {}) or {}  # Ensure mqtt is always a dict
@@ -184,6 +191,11 @@ def main():
         f.write(f"#define ROOM_NAME {c_string(room_name)}\n")
         f.write(f"#define FW_VERSION {c_string(fw_version)}\n")
         f.write(f"#define WAKE_INTERVAL_SEC {wake_interval}\n")
+        # Guarded so a -DSAMPLE_INTERVAL_SEC build flag still wins, matching how
+        # the other tunables in config.h behave.
+        f.write("#ifndef SAMPLE_INTERVAL_SEC\n")
+        f.write(f"#define SAMPLE_INTERVAL_SEC {sample_interval}\n")
+        f.write("#endif\n")
         f.write(f"#define FULL_REFRESH_EVERY {full_refresh_every}\n")
         f.write(f"#define OUTSIDE_SOURCE {c_string(outside_source)}\n")
         f.write(f"#define WIFI_SSID {c_string(wifi_ssid)}\n")

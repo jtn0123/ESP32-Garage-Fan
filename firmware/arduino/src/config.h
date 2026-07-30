@@ -1,6 +1,11 @@
 #pragma once
 // Copyright 2024 Justin
 
+// Pulled in first so the #ifndef fallbacks below act as fallbacks rather than
+// shadowing values generated from config/device.yaml. Precedence ends up:
+// -D build flag > config/device.yaml (generated_config.h) > default here.
+#include "generated_config.h"
+
 // Compile-time toggles (filled in later as features land)
 #ifndef USE_DISPLAY
 #define USE_DISPLAY 1
@@ -16,6 +21,27 @@
 #endif
 #ifndef DEV_SLEEP_SEC
 #define DEV_SLEEP_SEC 180
+#endif
+// Always-on mode: instead of waking, publishing and deep sleeping, the device
+// stays powered and samples on a timer. This is what makes network OTA usable —
+// a deep-sleeping node is unreachable for all but a few seconds per interval.
+// Costs roughly 50x the average current of the deep-sleep cycle, so it suits
+// USB-powered nodes.
+#ifndef ALWAYS_ON
+#define ALWAYS_ON 0
+#endif
+// How often to read the sensors and publish while in ALWAYS_ON mode.
+// Kept at/above 60s: the BME280 self-heats when polled continuously, which
+// biases the temperature reading upward.
+#ifndef SAMPLE_INTERVAL_SEC
+#define SAMPLE_INTERVAL_SEC 300
+#endif
+// Floor on how often the e-ink panel is redrawn in ALWAYS_ON mode. Sampling
+// every 5 minutes does not mean redrawing every 5 minutes: a full refresh
+// visibly flashes the panel and consumes one of its finite refresh cycles, so
+// the draw is decoupled from the sample and rate limited here.
+#ifndef DISPLAY_MIN_REFRESH_INTERVAL_SEC
+#define DISPLAY_MIN_REFRESH_INTERVAL_SEC 900
 #endif
 #ifndef USE_SHT40
 #define USE_SHT40 0
@@ -116,4 +142,39 @@
 // Status pixel configuration
 #ifndef USE_STATUS_PIXEL
 #define USE_STATUS_PIXEL 0
+#endif
+
+// microSD card on the eInk FeatherWing.
+// The card shares the Feather's hardware SPI bus with the e-ink panel; only the
+// chip selects differ (panel = D9, card = D5). See hardware/pinmap.md.
+#ifndef SD_CS_PIN
+#define SD_CS_PIN 5
+#endif
+// SPI clock for the card. 20 MHz is well within microSD spec but the bus is
+// shared with the panel and routed through headers, so start conservative.
+#ifndef SD_SPI_FREQ_HZ
+#define SD_SPI_FREQ_HZ 20000000
+#endif
+// Retention sweep for /data/*.csv. 0 disables pruning (keep everything).
+#ifndef SD_HISTORY_RETENTION_DAYS
+#define SD_HISTORY_RETENTION_DAYS 90
+#endif
+// Number of rotating log files kept in /logs.
+#ifndef SD_LOG_FILE_COUNT
+#define SD_LOG_FILE_COUNT 5
+#endif
+// Size at which the active log file rotates (bytes).
+#ifndef SD_LOG_MAX_BYTES
+#define SD_LOG_MAX_BYTES 262144
+#endif
+
+// Network OTA (ArduinoOTA / espota) listener port.
+#ifndef OTA_PORT
+#define OTA_PORT 3232
+#endif
+// Set to 1 to refuse to start the network OTA listener unless a password is
+// configured. Defaults to 0 so OTA works out of the box on a trusted LAN; the
+// firmware logs a prominent warning whenever it runs unauthenticated.
+#ifndef OTA_REQUIRE_PASSWORD
+#define OTA_REQUIRE_PASSWORD 0
 #endif

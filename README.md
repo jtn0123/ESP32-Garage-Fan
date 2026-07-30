@@ -55,6 +55,11 @@ Pixel/snapshot checks (CI, blocking):
 - Awake (Wi‑Fi + draw): **60–100 mA** for **30–120 s**.
 - Hourly / 2‑hourly / 4‑hourly wakes supported; see `/scripts/power_estimator.py`.
 
+There is also an **always‑on** mode (`env:feather_esp32s2_always_on`) that never
+sleeps, samples every 5 minutes, and stays reachable for network OTA. It averages
+roughly **40 mA** — about **3–4 days** on a 3500 mAh cell — so it suits a
+USB‑powered node. See [docs/ALWAYS_ON_AND_OTA.md](docs/ALWAYS_ON_AND_OTA.md).
+
 ### Home Assistant Integration
 
 - **ESPHome path**: uses `homeassistant:` to read outdoor entities and native sensors to publish.
@@ -209,6 +214,7 @@ build_flags =
 Note: The optional status LED heartbeat uses the Adafruit NeoPixel library and is already included in the PlatformIO `lib_deps`. You can disable the LED at build time with `-DUSE_STATUS_PIXEL=0` if optimizing for lowest sleep current.
 
 Developer builds:
+- `env:feather_esp32s2_always_on`: stays awake, samples every `SAMPLE_INTERVAL_SEC` (default 300), keeps a CSV history and rotating logs on microSD, and accepts network OTA. See [docs/ALWAYS_ON_AND_OTA.md](docs/ALWAYS_ON_AND_OTA.md) for the power tradeoff and the OTA workflow.
 - `env:feather_esp32s2_headless`: headless with parity to e‑ink build (same thresholds and availability; sleeps per `WAKE_INTERVAL_SEC`).
 - `env:feather_esp32s2_dev2`: headless, 3 min awake / 3 min sleep cycle for soak testing while limiting heat.
 - `env:feather_esp32s2_headless_1h`: headless, 1‑hour sleep schedule (WAKE_INTERVAL_SEC=3600).

@@ -10,6 +10,7 @@
 #include "mqtt_client.h"
 #include "safe_strings.h"  // Add safe string operations
 #include "logging.h"       // Add logging infrastructure
+#include "runtime_config.h"
 
 #if USE_STATUS_PIXEL
 #include <Adafruit_NeoPixel.h>
@@ -160,7 +161,7 @@ void publish_layout_identity() {
   }
 
   mqtt_topic_t topic;  // Use pre-sized buffer type
-  safe_snprintf(topic, "%s/layout", MQTT_PUB_BASE);
+  safe_snprintf(topic, "%s/layout", rc_mqtt_pub_base());
 
   char payload[96];
 #if USE_DISPLAY
@@ -327,15 +328,15 @@ void publish_boot_diagnostics() {
   char topic[128];
   char payload[64];
 
-  snprintf(topic, sizeof(topic), "%s/debug/boot_count", MQTT_PUB_BASE);
+  snprintf(topic, sizeof(topic), "%s/debug/boot_count", rc_mqtt_pub_base());
   snprintf(payload, sizeof(payload), "%lu", (unsigned long)rtc_boot_count);
   mqtt_publish_raw(topic, payload, false);
 
-  snprintf(topic, sizeof(topic), "%s/debug/crash_count", MQTT_PUB_BASE);
+  snprintf(topic, sizeof(topic), "%s/debug/crash_count", rc_mqtt_pub_base());
   snprintf(payload, sizeof(payload), "%lu", (unsigned long)rtc_crash_count);
   mqtt_publish_raw(topic, payload, false);
 
-  snprintf(topic, sizeof(topic), "%s/debug/uptime", MQTT_PUB_BASE);
+  snprintf(topic, sizeof(topic), "%s/debug/uptime", rc_mqtt_pub_base());
   snprintf(payload, sizeof(payload), "%lu", (unsigned long)rtc_cumulative_uptime_sec);
   mqtt_publish_raw(topic, payload, false);
 }

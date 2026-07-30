@@ -7,6 +7,7 @@
 #include "generated_config.h"
 #include "config.h"
 #include "profiling.h"
+#include "runtime_config.h"
 
 // Static storage for provisioning
 static Preferences g_wifi_prefs;
@@ -54,16 +55,21 @@ bool wifi_connect_with_timeout(uint32_t timeout_ms) {
   }
 #endif
 
+  // Credentials come from the runtime config, so they can be supplied either at
+  // build time or by /config/device.json on the SD card.
+  const char* ssid = rc_wifi_ssid();
+  const char* pass = rc_wifi_pass();
+
   // Set hostname before connecting
-  WiFi.setHostname(ROOM_NAME);
+  WiFi.setHostname(rc_room_name());
 
   // Connect with or without BSSID
   if (has_bssid) {
-    Serial.printf("[WiFi] Connecting to %s with BSSID\n", WIFI_SSID);
-    WiFi.begin(WIFI_SSID, WIFI_PASS, 0, bssid_bytes);
+    Serial.printf("[WiFi] Connecting to %s with BSSID\n", ssid);
+    WiFi.begin(ssid, pass, 0, bssid_bytes);
   } else {
-    Serial.printf("[WiFi] Connecting to %s\n", WIFI_SSID);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    Serial.printf("[WiFi] Connecting to %s\n", ssid);
+    WiFi.begin(ssid, pass);
   }
 
   // Wait for connection with timeout

@@ -8,6 +8,7 @@
 #include "mqtt_client.h"
 #include "generated_config.h"
 #include "config.h"
+#include "runtime_config.h"
 
 // Forward declaration for MQTT publish function
 extern bool mqtt_publish_raw(const char* topic, const char* payload, bool retain);
@@ -27,9 +28,9 @@ static void publish_discovery_config(const char* component, const char* sensor_n
 
 // Helper to build device JSON
 static String build_device_json() {
-  return String("{") + "\"identifiers\":[\"" + g_device_id + "\"]," + "\"name\":\"" + ROOM_NAME +
-         " Sensor\"," + "\"model\":\"ESP32 Environmental Sensor\"," + "\"manufacturer\":\"DIY\"," +
-         "\"sw_version\":\"" + FW_VERSION + "\"" + "}";
+  return String("{") + "\"identifiers\":[\"" + g_device_id + "\"]," + "\"name\":\"" +
+         rc_room_name() + " Sensor\"," + "\"model\":\"ESP32 Environmental Sensor\"," +
+         "\"manufacturer\":\"DIY\"," + "\"sw_version\":\"" + FW_VERSION + "\"" + "}";
 }
 
 void ha_discovery_begin(const char* client_id) {
@@ -58,7 +59,7 @@ void ha_discovery_publish_temperature_sensor() {
     return;
 
   String config =
-      String("{") + "\"name\":\"" + ROOM_NAME + " Temperature\"," + "\"unique_id\":\"" +
+      String("{") + "\"name\":\"" + rc_room_name() + " Temperature\"," + "\"unique_id\":\"" +
       g_device_id + "_temperature\"," + "\"state_topic\":\"espsensor/" + g_device_id +
       "/inside/temperature\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
       "/availability\"," + "\"device_class\":\"temperature\"," + "\"unit_of_measurement\":\"°C\"," +
@@ -72,10 +73,10 @@ void ha_discovery_publish_humidity_sensor() {
     return;
 
   String config =
-      String("{") + "\"name\":\"" + ROOM_NAME + " Humidity\"," + "\"unique_id\":\"" + g_device_id +
-      "_humidity\"," + "\"state_topic\":\"espsensor/" + g_device_id + "/inside/humidity\"," +
-      "\"availability_topic\":\"espsensor/" + g_device_id + "/availability\"," +
-      "\"device_class\":\"humidity\"," + "\"unit_of_measurement\":\"%\"," +
+      String("{") + "\"name\":\"" + rc_room_name() + " Humidity\"," + "\"unique_id\":\"" +
+      g_device_id + "_humidity\"," + "\"state_topic\":\"espsensor/" + g_device_id +
+      "/inside/humidity\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
+      "/availability\"," + "\"device_class\":\"humidity\"," + "\"unit_of_measurement\":\"%\"," +
       "\"value_template\":\"{{ value | round(1) }}\"," + "\"device\":" + build_device_json() + "}";
 
   publish_discovery_config("sensor", "humidity", config.c_str());
@@ -86,11 +87,12 @@ void ha_discovery_publish_pressure_sensor() {
     return;
 
   String config =
-      String("{") + "\"name\":\"" + ROOM_NAME + " Pressure\"," + "\"unique_id\":\"" + g_device_id +
-      "_pressure\"," + "\"state_topic\":\"espsensor/" + g_device_id + "/inside/pressure\"," +
-      "\"availability_topic\":\"espsensor/" + g_device_id + "/availability\"," +
-      "\"device_class\":\"atmospheric_pressure\"," + "\"unit_of_measurement\":\"hPa\"," +
-      "\"value_template\":\"{{ value | round(1) }}\"," + "\"device\":" + build_device_json() + "}";
+      String("{") + "\"name\":\"" + rc_room_name() + " Pressure\"," + "\"unique_id\":\"" +
+      g_device_id + "_pressure\"," + "\"state_topic\":\"espsensor/" + g_device_id +
+      "/inside/pressure\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
+      "/availability\"," + "\"device_class\":\"atmospheric_pressure\"," +
+      "\"unit_of_measurement\":\"hPa\"," + "\"value_template\":\"{{ value | round(1) }}\"," +
+      "\"device\":" + build_device_json() + "}";
 
   publish_discovery_config("sensor", "pressure", config.c_str());
 }
@@ -100,22 +102,23 @@ void ha_discovery_publish_battery_sensor() {
     return;
 
   // Battery percentage
-  String config = String("{") + "\"name\":\"" + ROOM_NAME + " Battery\"," + "\"unique_id\":\"" +
-                  g_device_id + "_battery\"," + "\"state_topic\":\"espsensor/" + g_device_id +
-                  "/battery/percent\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
-                  "/availability\"," + "\"device_class\":\"battery\"," +
-                  "\"unit_of_measurement\":\"%\"," + "\"device\":" + build_device_json() + "}";
+  String config = String("{") + "\"name\":\"" + rc_room_name() + " Battery\"," +
+                  "\"unique_id\":\"" + g_device_id + "_battery\"," +
+                  "\"state_topic\":\"espsensor/" + g_device_id + "/battery/percent\"," +
+                  "\"availability_topic\":\"espsensor/" + g_device_id + "/availability\"," +
+                  "\"device_class\":\"battery\"," + "\"unit_of_measurement\":\"%\"," +
+                  "\"device\":" + build_device_json() + "}";
 
   publish_discovery_config("sensor", "battery", config.c_str());
 
   // Battery voltage (diagnostic)
   if (g_diagnostic_entities) {
-    config = String("{") + "\"name\":\"" + ROOM_NAME + " Battery Voltage\"," + "\"unique_id\":\"" +
-             g_device_id + "_battery_voltage\"," + "\"state_topic\":\"espsensor/" + g_device_id +
-             "/battery/voltage\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
-             "/availability\"," + "\"device_class\":\"voltage\"," +
-             "\"unit_of_measurement\":\"V\"," + "\"entity_category\":\"diagnostic\"," +
-             "\"device\":" + build_device_json() + "}";
+    config = String("{") + "\"name\":\"" + rc_room_name() + " Battery Voltage\"," +
+             "\"unique_id\":\"" + g_device_id + "_battery_voltage\"," +
+             "\"state_topic\":\"espsensor/" + g_device_id + "/battery/voltage\"," +
+             "\"availability_topic\":\"espsensor/" + g_device_id + "/availability\"," +
+             "\"device_class\":\"voltage\"," + "\"unit_of_measurement\":\"V\"," +
+             "\"entity_category\":\"diagnostic\"," + "\"device\":" + build_device_json() + "}";
 
     publish_discovery_config("sensor", "battery_voltage", config.c_str());
   }
@@ -125,10 +128,10 @@ void ha_discovery_publish_rssi_sensor() {
   if (!mqtt_is_connected())
     return;
 
-  String config = String("{") + "\"name\":\"" + ROOM_NAME + " WiFi RSSI\"," + "\"unique_id\":\"" +
-                  g_device_id + "_rssi\"," + "\"state_topic\":\"espsensor/" + g_device_id +
-                  "/wifi/rssi\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
-                  "/availability\"," + "\"device_class\":\"signal_strength\"," +
+  String config = String("{") + "\"name\":\"" + rc_room_name() + " WiFi RSSI\"," +
+                  "\"unique_id\":\"" + g_device_id + "_rssi\"," + "\"state_topic\":\"espsensor/" +
+                  g_device_id + "/wifi/rssi\"," + "\"availability_topic\":\"espsensor/" +
+                  g_device_id + "/availability\"," + "\"device_class\":\"signal_strength\"," +
                   "\"unit_of_measurement\":\"dBm\"," + "\"entity_category\":\"diagnostic\"," +
                   "\"device\":" + build_device_json() + "}";
 
@@ -140,7 +143,7 @@ void ha_discovery_publish_diagnostic_sensors() {
     return;
 
   // Uptime sensor
-  String config = String("{") + "\"name\":\"" + ROOM_NAME + " Uptime\"," + "\"unique_id\":\"" +
+  String config = String("{") + "\"name\":\"" + rc_room_name() + " Uptime\"," + "\"unique_id\":\"" +
                   g_device_id + "_uptime\"," + "\"state_topic\":\"espsensor/" + g_device_id +
                   "/debug/uptime\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
                   "/availability\"," + "\"unit_of_measurement\":\"s\"," +
@@ -150,7 +153,7 @@ void ha_discovery_publish_diagnostic_sensors() {
   publish_discovery_config("sensor", "uptime", config.c_str());
 
   // Wake count sensor
-  config = String("{") + "\"name\":\"" + ROOM_NAME + " Wake Count\"," + "\"unique_id\":\"" +
+  config = String("{") + "\"name\":\"" + rc_room_name() + " Wake Count\"," + "\"unique_id\":\"" +
            g_device_id + "_wake_count\"," + "\"state_topic\":\"espsensor/" + g_device_id +
            "/debug/wake_count\"," + "\"availability_topic\":\"espsensor/" + g_device_id +
            "/availability\"," + "\"icon\":\"mdi:counter\"," +

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include "generated_config.h"
 #include "config.h"
+#include "runtime_config.h"
 #include "metrics_diagnostics.h"
 #include "debug_commands.h"
 #include "profiling.h"
@@ -59,10 +60,10 @@ void mqtt_begin() {
   // Configure MQTT client
   g_mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);
 
-// Set MQTT server
-#ifdef MQTT_HOST
-  g_mqtt.setServer(MQTT_HOST, MQTT_PORT);
-#endif
+  // Server comes from the runtime config so an SD card override takes effect.
+  if (rc_mqtt_host()[0] != '\0') {
+    g_mqtt.setServer(rc_mqtt_host(), rc_mqtt_port());
+  }
 
   // Set up MQTT callback for commands and outdoor data
   // NOTE: Using C strings (not Arduino String) to avoid heap fragmentation
@@ -265,13 +266,15 @@ bool mqtt_connect() {
   char lwt_topic[96];
   build_topic_buf(lwt_topic, sizeof(lwt_topic), "availability");
 
-  // Connect with authentication if configured
+  // Connect with authentication if configured. An empty user means anonymous;
+  // passing "" as the username makes some brokers reject the connection.
   bool connected = false;
-#if defined(MQTT_USER) && defined(MQTT_PASS)
-  connected = g_mqtt.connect(g_mqtt_client_id, MQTT_USER, MQTT_PASS, lwt_topic, 0, true, "offline");
-#else
-  connected = g_mqtt.connect(g_mqtt_client_id, lwt_topic, 0, true, "offline");
-#endif
+  if (rc_mqtt_user()[0] != '\0') {
+    connected = g_mqtt.connect(g_mqtt_client_id, rc_mqtt_user(), rc_mqtt_pass(), lwt_topic, 0, true,
+                               "offline");
+  } else {
+    connected = g_mqtt.connect(g_mqtt_client_id, lwt_topic, 0, true, "offline");
+  }
 
   if (connected) {
     // Publish online status
@@ -296,7 +299,7 @@ bool mqtt_connect() {
     snprintf(
         discovery_payload, sizeof(discovery_payload),
         "{\"device_id\":\"%s\",\"ip\":\"%s\",\"version\":\"%s\",\"room\":\"%s\",\"uptime\":%lu}",
-        g_mqtt_client_id, ip_buf, FW_VERSION, ROOM_NAME, millis() / 1000);
+        g_mqtt_client_id, ip_buf, FW_VERSION, rc_room_name(), millis() / 1000);
 
     // Publish discovery (not retained - will clear on disconnect via LWT)
     g_mqtt.publish(discovery_topic, discovery_payload, false);
@@ -310,26 +313,28 @@ bool mqtt_connect() {
     DebugCommands::getInstance().setClientId(g_mqtt_client_id);
     DebugCommands::getInstance().begin();
 
-// Subscribe to outdoor weather data (alias topics)
-#ifdef MQTT_SUB_BASE
-    String outdoor_base = String(MQTT_SUB_BASE);
-    // Subscribe to alias topics for outdoor data
-    String sub_topics[] = {
-        outdoor_base + "/temp_f",          // Temperature in Fahrenheit
-        outdoor_base + "/pressure_hpa",    // Barometric pressure in hPa
-        outdoor_base + "/condition",       // Weather condition text
-        outdoor_base + "/condition_code",  // Weather condition code
-        // Legacy topics for backward compatibility
-        outdoor_base + "/temp",       // Temperature in Celsius
-        outdoor_base + "/pressure",   // Barometric pressure in hPa
-        outdoor_base + "/weather",    // Weather description
-        outdoor_base + "/weather_id"  // Weather ID
-    };
+    // Subscribe to outdoor weather data (alias topics). Skipped when no base
+    // topic is configured, which would otherwise subscribe to "/temp_f" and
+    // friends at the broker root.
+    if (rc_mqtt_sub_base()[0] != '\0') {
+      String outdoor_base = String(rc_mqtt_sub_base());
+      // Subscribe to alias topics for outdoor data
+      String sub_topics[] = {
+          outdoor_base + "/temp_f",          // Temperature in Fahrenheit
+          outdoor_base + "/pressure_hpa",    // Barometric pressure in hPa
+          outdoor_base + "/condition",       // Weather condition text
+          outdoor_base + "/condition_code",  // Weather condition code
+          // Legacy topics for backward compatibility
+          outdoor_base + "/temp",       // Temperature in Celsius
+          outdoor_base + "/pressure",   // Barometric pressure in hPa
+          outdoor_base + "/weather",    // Weather description
+          outdoor_base + "/weather_id"  // Weather ID
+      };
 
-    for (const String& topic : sub_topics) {
-      g_mqtt.subscribe(topic.c_str());
+      for (const String& topic : sub_topics) {
+        g_mqtt.subscribe(topic.c_str());
+      }
     }
-#endif
   }
 
   return connected;
@@ -376,7 +381,7 @@ void publish_device_status() {
            "\"%s\"}",
            mode, (unsigned long)sleep_interval, (unsigned long)dev_timeout_sec,
            (unsigned long)(millis() / 1000), bs.percent, (unsigned long)ESP.getFreeHeap(),
-           FW_VERSION, ROOM_NAME);
+           FW_VERSION, rc_room_name());
 
   g_mqtt.publish(topic_buf, payload, false);
   Serial.printf("[MQTT] Published device status: mode=%s, interval=%lus\n", mode,
