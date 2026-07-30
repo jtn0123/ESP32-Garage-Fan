@@ -9,10 +9,24 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
+
+# Repo-relative paths of everything gen_ui.py writes; with --output they are
+# mirrored under the given directory instead of written into the repo.
+GENERATED_REL_PATHS = [
+    "firmware/arduino/src/ui_generated.h",
+    "firmware/arduino/src/ui_generated.cpp",
+    "firmware/arduino/src/ui_ops_generated.h",
+    "firmware/arduino/src/ui_ops_generated.cpp",
+    "firmware/arduino/src/display_layout.h",
+    "config/display_geometry.json",
+    "web/sim/ui_generated.js",
+    "web/sim/geometry.json",
+]
 
 
 def get_gen_ui_script():
@@ -43,23 +57,84 @@ def create_test_ui_spec(operations: List[Dict[str, Any]]) -> str:
         return f.name
 
 
-def run_gen_ui(spec_file: str, output_dir: str) -> bool:
-    """Run gen_ui.py script and check output"""
+def run_gen_ui(spec_file: str, output_dir: str) -> Optional[subprocess.CompletedProcess]:
+    """Run gen_ui.py with --spec/--output; None if the script is missing."""
     script = get_gen_ui_script()
     if not script.exists():
-        # Script might not exist, return True to skip
-        return True
+        return None
 
-    try:
-        result = subprocess.run(
-            ["python3", str(script), "--spec", spec_file, "--output", output_dir],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    return subprocess.run(
+        [sys.executable, str(script), "--spec", spec_file, "--output", output_dir],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def write_minimal_ui_spec(path: Path, rect_name: str = "TESTBOX") -> Path:
+    """Write a minimal spec that passes gen_ui.py's validation."""
+    spec = {
+        "schema": "ui-spec@1",
+        "canvas": {"w": 250, "h": 122},
+        "fonts": {"tokens": {"big": {"px": 22}, "label": {"px": 11}, "small": {"px": 10}}},
+        "rects": {rect_name: [0, 0, 100, 20]},
+        "components": {"header": [{"op": "text", "rect": rect_name, "text": "hi", "x": 0, "y": 0}]},
+        "variants": {"v1": ["header"]},
+    }
+    path.write_text(json.dumps(spec))
+    return path
+
+
+class TestArgumentHandling:
+    """gen_ui.py must honor --spec/--output instead of silently writing in place."""
+
+    def test_output_redirects_all_outputs(self, tmp_path):
+        out_dir = tmp_path / "out"
+        result = run_gen_ui(str(get_ui_spec_path()), str(out_dir))
+        if result is None:
+            pytest.skip("gen_ui.py not found")
+        assert result.returncode == 0, result.stderr or result.stdout
+        for rel in GENERATED_REL_PATHS:
+            assert (out_dir / rel).exists(), f"missing redirected output {rel}"
+
+    def test_output_redirect_leaves_repo_untouched(self, tmp_path):
+        repo = Path(__file__).parent.parent
+        before = {
+            rel: (repo / rel).read_bytes() for rel in GENERATED_REL_PATHS if (repo / rel).exists()
+        }
+        result = run_gen_ui(str(get_ui_spec_path()), str(tmp_path / "out"))
+        if result is None:
+            pytest.skip("gen_ui.py not found")
+        assert result.returncode == 0, result.stderr or result.stdout
+        for rel, content in before.items():
+            assert (repo / rel).read_bytes() == content, f"redirected run modified repo file {rel}"
+
+    def test_spec_overrides_input(self, tmp_path):
+        spec_path = write_minimal_ui_spec(tmp_path / "ui_spec.json", rect_name="TESTBOX")
+        out_dir = tmp_path / "out"
+        result = run_gen_ui(str(spec_path), str(out_dir))
+        if result is None:
+            pytest.skip("gen_ui.py not found")
+        assert result.returncode == 0, result.stderr or result.stdout
+        layout = (out_dir / "firmware/arduino/src/display_layout.h").read_text()
+        assert "RECT_TESTBOX" in layout, "--spec input was not used for generation"
+        js = (out_dir / "web/sim/ui_generated.js").read_text()
+        assert "TESTBOX" in js
+
+    def test_regeneration_is_deterministic(self, tmp_path):
+        """Two runs at the same commit must produce identical bytes (no volatile
+        git-describe stamp in UI_FW_VERSION unless --git-version is passed)."""
+        results = [run_gen_ui(str(get_ui_spec_path()), str(tmp_path / f"out{i}")) for i in (1, 2)]
+        if results[0] is None:
+            pytest.skip("gen_ui.py not found")
+        for result in results:
+            assert result.returncode == 0, result.stderr or result.stdout
+        for rel in GENERATED_REL_PATHS:
+            a = (tmp_path / "out1" / rel).read_bytes()
+            b = (tmp_path / "out2" / rel).read_bytes()
+            assert a == b, f"{rel} differs between identical runs"
+        js = (tmp_path / "out1" / "web/sim/ui_generated.js").read_text()
+        assert re.search(r'window\.UI_FW_VERSION = "[^"]+";', js)
 
 
 class TestUISpecStructure:

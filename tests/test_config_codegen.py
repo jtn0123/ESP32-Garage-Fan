@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 
@@ -15,18 +16,24 @@ def _read(path: str) -> str:
 
 
 def test_layout_header_is_deterministic(tmp_path):
-    # Ensure running the generator twice yields identical bytes
-    gen = ["python3", os.path.join(ROOT, "scripts", "gen_layout_header.py")]
-    r1 = _run(gen)
+    # Ensure running the generator twice yields identical bytes. Write to
+    # tmp_path: the repo's display_layout.h is owned by gen_ui.py (a different
+    # format), so generating in place would dirty the working tree.
+    repo_header = os.path.join(ROOT, "firmware", "arduino", "src", "display_layout.h")
+    repo_header_before = _read(repo_header) if os.path.exists(repo_header) else None
+    gen = [sys.executable, os.path.join(ROOT, "scripts", "gen_layout_header.py")]
+    out1 = tmp_path / "display_layout_1.h"
+    out2 = tmp_path / "display_layout_2.h"
+    r1 = _run(gen + ["--out", str(out1)])
     assert r1.returncode == 0, r1.stdout + r1.stderr
-    out_path = os.path.join(ROOT, "firmware", "arduino", "src", "display_layout.h")
-    content1 = _read(out_path)
-
-    r2 = _run(gen)
+    r2 = _run(gen + ["--out", str(out2)])
     assert r2.returncode == 0, r2.stdout + r2.stderr
-    content2 = _read(out_path)
 
-    assert content1 == content2
+    assert out1.read_text() == out2.read_text()
+
+    # Regression guard: the redirected runs must not touch the repo's header
+    if repo_header_before is not None:
+        assert _read(repo_header) == repo_header_before
 
 
 def _gen_device_header_with_env(env_overrides: dict[str, str]) -> str:
