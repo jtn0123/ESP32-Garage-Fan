@@ -7,6 +7,7 @@ so the device permanently drew "-- hPa" in OUT_PRESSURE. These tests pin every h
 the guard: spec -> gen_ui.py -> UiOpHeader.s1 -> the renderers.
 """
 
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -93,6 +94,53 @@ def test_committed_generated_ops_are_up_to_date(tmp_path):
     for path in (OPS_CPP, OPS_H):
         fresh = tmp_path / path.relative_to(ROOT)
         assert fresh.read_text() == path.read_text(), f"{path.name} is stale; rerun gen_ui.py"
+
+
+def load_gen_ui_module():
+    """Import scripts/gen_ui.py as a fresh module instance, mirroring
+    tests/test_gen_ui_pipeline.py: in-process calls let `pytest --cov=scripts`
+    measure the generator, which a subprocess run cannot."""
+    spec = importlib.util.spec_from_file_location("gen_ui_guards_under_test", GEN_UI)
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def test_guard_field_parses_and_rejects_in_process():
+    """Same contract as the subprocess test below, called directly so the parse and
+    reject arms are measured."""
+    gen_ui = load_gen_ui_module()
+    assert gen_ui.guard_field({"op": "text"}, "body") is None
+    assert gen_ui.guard_field({"op": "text", "when": "has(outside_pressure_hpa)"}, "body") == (
+        "outside_pressure_hpa"
+    )
+    # Whitespace inside has() is tolerated; the field name is what reaches the device.
+    assert gen_ui.guard_field({"op": "text", "when": " has( pressure_hpa ) "}, "body") == (
+        "pressure_hpa"
+    )
+    for bad in ("!has(x)", "has()", "x", "has(x) and has(y)", ""):
+        with pytest.raises(SystemExit):
+            gen_ui.guard_field({"op": "text", "when": bad}, "body")
+
+
+def test_emitted_ops_table_carries_guard_in_process():
+    """emit_fw_ops_cpp() is where the guard reaches UiOpHeader.s1."""
+    gen_ui = load_gen_ui_module()
+    spec = {
+        "rects": {"BOX": [0, 0, 100, 20]},
+        "fonts": {"tokens": {"small": {"px": 10}}},
+        "components": {
+            "body": [
+                {"op": "text", "rect": "BOX", "text": "a", "when": "has(some_field)"},
+                {"op": "text", "rect": "BOX", "text": "b"},
+            ]
+        },
+        "variants": {"v1": ["body"]},
+    }
+    cpp = gen_ui.emit_fw_ops_cpp(spec)
+    assert '"a", "some_field" },' in cpp, "guarded op must carry its field in s1"
+    assert '"b", NULL },' in cpp, "unguarded op must leave s1 NULL"
+    assert "when: has(" in gen_ui.emit_fw_ops_header(spec)
 
 
 def test_gen_ui_rejects_unsupported_when_clause(tmp_path):

@@ -60,32 +60,41 @@ def prescripts_in_ini() -> list[str]:
 
 
 def make_fake_repo(tmp_path: Path) -> Path:
-    """A minimal repo copy so generators write there instead of into the real tree."""
+    """A throwaway repo layout the generators write into instead of the real tree.
+
+    Only the inputs are copied. The generators themselves run from their real
+    location (see run_as_scons_prescript) so `pytest --cov=scripts` attributes the
+    lines it executes to scripts/, not to a temporary copy.
+    """
     fake = tmp_path / "repo"
     (fake / "scripts").mkdir(parents=True)
     (fake / "firmware" / "arduino" / "src").mkdir(parents=True)
     (fake / "config").mkdir(parents=True)
     for rel in FIXTURE_FILES:
         shutil.copy2(ROOT / rel, fake / rel)
-    for name in PRESCRIPTS:
-        shutil.copy2(ROOT / "scripts" / name, fake / "scripts" / name)
     return fake
 
 
-def run_as_scons_prescript(script: Path, cwd: Path) -> None:
-    """Execute `script` the way SCons executes an SConscript.
+def run_as_scons_prescript(name: str, cwd: Path, module_name: str = "SCons.Script") -> None:
+    """Execute scripts/<name> the way SCons executes an SConscript.
 
     No __file__ in the globals, __name__ set to "SCons.Script", cwd left at the
     PlatformIO project directory. SCons also prepends the script's directory to
     sys.path; that detail does not affect these generators.
+
+    The real scripts/<name> is compiled under its real path: without __file__ the
+    generators derive the repo root from the cwd, so passing a cwd inside the
+    throwaway repo is what keeps writes out of the real tree (asserted by
+    test_prescript_resolves_repo_root_without_file). Compiling the real path rather
+    than a copy is what makes these executed lines count toward coverage.
     """
-    source = script.read_text()
-    globals_dict = {"__name__": "SCons.Script", "__builtins__": __builtins__}
+    script = ROOT / "scripts" / name
+    globals_dict = {"__name__": module_name, "__builtins__": __builtins__}
     assert "__file__" not in globals_dict
     prev = os.getcwd()
     os.chdir(cwd)
     try:
-        exec(compile(source, str(script), "exec"), globals_dict)  # noqa: S102
+        exec(compile(script.read_text(), str(script), "exec"), globals_dict)  # noqa: S102
     finally:
         os.chdir(prev)
 
@@ -97,7 +106,7 @@ def test_prescript_generates_its_output_under_scons(name, produces, tmp_path):
     target = fake / produces
     assert not target.exists()
 
-    run_as_scons_prescript(fake / "scripts" / name, cwd=fake / "firmware" / "arduino")
+    run_as_scons_prescript(name, cwd=fake / "firmware" / "arduino")
 
     assert target.exists(), f"{name} produced no {produces} when run as a pre-script"
     assert target.read_text().strip(), f"{name} wrote an empty {produces}"
@@ -110,7 +119,7 @@ def test_prescript_resolves_repo_root_without_file(name, produces, tmp_path):
     real = ROOT / produces
     before = real.read_bytes() if real.exists() else None
 
-    run_as_scons_prescript(fake / "scripts" / name, cwd=fake / "firmware" / "arduino")
+    run_as_scons_prescript(name, cwd=fake / "firmware" / "arduino")
 
     # Assert it ran, so this cannot pass just because the generator did nothing.
     assert (fake / produces).exists(), f"{name} produced no {produces}"
@@ -149,13 +158,20 @@ def test_importing_a_generator_writes_nothing(name, tmp_path):
     """Tests import these modules to call individual functions; that must stay
     side-effect free, or a plain pytest run regenerates committed files in place."""
     fake = make_fake_repo(tmp_path)
-    script = fake / "scripts" / name
-    globals_dict = {"__name__": "some_test_module", "__builtins__": __builtins__}
-    prev = os.getcwd()
-    os.chdir(fake / "firmware" / "arduino")
-    try:
-        exec(compile(script.read_text(), str(script), "exec"), globals_dict)  # noqa: S102
-    finally:
-        os.chdir(prev)
+    run_as_scons_prescript(name, cwd=fake / "firmware" / "arduino", module_name="a_test_module")
     produced = fake / PRESCRIPTS[name]
     assert not produced.exists(), f"importing scripts/{name} wrote {PRESCRIPTS[name]}"
+
+
+def test_repo_root_reports_where_it_looked_when_outside_a_checkout(tmp_path, monkeypatch):
+    """With no __file__ and a cwd outside any checkout there is nothing to fall back
+    on, so fail with the path searched rather than writing to a guessed root."""
+    empty = tmp_path / "not-a-checkout"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
+    source = (ROOT / "scripts" / "gen_device_header.py").read_text()
+    globals_dict = {"__name__": "a_test_module", "__builtins__": __builtins__}
+    with pytest.raises(RuntimeError, match="cannot locate repo root"):
+        exec(  # noqa: S102
+            compile(source, str(ROOT / "scripts" / "gen_device_header.py"), "exec"), globals_dict
+        )
