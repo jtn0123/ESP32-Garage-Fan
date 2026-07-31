@@ -194,25 +194,29 @@ def test_header_time_right_aligned_and_name_truncated():
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
             page.wait_for_timeout(300)
 
-            # Compute actual time text placement as in sim.js and probe a pixel near its middle
+            # v3 header is an inverted band: glyphs are WHITE knocked out of
+            # solid black, so the polarity of both probes flips relative to the
+            # pre-v3 expectations this test originally encoded.
             time_metrics = page.evaluate(_TIME_METRICS_JS)
-            # Probe a small 3x3 neighborhood around the measured center for any black pixel
+            # Probe a small 3x3 neighborhood around the measured center for any
+            # white (glyph) pixel — proves the stamp actually rendered.
             cx = int(time_metrics["x"] + max(1, time_metrics["w"] // 2))
             cy = int(time_metrics["y"] + 2)
-            any_black = False
+            any_glyph = False
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
                     r1, g1, b1, a1 = page.evaluate(_CANVAS_RGBA_JS, [cx + dx, cy + dy])
-                    if (r1, g1, b1) == (0, 0, 0):
-                        any_black = True
+                    if (r1, g1, b1) == (255, 255, 255):
+                        any_glyph = True
                         break
-                if any_black:
+                if any_glyph:
                     break
-            assert any_black
-            # Just left of HEADER_TIME rect should remain white to confirm right-alignment space
+            assert any_glyph
+            # Just left of the stamp's rect must be solid band (no glyph spill),
+            # confirming the alignment gap — black under the inverted header.
             hx, hy, hw, hh = time_metrics["rt"]
             r0, g0, b0, a0 = page.evaluate(_CANVAS_RGBA_JS, [hx - 2, hy + 2])
-            assert (r0, g0, b0) == (255, 255, 255)
+            assert (r0, g0, b0) == (0, 0, 0)
             browser.close()
     finally:
         server.terminate()

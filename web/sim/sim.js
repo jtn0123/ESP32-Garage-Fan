@@ -2300,41 +2300,28 @@
               break;
             }
             case 'tempGroupCentered': {
+              // Big temperature + units, centered in the op's rect. The metrics
+              // key comes from the op's value template (inside_temp_f /
+              // outside_temp_f), not from rect-name matching - variants can name
+              // rects anything. (INNER/BADGE rect lookups removed: no spec has
+              // ever defined them, so those branches never ran.)
               const r = rects[op.rect]; if (!r) break;
-              // Render number + units centered, prefer INNER area for v2 variants
-              const isV2 = (typeof window !== 'undefined' && true /* always v2 */);
-              // Use standard font size for v2
               const fontSize = SIZE_BIG;
               ctx.font = `bold ${fontSize}px ${FONT_STACK}`; ctx.textBaseline='top';
-              let s = String((op.value||'').toString().replace(/[{}]/g,''));
-              s = String(data[s] ?? '');
-              const inner = isV2 ? (op.rect === 'INSIDE_TEMP' ? rects.INSIDE_TEMP_INNER : (op.rect === 'OUT_TEMP' ? rects.OUT_TEMP_INNER : null)) : null;
-              const area = inner || r;
-              const areaX = area[0], areaY = area[1], areaW = area[2];
-              const badge = isV2 ? (op.rect === 'INSIDE_TEMP' ? rects.INSIDE_TEMP_BADGE : (op.rect === 'OUT_TEMP' ? rects.OUT_TEMP_BADGE : null)) : null;
-              const unitsW = badge ? badge[2] : 14;
+              const field = String(op.value||'').replace(/[{}]/g,'');
+              const s = String(data[field] ?? '');
+              const unitsW = 14;
               const tw = ctx.measureText(s).width;
-              const totalW = Math.min(Math.max(0,areaW-2), tw + unitsW);
-              const left = Math.round(areaX + Math.max(0, Math.floor((areaW - totalW)/2)));
-              // Center text vertically in the area
-              const areaH = area[3] || 28;
-              const yTop = Math.round(areaY + Math.max(0, Math.floor((areaH - fontSize) / 2)));
-              // Track the inner region for validation
-              const innerRegion = inner ? (op.rect === 'INSIDE_TEMP' ? 'INSIDE_TEMP_INNER' : 'OUT_TEMP_INNER') : op.rect;
-              text(left, yTop, s, fontSize, 'bold', innerRegion);
-              if (badge){
-                // Don't draw border around badge - just the text
-                text(badge[0] + 2, badge[1] + Math.max(0, Math.floor((badge[3]-10)/2)), '°F', 10);
-              } else {
-                // Adjust degree and F symbols to align with centered temperature
-                const unitSize = 12;
-                const unitYOffset = 3;
-                text(left + tw + 2, yTop + unitYOffset, '°', unitSize);
-                text(left + tw + 8, yTop + unitYOffset, 'F', unitSize);
-              }
-              // Prefix match so v3 rects (INSIDE_TEMP_V3, ...) export metrics too.
-              const key = String(op.rect||'').startsWith('INSIDE_TEMP') ? 'inside' : (String(op.rect||'').startsWith('OUT_TEMP') ? 'outside' : null);
-              if (key){ window.__tempMetrics[key] = { rect: { x: areaX, y: areaY, w: areaW, h: (area[3]||0) }, contentLeft: left, totalW: (tw + unitsW) }; }
+              const totalW = Math.min(Math.max(0, r[2]-2), tw + unitsW);
+              const left = Math.round(r[0] + Math.max(0, Math.floor((r[2] - totalW)/2)));
+              const yTop = Math.round(r[1] + Math.max(0, Math.floor(((r[3]||28) - fontSize) / 2)));
+              text(left, yTop, s, fontSize, 'bold', op.rect);
+              const unitSize = 12, unitYOffset = 3;
+              text(left + tw + 2, yTop + unitYOffset, '°', unitSize);
+              text(left + tw + 8, yTop + unitYOffset, 'F', unitSize);
+              const key = field.startsWith('inside') ? 'inside'
+                        : (field.startsWith('outside') ? 'outside' : null);
+              if (key){ window.__tempMetrics[key] = { rect: { x: r[0], y: r[1], w: r[2], h: (r[3]||0) }, contentLeft: left, totalW: (tw + unitsW) }; }
               break;
             }
             case 'textCenteredIn': {
@@ -2358,129 +2345,41 @@
               break;
             }
             case 'iconIn': {
+              // Icon only - the condition label is always its own text op, in
+              // every variant, matching the firmware exactly. The old "legacy"
+              // icon+label fallback and its isV2 gating produced two real bugs
+              // (doubled labels) and served no spec: deleted.
               const r = rects[op.rect]; if (!r) break;
-              // Track that WEATHER_ICON has rendered content
-              if (op.rect === 'WEATHER_ICON' && validationEnabled) {
-                renderedContent['WEATHER_ICON'] = {
-                  text: 'weather_icon',
-                  fontSize: 0,
+              if (validationEnabled) {
+                renderedContent[op.rect] = {
+                  text: 'weather_icon', fontSize: 0,
                   actualBounds: { x: r[0], y: r[1], width: r[2], height: r[3] }
                 };
               }
-              let barX = r[0], barY = r[1], barW = r[2], barH = r[3];
-              const isV2 = (function(){
-                try{
-                  const mode = (typeof window !== 'undefined' && window.__specMode) ? String(window.__specMode) : '';
-                  const variant = (typeof window !== 'undefined' && window.QS) ? (window.QS.get('variant') || '') : '';
-                  const defVar = (typeof window !== 'undefined' && window.UI_SPEC && window.UI_SPEC.defaultVariant) ? String(window.UI_SPEC.defaultVariant) : '';
-                  return mode.startsWith('v2') || variant.startsWith('v2') || defVar.startsWith('v2');
-                }catch(_){ return false; }
-              })();
-              // For WEATHER_ICON-family regions: icon only, label drawn by its
-              // own text op (matches firmware). Prefix match so variant rects
-              // (WEATHER_ICON_V3, ...) get the same treatment instead of the
-              // legacy icon+label path, which double-printed the condition.
-              let iconW, iconH, startX, startY;
-              // Unconditional: the old isV2 gate keyed off defaultVariant and
-              // broke the moment the default became v3, dropping the icon into
-              // the legacy icon+label path (doubled condition text).
-              if (String(op.rect || '').startsWith('WEATHER_ICON')) {
-                // Clear the icon area, clamped to the frame interior so the
-                // 1px display border (x=0/249, y=0/121) is never erased.
-                // The firmware does no clear at all here (full refresh starts
-                // from a blank buffer), so anything we wipe must stay inside.
-                const clearX0 = Math.max(1, barX - 2);
-                const clearY0 = Math.max(1, barY - 2);
-                const clearX1 = Math.min(WIDTH - 1, barX + barW + 2);
-                const clearY1 = Math.min(HEIGHT - 1, barY + barH + 2);
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(clearX0, clearY0, Math.max(0, clearX1 - clearX0), Math.max(0, clearY1 - clearY0));
-                ctx.strokeStyle = '#000'; // Reset for icon drawing
-                // Inset and clip to avoid any boundary overlap/cutoff
-                const inset = 2;
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(barX + inset, barY + inset, Math.max(0, barW - inset*2), Math.max(0, barH - inset*2));
-                ctx.clip();
-                // Fill the rect (minus inset) with the icon, centered within the inner box
-                iconW = Math.max(14, (barW - inset*2));
-                iconH = Math.max(12, (barH - inset*2));
-                startX = barX + inset + Math.max(0, Math.floor(((barW - inset*2) - iconW)/2));
-                startY = barY + inset + Math.max(0, Math.floor(((barH - inset*2) - iconH)/2));
-                // Draw icon only (no surrounding border)
-                // Center circular icons inside the inner box
-                const iconCx = startX + Math.floor(iconW/2);
-                const iconCy = startY + Math.floor(iconH/2);
-                ctx.strokeStyle = '#000'; ctx.fillStyle = '#000';
-                const category = classifyWeather(data.weather);
-                // Try baked bitmap first (matches device), then SVG, then glyph
-                if (!tryDrawBakedBitmap(category, startX, startY, iconW, iconH)){
-                  const drewSvg = tryDrawMdiIcon(category, startX, startY, iconW, iconH);
-                  if (!drewSvg) drawWeatherGlyph(category, startX, startY, iconW, iconH);
-                }
-                // The weather label is drawn by the footer_split textCenteredIn
-                // op on FOOTER_WEATHER (same as firmware) — not here.
-                ctx.restore();
-                break;
-              }
-              // Legacy/other behavior unchanged
-              // Use the actual WEATHER_ICON rect coordinates for rendering
-              const fpx2 = ((fonts['small']||{}).px) || pxSmall;
-              let barX2 = r[0], barY2 = r[1], barW2 = r[2], barH2 = r[3];
-              // Clear border for WEATHER_ICON in legacy path too
-              if (op.rect === 'WEATHER_ICON') {
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(barX2 - 2, barY2 - 2, barW2 + 4, barH2 + 4);
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(barX2, barY2, barW2, barH2);
-                ctx.strokeStyle = '#000';
-              }
-              if (op.rect !== 'WEATHER_ICON') {
-                barX2 = 130; barY2 = 95; barW2 = r[2]; barH2 = Math.min(24, Math.max(12, r[3]));
-                if (typeof window !== 'undefined' && window.__specMode === 'v2_grid' && rects.FOOTER_WEATHER){
-                  const fr = rects.FOOTER_WEATHER;
-                  barW2 = fr[2];
-                  barH2 = Math.min(22, Math.max(12, fr[3] - 4));
-                  barX2 = fr[0];
-                  barY2 = fr[1] + Math.max(0, Math.floor((fr[3] - barH2)/2));
-                }
-              }
-              // Centered icon+text path for legacy
-              if (barW2 <= 0 || barH2 <= 0) break;
-              let iconW2 = Math.max(12, Math.min(26, barW2 - 4));
-              let iconH2 = Math.max(12, Math.min(22, barH2 - 4));
-              const gap2 = Math.max(4, Math.min(10, Math.floor(barW2 * 0.10)));
-              const label2 = shortConditionLabel(data.weather || 'cloudy');
-              ctx.font = `${fpx2}px ${FONT_STACK}`; ctx.textBaseline='top';
-              const textW2 = ctx.measureText(label2).width;
-              const totalW2 = iconW2 + gap2 + textW2;
-              const startX2 = barX2 + Math.max(0, Math.floor((barW2 - totalW2)/2));
-              const iconCx2 = startX2 + Math.floor(iconW2/2);
-              const iconCy2 = barY2 + Math.floor(iconH2/2);
+              const barX = r[0], barY = r[1], barW = r[2], barH = r[3];
+              // Clear the icon area, clamped inside the 1px display border.
+              const clearX0 = Math.max(1, barX - 2);
+              const clearY0 = Math.max(1, barY - 2);
+              const clearX1 = Math.min(WIDTH - 1, barX + barW + 2);
+              const clearY1 = Math.min(HEIGHT - 1, barY + barH + 2);
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(clearX0, clearY0, Math.max(0, clearX1 - clearX0), Math.max(0, clearY1 - clearY0));
+              const inset = 2;
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(barX + inset, barY + inset, Math.max(0, barW - inset*2), Math.max(0, barH - inset*2));
+              ctx.clip();
+              const iconW = Math.max(14, (barW - inset*2));
+              const iconH = Math.max(12, (barH - inset*2));
+              const startX = barX + inset;
+              const startY = barY + inset;
               ctx.strokeStyle = '#000'; ctx.fillStyle = '#000';
-              const category2 = classifyWeather(data.weather);
-              if (!tryDrawBakedBitmap(category2, startX2, barY2, iconW2, iconH2)){
-                const drewSvg2 = tryDrawMdiIcon(category2, startX2, barY2, iconW2, iconH2);
-                if (!drewSvg2) drawWeatherGlyph(category2, startX2, barY2, iconW2, iconH2);
+              const category = classifyWeather(data.weather);
+              if (!tryDrawBakedBitmap(category, startX, startY, iconW, iconH)){
+                const drewSvg = tryDrawMdiIcon(category, startX, startY, iconW, iconH);
+                if (!drewSvg) drawWeatherGlyph(category, startX, startY, iconW, iconH);
               }
-              const labelTop2 = barY2 + Math.max(0, Math.floor((iconH2 - fpx2)/2)) + 1;
-              text(startX2 + iconW2 + gap2, labelTop2, label2, fpx2);
-              window.__layoutMetrics.weather = {
-                bar: { x: barX2, w: barW2, y: barY2 },
-                iconBox: { x: startX2, y: barY2, w: iconW2, h: iconH2 },
-                totalW: iconW2 + gap2 + ctx.measureText(label2).width
-              };
-              break;
-            }
-            case 'shortCondition': {
-              const r = rects[op.rect]; if (!r) break;
-              // v2 doesn't need duplicate label
-              if (typeof window !== 'undefined' && true /* always v2 */){ break; }
-              const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
-              const s = String((window.lastData && window.lastData.weather) || 'Cloudy').split(/[\s-]+/)[0];
-              const ty = r[1] + Math.max(0, Math.floor((r[3] - fpx)/2));
-              text(r[0] + (op.xOffset||0), ty, s, fpx);
+              ctx.restore();
               break;
             }
             case 'batteryGlyph': {
@@ -2565,6 +2464,30 @@
     }
     return {ti,to,ri,ro};
   })();
+  // Variant picker (C2): populated from the spec so new variants appear
+  // automatically; selection overrides for the session and updates the URL.
+  try {
+    const sel = document.getElementById('variantSel');
+    if (sel && window.UI_SPEC && window.UI_SPEC.variants) {
+      const names = Object.keys(window.UI_SPEC.variants);
+      const current = QS.get('variant') || window.UI_SPEC.defaultVariant || names[0];
+      for (const n of names) {
+        const o = document.createElement('option');
+        o.value = n; o.textContent = n + (n === window.UI_SPEC.defaultVariant ? ' (default)' : '');
+        if (n === current) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => {
+        window.__variantOverride = sel.value;
+        const url = new URL(window.location.href);
+        url.searchParams.set('variant', sel.value);
+        window.history.replaceState(null, '', url.toString());
+        if (typeof window.draw === 'function') window.draw();
+        else if (typeof draw === 'function') draw();
+      });
+    }
+  } catch(e) { console.warn('variant picker init failed', e); }
+
   const DEFAULTS = {
     room_name: 'Office',
     hist_temp_in: __demoHist.ti, hist_temp_out: __demoHist.to,
@@ -2684,8 +2607,9 @@
     }
     try{ if (typeof window !== 'undefined') window.lastData = lastData; }catch(e){}
     // Render via spec only
-    const variant = QS.get('variant') || (typeof window!=='undefined' && window.UI_SPEC && window.UI_SPEC.defaultVariant) || 'v2';
-    console.log('Using variant:', variant);
+    const variant = (typeof window!=='undefined' && window.__variantOverride)
+      || QS.get('variant')
+      || (typeof window!=='undefined' && window.UI_SPEC && window.UI_SPEC.defaultVariant) || 'v2';
     
     ctx.fillStyle = '#fff'; ctx.fillRect(0,0,WIDTH,HEIGHT);
     
