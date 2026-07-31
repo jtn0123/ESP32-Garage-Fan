@@ -52,10 +52,12 @@ current-reading chips + `frame` op, owner request, `4a75528` fw 1.16.
 A3+G1 `75f05dd` fw 1.18 (allocation-free render path; spec_render.h pure
 header + native_spec_render env, 8 tests — first slice of D2).
 
+**Done 2026-07-31 (cont. 3):** R4 + task #11 `5a9a727` fw 1.19 (outline icon
+pipeline: convert_icons.py --outline, 28×28, sim draws the same baked frames).
+
 **Open:** A2 · B2 · D2 (sparkline-scaling extraction + spec key-coverage
 assertion remain) · D3 (history_ring done; storage.cpp CSV parse/rotation
-still .cpp-bound) · E2 (optional TLS only) · F1–F3 · R4 (icon unification,
-incl. task #11 filled-blob icon).
+still .cpp-bound) · E2 (optional TLS only) · F1–F3.
 
 Post-execution regrade snapshot (honest read, not re-audited): D C+→**B+**,
 C C+→**B**, H B→**A−**, I B+→**A−**; overall B→**B+**. Section grades below
@@ -350,7 +352,7 @@ effort and rationale. Execute IDs work here too (e.g. `R1`).
 | R1 | Partial e-ink refresh (SSD1680 + SmartRefresh) | **A** | L | ✓ done fw 1.15 `0bcc057` |
 | R2 | CSV backfill of history ring (=B1) | **A−** | M | ✓ done fw 1.13 `4169d27` |
 | R3 | USB mass-storage: history as a flash drive | **B+** | M | ✓ done fw 1.14 `f7238fc` (owner plug-in check pending) |
-| R4 | Outline icon set unification | **B** | M | Open — next with icon task #11 |
+| R4 | Outline icon set unification | **B** | M | ✓ done fw 1.19 `5a9a727` (+ task #11) |
 | R5 | STEMMA QT plug-in sensor (CO₂ etc.) | **B−** | S+$ | Skipped (owner) |
 | R6 | Capacitive touch on header pads | **C** | M | Skipped (owner) |
 
