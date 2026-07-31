@@ -66,3 +66,16 @@ inline bool merge_bool(bool* dst, bool present, bool src) {
   *dst = src;
   return true;
 }
+
+// Floats can be legitimately negative or zero, so like merge_bool the caller
+// decides presence; unlike the integer helpers there is no sentinel that could
+// stand in for "absent". Out-of-range values are rejected rather than clamped.
+inline bool merge_float(float* dst, bool present, double src, double min_val, double max_val) {
+  if (!dst || !present)
+    return false;
+  if (src < min_val || src > max_val)
+    return false;
+
+  *dst = static_cast<float>(src);
+  return true;
+}

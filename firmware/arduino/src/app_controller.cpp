@@ -17,17 +17,29 @@
 #include "state_manager.h"
 #include "metrics_diagnostics.h"
 #include "display_manager.h"
+#if USE_DISPLAY
+#include "display_renderer.h"
+#endif
 #include "crash_handler.h"
 #include "memory_tracking.h"
 #include "mqtt_batcher.h"
 #include "profiling.h"
 #include "ota_manager.h"
-#include "sd_store.h"
+#include "storage.h"
+#include "logging/logger.h"
+#include "history_ring.h"
+#include "usb_msc.h"
 
 // Diagnostic test functions (from diagnostic_test.cpp)
 extern void diagnostic_test_init();
 extern void diagnostic_test_loop();
 extern void show_boot_stage(int stage);
+extern void pixel_flash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms);
+extern void pixel_tick();
+
+// Set from the MQTT cmd/page handler; consumed in app_loop.
+static volatile bool g_page_flip_request = false;
+void request_page_flip() { g_page_flip_request = true; }
 
 // Track wake time for phase management
 static uint32_t g_wake_time_ms = 0;
@@ -60,11 +72,19 @@ static float g_drawn_outside_tempC = NAN;
 // Cadence for uptime accounting, the NVS commit and the retention sweep.
 #define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
 
-static void record_sample_to_sd();
 #if USE_DISPLAY
 static void maybe_refresh_display();
 #endif
 #endif  // ALWAYS_ON
+
+// History is written by both builds: the deep-sleep node is the one whose data
+// nobody can retrieve after the fact, so a local CSV is worth more there, not
+// less. The always-on loop calls this once per sample interval; the deep-sleep
+// build calls it once per wake, which is the same thing.
+static void record_sample_to_storage();
+#if FEATURE_STORAGE && !ALWAYS_ON
+static void maybe_prune_history();
+#endif
 
 // mDNS/OTA hostname. Derived unconditionally during setup rather than inside the
 // WiFi-connected branch: if WiFi is down at boot and only comes up later, the
@@ -78,24 +98,60 @@ static void derive_hostname() {
   snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
 }
 
+// Publish the retained Home Assistant discovery configs, once per boot. Split
+// from the connect path because MQTT can come up either during setup or — after
+// a power-outage boot race — from the link-check loop, and whichever happens
+// first should publish. Without this call HA never auto-creates the entities:
+// the only other caller of ha_discovery_publish_all() was net_init_and_connect(),
+// which nothing invokes.
+static void publish_ha_discovery_once() {
+  static bool s_published = false;
+  if (s_published || !mqtt_is_connected())
+    return;
+  s_published = true;
+  net_publish_ha_discovery();
+  Serial.println("[NET] HA discovery published");
+}
+
 // Bring up mDNS and the OTA listener. Safe to call repeatedly -- ota_begin()
 // returns immediately once running -- so callers can just retry while WiFi is up.
 static void start_network_services() {
   if (!wifi_is_connected())
     return;
 
-  if (MDNS.begin(g_hostname)) {
-    Serial.printf("[NET] mDNS started: %s.local\n", g_hostname);
-    MDNS.addService("espsensor", "tcp", 80);
-    MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
-    MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
-  } else {
-    Serial.println("[NET] mDNS failed to start");
+  // mDNS success is tracked on its own rather than inferred from OTA state: the
+  // old guard (`!ota_is_active()`) meant a boot-time mDNS failure became
+  // permanent the moment OTA came up, and <room>.local never resolved again.
+  // Failures after the first are retried silently -- at a 30 s cadence a
+  // persistent failure would otherwise print 2880 lines a day.
+  static bool s_mdns_ok = false;
+  static bool s_mdns_fail_logged = false;
+  if (!s_mdns_ok) {
+    if (MDNS.begin(g_hostname)) {
+      s_mdns_ok = true;
+      Serial.printf("[NET] mDNS started: %s.local\n", g_hostname);
+      MDNS.addService("espsensor", "tcp", 80);
+      MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
+      MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
+    } else if (!s_mdns_fail_logged) {
+      s_mdns_fail_logged = true;
+      Serial.println("[NET] mDNS failed to start (will keep retrying quietly)");
+    }
   }
 
   // After mDNS, so the OTA service record lands in the responder set up above
   // instead of ArduinoOTA re-initialising mDNS and discarding it.
   ota_begin(g_hostname);
+
+#if ALWAYS_ON
+  // Modem sleep between DTIM beacons. The radio at full power is the largest
+  // single heat source on the board; with it duty-cycled, MQTT and OTA still
+  // work — packets just wait for the next beacon (tens of ms). Set here rather
+  // than at connect time because this function is the "network is up" hook and
+  // is safe to call repeatedly.
+  wifi_configure_power_save(true);
+  wifi_reduce_tx_power();
+#endif
 }
 
 uint32_t get_wake_time_ms() { return g_wake_time_ms; }
@@ -132,14 +188,57 @@ bool is_first_boot() { return esp_reset_reason() == ESP_RST_POWERON; }
 void app_setup() {
   g_wake_time_ms = millis();
 
+#if ALWAYS_ON
+  // BOOT (GPIO0) doubles as the page-flip button at runtime. Strapping pin:
+  // only sampled at reset, so a runtime press is safe; INPUT_PULLUP matches its
+  // active-low wiring.
+  pinMode(0, INPUT_PULLUP);
+
+  // 80 MHz, not the 240 MHz default. The deep-sleep build races to finish and
+  // sleep, but an always-on node runs forever and every milliwatt becomes heat
+  // that the BME280 — millimetres away — reads as room temperature. WiFi, SPI
+  // and I2C all run from the 80 MHz APB clock, which this does not change.
+  setCpuFrequencyMhz(80);
+#endif
+
   // Initialize serial FIRST with longer delay
   Serial.begin(115200);
   delay(500);  // Longer delay for serial stability
 
   // Initialize hardware watchdog early (30 second timeout)
-  // This catches hangs in setup - will reboot if setup takes too long
-  esp_task_wdt_init(30, true);  // 30 sec timeout, panic (reboot) on timeout
-  esp_task_wdt_add(NULL);       // Add current task to watchdog
+  // This catches hangs in setup - will reboot if setup takes too long.
+  // IDF 5 (core 3.x): the TWDT is usually armed by the system at boot, so
+  // reconfigure it; fall back to init for configs where it is not.
+  {
+    esp_task_wdt_config_t wdt_cfg = {};
+    wdt_cfg.timeout_ms = 30000;
+    wdt_cfg.idle_core_mask = 0;
+    wdt_cfg.trigger_panic = true;  // panic (reboot) on timeout
+    if (esp_task_wdt_reconfigure(&wdt_cfg) != ESP_OK) {
+      esp_task_wdt_init(&wdt_cfg);
+    }
+  }
+  esp_task_wdt_add(NULL);  // Add current task to watchdog
+
+  // Bring up the structured logger before anything logs through it. This call
+  // was missing entirely, which left every sink dead: no ring buffer for crash
+  // dumps, no NVS persistence, no MQTT log stream — LOGM_* went to serial only.
+  // With the USB cable gone, the MQTT sink (espsensor/<id>/logs/#) is the only
+  // live window into a misbehaving device, so it is on; its own rate limiter
+  // keeps a log storm from starving sensor publishes. NVS keeps ERROR+ for
+  // post-mortem after a crash.
+  {
+    Logger::Config log_config;
+    log_config.buffer_enabled = true;
+    log_config.nvs_enabled = true;
+    log_config.mqtt_enabled = true;
+    Logger::getInstance().begin(log_config);
+  }
+
+  // Classify this reset and bump the RTC boot/crash counters. This was never
+  // called, so /debug/boot_count and /debug/crash_count published 0 forever and
+  // a watchdog reboot-loop in the field would have been invisible in telemetry.
+  update_boot_counters();
 
   // Immediate debug output
   Serial.println("\n\n=== ESP32 BOOT SEQUENCE ===");
@@ -171,18 +270,9 @@ void app_setup() {
   MemoryTracker::getInstance().begin();
 #endif
 
-// Show we're alive with neopixel if available
-#ifdef NEOPIXEL_PIN
-  pinMode(NEOPIXEL_PIN, OUTPUT);
-#ifdef NEOPIXEL_POWER
-  pinMode(NEOPIXEL_POWER, OUTPUT);
-  digitalWrite(NEOPIXEL_POWER, HIGH);
-#endif
-  // Quick red flash to show boot
-  analogWrite(NEOPIXEL_PIN, 10);
-  delay(100);
-  analogWrite(NEOPIXEL_PIN, 0);
-#endif
+  // Boot feedback is show_boot_stage() (diagnostic_test.cpp), already called at
+  // every stage. The analogWrite "red flash" that used to sit here was PWM into
+  // a NeoPixel data line — a protocol-driven part that PWM cannot light.
 
   Serial.println("[2] Starting initialization");
   Serial.flush();
@@ -209,7 +299,9 @@ void app_setup() {
 
 #if USE_DISPLAY
   Serial.println("[BOOT-2c] Initializing display...");
-  display_manager_init();  // This will show "12:34" test pattern in debug mode
+  // Skip the init full-clear: the display phase below always follows with a
+  // real full draw, so the clear was a second ~3 s refresh spent on nothing.
+  display_manager_init(false);
   Serial.println("[BOOT-2c] Display initialized");
 #endif
 
@@ -217,13 +309,19 @@ void app_setup() {
   // display driver is what brings that bus up. Overrides therefore land after
   // the boot screen has already drawn -- the compiled-in room name is what shows
   // until the first post-config refresh.
-#if FEATURE_SD_STORAGE
-  if (sd_begin()) {
-    sd_load_config();
+#if FEATURE_STORAGE
+  if (storage_begin()) {
+    storage_load_config();
+
+    // Both log paths onto the card open here, once the card is known good and
+    // the card's own logs_enabled setting has been read. Anything logged earlier
+    // in boot went to serial only — there was nowhere else for it to go.
+    storage_log_set_mirror(rc_logs_enabled());
+    Logger::getInstance().enableSD(rc_logs_enabled());
 
     // Apply a card-staged firmware image before doing any real work: if it
     // succeeds this call reboots and never returns.
-    if (sd_has_staged_update()) {
+    if (storage_has_staged_update()) {
       Serial.println("[2e] Staged firmware image found on SD, applying...");
       ota_apply_from_sd();
       // Only reached when the image was rejected; ota_last_sd_result() says why.
@@ -232,6 +330,12 @@ void app_setup() {
   }
 #endif
   rc_log_summary();
+
+#if FEATURE_USB_MSC
+  // After storage: geometry probe needs the partition, and the handoff logic
+  // assumes the storage layer is the current owner.
+  usb_msc_begin();
+#endif
 
   // Initialize state management with error checking
   Serial.println("[3] Initializing NVS cache...");
@@ -259,6 +363,10 @@ void app_setup() {
 
     // Save any cached state to NVS
     nvs_end_cache();
+
+#if FEATURE_STORAGE
+    storage_end();
+#endif
 
     Serial.println("Entering emergency deep sleep (1 hour)");
     Serial.flush();
@@ -288,6 +396,13 @@ void app_setup() {
                 ESP.getMinFreeHeap());
 #endif
 
+  // Display init, storage mount and sensor bring-up above can consume ~8 s of
+  // the 30 s watchdog budget; the WiFi backoff below can take 21 s on its own
+  // when the AP is unreachable. Without a feed between them, a boot with the
+  // router down trips the watchdog just before setup completes and the device
+  // reboot-loops until the AP returns.
+  esp_task_wdt_reset();
+
   // Initialize network with exponential backoff
   Serial.println("[BOOT-3] Attempting WiFi connection...");
   show_boot_stage(3);  // Blue for WiFi
@@ -309,11 +424,34 @@ void app_setup() {
   derive_hostname();
   start_network_services();
 
-  // Initialize MQTT
+  // Initialize MQTT. Through net_begin(), not mqtt_begin() directly: net_begin
+  // is what derives the MAC-based client id and registers it with the MQTT and
+  // HA-discovery modules. Calling mqtt_begin() bare left the id empty, which
+  // silently disabled every sensor publish (the queue guards on a non-empty id)
+  // and put the LWT on espsensor/unknown/.
   if (wifi_is_connected()) {
-    mqtt_begin();
+    net_begin();
     ensure_mqtt_connected();
+    publish_ha_discovery_once();
+
+#if FEATURE_CRASH_HANDLER
+    // The crash detected at boot finally gets shipped. It was formatted and
+    // printed above with a "will publish via MQTT after connection" note, but
+    // nothing ever did — mqtt_publish_last_crash() had no callers. Cleared only
+    // after a successful publish so an offline boot retries next time.
+    if (mqtt_is_connected() && CrashHandler::getInstance().hasCrashInfo()) {
+      char crash_report[256];
+      CrashHandler::getInstance().formatCrashReport(crash_report, sizeof(crash_report));
+      mqtt_publish_last_crash(crash_report);
+      CrashHandler::getInstance().clearCrashInfo();
+      Serial.println("[NET] Previous crash report published");
+    }
+#endif
   }
+
+  // The WiFi + MQTT block above can spend ~25 s against an unreachable AP and a
+  // half-dead broker; give the boot phases below a fresh watchdog budget.
+  esp_task_wdt_reset();
 
   // Run main phases
   run_sensor_phase();
@@ -323,9 +461,26 @@ void app_setup() {
   run_display_phase();
 #endif
 
+#if FEATURE_STORAGE
+  // Refill the sparkline ring from the CSVs before the boot sample lands, so a
+  // reboot (every OTA deploy) no longer blanks the graphs page for hours.
+  // After the network phase because file selection needs the NTP clock.
+  storage_backfill_history([](float tC, float rh, float otC, float orh) {
+    hist_push(isfinite(tC) ? tC * 9.0f / 5.0f + 32.0f : NAN,
+              isfinite(otC) ? otC * 9.0f / 5.0f + 32.0f : NAN, rh, orh);
+  });
+#endif
+
+  // After the network phase, so the row carries an NTP-corrected timestamp and a
+  // real RSSI rather than the placeholders the sensor phase starts with.
+  record_sample_to_storage();
+#if FEATURE_STORAGE && !ALWAYS_ON
+  maybe_prune_history();
+#endif
+
 #if ALWAYS_ON
-  // Record the boot sample so the loop waits a full interval before the next
-  // one, and seed the "what is on screen" snapshot from the draw just made.
+  // Seed the "what is on screen" snapshot from the draw just made, and start the
+  // interval clocks so the loop waits a full interval before the next sample.
   uint32_t now = millis();
   g_last_sample_ms = now;
   g_last_display_ms = now;
@@ -337,30 +492,99 @@ void app_setup() {
   g_drawn_rhPct = get_last_published_inside_rh();
   g_drawn_batt_pct = read_battery_status().percent;
 
-  record_sample_to_sd();
-
   Serial.printf("=== Always-on mode: sampling every %u s, panel redraw floor %d s ===\n",
                 rc_sample_interval_sec(), DISPLAY_MIN_REFRESH_INTERVAL_SEC);
 #endif
 
+  // Boot finished: douse the stage LED. Leaving it lit costs battery around the
+  // clock and makes "green" meaningless as a boot-progress signal.
+  show_boot_stage(0);
+
   run_sleep_phase();
 }
 
-#if ALWAYS_ON
-// Persist one row of sensor history to the card. Silent no-op when the card is
-// absent or history is turned off in config.
-static void record_sample_to_sd() {
-#if FEATURE_SD_STORAGE
-  if (!sd_is_mounted() || !rc_history_enabled())
-    return;
+// Record one sample: always into the RAM sparkline ring, and additionally onto
+// the card when one is mounted and available. Storage is a silent no-op when the
+// card is absent or history is turned off in config.
+static void record_sample_to_storage() {
+  // The ring comes first and is deliberately outside every storage guard: it is
+  // RAM-only and the graphs page is the only thing that reads it.
+  //
+  // This used to sit below the guards, which made the 24h graphs depend on the
+  // SD card. A node with no card mounted, with history disabled, or whose disk
+  // the USB host had claimed took the early return and never pushed a sample, so
+  // the graphs page stayed empty for the entire boot -- and the "the RAM ring
+  // below still collects" comment on the USB branch asserted exactly the
+  // invariant the control flow broke. The status-pixel blip below was lost the
+  // same way.
+  //
+  // Display-ready units (F / %); outside values only when currently valid, since
+  // NaN is what renders as a gap.
+  {
+    const float tin = get_last_published_inside_tempC();
+    OutsideReadings o = net_get_outside();
+    hist_push(
+        isfinite(tin) ? tin * 9.0f / 5.0f + 32.0f : NAN,
+        (o.validTemp && isfinite(o.temperatureC)) ? o.temperatureC * 9.0f / 5.0f + 32.0f : NAN,
+        get_last_published_inside_rh(),
+        (o.validHum && isfinite(o.humidityPct)) ? o.humidityPct : NAN);
+  }
 
-  BatteryStatus bs = read_battery_status();
-  sd_append_history(time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
-                    get_last_published_inside_rh(), get_last_published_inside_pressureHPa(),
-                    bs.voltage, bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0);
+#if FEATURE_STORAGE
+  // usb_msc_host_active(): the host owns the disk and the CSV write would
+  // remount it mid-transfer. Skipping the write costs nothing now that the ring
+  // above has already taken the sample.
+  if (storage_is_mounted() && rc_history_enabled() && !usb_msc_host_active()) {
+    BatteryStatus bs = read_battery_status();
+    OutsideReadings out_now = net_get_outside();
+    storage_append_history(
+        time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
+        get_last_published_inside_rh(), get_last_published_inside_pressureHPa(), bs.voltage,
+        bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0,
+        (out_now.validTemp && isfinite(out_now.temperatureC)) ? out_now.temperatureC : NAN,
+        (out_now.validHum && isfinite(out_now.humidityPct)) ? out_now.humidityPct : NAN);
+  }
+#endif
+
+#if USE_STATUS_PIXEL
+  // Quiet cyan blip: a sample was just taken. Dim and brief on purpose.
+  pixel_flash(0, 18, 18, 120);
 #endif
 }
 
+#if FEATURE_STORAGE && !ALWAYS_ON
+// The always-on build sweeps expired history on its maintenance timer. The
+// deep-sleep build has no such loop -- it wakes, works and sleeps -- so it sweeps
+// at most once per calendar day instead. Pruning is a full directory scan, and
+// doing one on every wake would be a real cost at a 5-minute cadence.
+//
+// The marker lives in RTC memory, which survives deep sleep but not a power
+// cycle; the worst case on reboot is one extra scan.
+RTC_DATA_ATTR static long rtc_last_prune_day = -1;
+
+static void maybe_prune_history() {
+  if (!storage_is_mounted())
+    return;
+
+  time_t now = time(nullptr);
+  // Without NTP there is no way to tell which files are old, and recording a day
+  // number derived from the RTC default would suppress the real sweep later.
+  if (now <= SD_MIN_PLAUSIBLE_EPOCH)
+    return;
+
+  long today = static_cast<long>(now / 86400);
+  if (today == rtc_last_prune_day)
+    return;
+  rtc_last_prune_day = today;
+
+  uint16_t pruned = storage_prune_history(rc_history_retention_days());
+  if (pruned > 0) {
+    Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
+  }
+}
+#endif  // FEATURE_STORAGE && !ALWAYS_ON
+
+#if ALWAYS_ON
 #if USE_DISPLAY
 // Decide whether the panel is worth redrawing.
 //
@@ -401,19 +625,23 @@ static void maybe_refresh_display() {
       changed = true;
   }
 
-  if (!changed) {
-    Serial.println("Display: no significant change, skipping refresh");
-    return;
-  }
-
   const uint32_t now = millis();
   const uint32_t floor_ms = DISPLAY_MIN_REFRESH_INTERVAL_SEC * 1000UL;
-  if (g_display_drawn_once && (now - g_last_display_ms) < floor_ms) {
-    Serial.printf("Display: change pending, holding off (%lu s of %d s floor elapsed)\n",
-                  (now - g_last_display_ms) / 1000UL, DISPLAY_MIN_REFRESH_INTERVAL_SEC);
+  const bool floor_elapsed = !g_display_drawn_once || (now - g_last_display_ms) >= floor_ms;
+
+  if (!floor_elapsed) {
+    if (changed) {
+      Serial.printf("Display: change pending, holding off (%lu s of %d s floor elapsed)\n",
+                    (now - g_last_display_ms) / 1000UL, DISPLAY_MIN_REFRESH_INTERVAL_SEC);
+    }
     return;
   }
 
+  // At each floor interval the display alternates between the live page and the
+  // 24h graphs page, so every refresh cycle is spent showing something new --
+  // this replaces the old "skip when unchanged" rule, whose purpose (not
+  // burning refreshes on identical frames) the alternation now serves.
+  display_toggle_page();
   run_display_phase();
 
   g_last_display_ms = now;
@@ -445,6 +673,62 @@ void app_loop() {
 
   const uint32_t now = millis();
 
+  usb_msc_tick();
+#if USE_STATUS_PIXEL
+  pixel_tick();
+  // Idle twinkle: a soft blip every ~7 s says "alive" without lighting the
+  // room. Rotates through three dim tints so it reads as a twinkle, not a
+  // metronome. Duty cycle ~1%, so the battery cost is noise.
+  {
+    static uint32_t s_last_twinkle_ms = 0;
+    static uint8_t s_phase = 0;
+    if (now - s_last_twinkle_ms >= 7000) {
+      s_last_twinkle_ms = now;
+      switch (s_phase++ % 3) {
+        case 0:
+          pixel_flash(4, 10, 4, 70);  // soft green
+          break;
+        case 1:
+          pixel_flash(4, 6, 12, 70);  // soft blue
+          break;
+        default:
+          pixel_flash(8, 8, 8, 70);  // soft white
+          break;
+      }
+    }
+  }
+#endif
+
+#if USE_DISPLAY
+  // BOOT (GPIO0) press = flip page immediately. Debounced edge; the 250 ms
+  // guard also caps how fast a held button can burn e-ink refresh cycles.
+  {
+    static bool s_prev_high = true;
+    static uint32_t s_edge_ms = 0;
+    const bool level = digitalRead(0);
+    if (s_prev_high && !level && (now - s_edge_ms) > 250) {
+      s_edge_ms = now;
+      g_page_flip_request = true;
+    }
+    s_prev_high = level;
+  }
+  if (g_page_flip_request) {
+    g_page_flip_request = false;
+    display_toggle_page();
+#if USE_STATUS_PIXEL
+    // Feedback: blue flash = live page, magenta = graphs page.
+    if (display_current_page() == 0)
+      pixel_flash(0, 0, 60, 250);
+    else
+      pixel_flash(60, 0, 60, 250);
+#endif
+    Serial.printf("[UI] page flip -> %u\n", display_current_page());
+    run_display_phase();
+    g_last_display_ms = now;
+    g_display_drawn_once = true;
+  }
+#endif
+
   if (now - g_last_link_check_ms >= LINK_CHECK_INTERVAL_MS) {
     g_last_link_check_ms = now;
 
@@ -455,16 +739,26 @@ void app_loop() {
       }
     }
 
+    // The reconnect above can block for ~17 s (backoff + NTP); start MQTT's
+    // budget fresh so the two together cannot cross the 30 s watchdog.
+    esp_task_wdt_reset();
+
     // Gate on whether the services are running, NOT on observing a reconnect
     // here. If WiFi was down at boot and the IDF stack reconnected on its own,
     // this check only ever sees an already-connected link, no transition
     // happens, and OTA would stay dead for the whole session -- precisely when
     // it is most needed. start_network_services() is cheap to retry.
-    if (wifi_is_connected() && !ota_is_active()) {
+    if (wifi_is_connected()) {
       start_network_services();
-    }
 
-    ensure_mqtt_connected();
+      // net_begin() is idempotent and normally ran during setup — but if WiFi
+      // was down at boot (power outage: the ESP boots faster than the router),
+      // setup skipped it and MQTT was never configured. Without this call the
+      // node would retry a null broker address every 30 s forever.
+      net_begin();
+      ensure_mqtt_connected();
+      publish_ha_discovery_once();
+    }
   }
 
   // Pump MQTT so retained outside data and commands are handled between samples.
@@ -486,9 +780,15 @@ void app_loop() {
 
     run_sensor_phase();
     run_network_phase();
-    record_sample_to_sd();
+    record_sample_to_storage();
 #if USE_DISPLAY
     maybe_refresh_display();
+    // Fresh sample on the glass without waiting for the 15-minute full
+    // refresh: a flash-free partial covers the header stamp and both panes.
+    // Skipped when maybe_refresh_display() just did a full this same pass.
+    if (g_last_display_ms != now) {
+      display_partial_update_live();
+    }
 #endif
 
     // Periodic maintenance. An always-on node never reaches run_sleep_phase(),
@@ -497,12 +797,19 @@ void app_loop() {
     if (now - g_last_maintenance_ms >= MAINTENANCE_INTERVAL_MS) {
       g_last_maintenance_ms = now;
       account_uptime();
+      // Both had accumulated state that nothing ever read out: the error
+      // counters grew in RTC memory unpublished, and crash reports always
+      // showed min_free_heap=0 because the sampler was never called.
+      publish_error_stats();
+#if FEATURE_CRASH_HANDLER
+      CrashHandler::getInstance().updateHeapStats();
+#endif
       // Close and reopen so anything buffered in the Preferences handle is
       // committed rather than sitting there until a brownout discards it.
       nvs_end_cache();
       nvs_begin_cache();
-#if FEATURE_SD_STORAGE
-      uint16_t pruned = sd_prune_history(rc_history_retention_days());
+#if FEATURE_STORAGE
+      uint16_t pruned = storage_prune_history(rc_history_retention_days());
       if (pruned > 0) {
         Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
       }
@@ -778,6 +1085,13 @@ void run_sleep_phase() {
 
   // Store state to NVS
   nvs_end_cache();
+
+#if FEATURE_STORAGE
+  // Unmount before the GPIOs go high-Z. Every write already closes its file, so
+  // this is not about corruption -- it is about not leaving the card selected and
+  // drawing idle current for the whole sleep interval.
+  storage_end();
+#endif
 
   Serial.printf("Entering deep sleep for %u seconds\n", wake_interval_sec);
   go_deep_sleep_with_tracking(wake_interval_sec);

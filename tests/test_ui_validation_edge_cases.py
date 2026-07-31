@@ -41,10 +41,36 @@ class TestUIValidationEdgeCases:
     def test_collision_detection_with_exclusions(self):
         """Test region collision detection with allowed overlaps."""
         # Regions that should be excluded from collision detection
-        exclusion_patterns = ["_INNER", "_BADGE", "_ICON", "_LABEL"]
+        # _BAND/_TAB are fill underlays: containing their own text rects is
+        # their entire purpose, so like _INNER/_BADGE they are structural,
+        # not content, and sit outside collision semantics.
+        exclusion_patterns = ["_INNER", "_BADGE", "_ICON", "_LABEL", "_BAND", "_TAB"]
 
         rects = self.geometry["rects"]
         collisions = []
+
+        # Rects only collide meaningfully when both can draw in the SAME
+        # variant. The rect table is shared across variants (v2, v3, v3g), and
+        # different variants deliberately reuse screen area - v3's header band
+        # overlaps v2's header rects by design. Group by variant membership
+        # derived from the spec's components.
+        import json as _json
+        from pathlib import Path as _Path
+
+        spec = _json.loads(
+            (_Path(__file__).resolve().parents[1] / "config" / "ui_spec.json").read_text()
+        )
+        variant_rects = {}
+        for vname, comps in spec.get("variants", {}).items():
+            used = set()
+            for cname in comps:
+                for op in spec.get("components", {}).get(cname, []):
+                    if isinstance(op.get("rect"), str):
+                        used.add(op["rect"])
+            variant_rects[vname] = used
+
+        def same_variant(a, b):
+            return any(a in used and b in used for used in variant_rects.values())
 
         for name1, r1 in rects.items():
             # Skip if excluded
@@ -59,6 +85,9 @@ class TestUIValidationEdgeCases:
                 if any(pattern in name2 for pattern in exclusion_patterns):
                     continue
 
+                if not same_variant(name1, name2):
+                    continue
+
                 # Check collision
                 if self.regions_overlap(r1, r2):
                     collisions.append((name1, name2))
@@ -67,6 +96,10 @@ class TestUIValidationEdgeCases:
         expected_collisions = [
             ("HEADER_NAME", "HEADER_TIME_CENTER"),  # Time can overlap with name
             ("INSIDE_HUMIDITY", "INSIDE_PRESSURE"),  # Pressure and humidity can overlap
+            (
+                "INSIDE_PRESS_V3",
+                "INSIDE_RH_V3",
+            ),  # v3: RH left-aligned, pressure right-aligned; shared middle slack
             ("OUT_PRESSURE", "OUT_WIND"),  # Pressure and wind can overlap
         ]
 

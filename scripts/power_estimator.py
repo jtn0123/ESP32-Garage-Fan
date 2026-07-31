@@ -9,7 +9,14 @@ def estimate_days(
     awake_seconds: float,
     interval_seconds: float,
 ) -> float:
-    # Guard against invalid inputs
+    # Guard against invalid inputs. Non-finite values (inf/NaN from upstream
+    # arithmetic) previously slipped past the sign checks: inf awake_seconds
+    # clamped to the interval and produced a confident-looking finite estimate.
+    import math
+
+    for v in (capacity_mAh, sleep_current_mA, active_current_mA, awake_seconds, interval_seconds):
+        if not math.isfinite(v):
+            return 0.0
     if capacity_mAh <= 0:
         return 0.0
     if interval_seconds <= 0:

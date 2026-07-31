@@ -65,12 +65,15 @@ class LogBuffer {
   LogBuffer(const LogBuffer&) = delete;
   LogBuffer& operator=(const LogBuffer&) = delete;
 
-  RTC_DATA_ATTR static LogEntry buffer_[BUFFER_SIZE];
-  RTC_DATA_ATTR static size_t head_;
-  RTC_DATA_ATTR static size_t tail_;
-  RTC_DATA_ATTR static size_t count_;
-  RTC_DATA_ATTR static uint32_t overflow_count_;
-  RTC_DATA_ATTR static bool wrapped_;
+  // RTC_DATA_ATTR lives on the definitions (log_buffer.cpp) only: GCC 14
+  // rejects the attribute appearing on both declaration and definition with
+  // different .rtc.data section counters.
+  static LogEntry buffer_[BUFFER_SIZE];
+  static size_t head_;
+  static size_t tail_;
+  static size_t count_;
+  static uint32_t overflow_count_;
+  static bool wrapped_;
 
   mutable SemaphoreHandle_t mutex_ = nullptr;
   bool initialized_ = false;

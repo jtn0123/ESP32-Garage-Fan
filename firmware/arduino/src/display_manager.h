@@ -15,21 +15,15 @@ struct BatteryStatus;
 struct OutsideReadings;
 
 // Main display functions
-void display_manager_init();
+// clear_panel: spend a full refresh blanking the panel before use. The
+// always-on boot path passes false - its first real draw follows within
+// seconds and each full refresh costs ~3 s of watchdog budget plus one of
+// the panel's rated cycles. Diagnostic/debug builds keep the clear.
+void display_manager_init(bool clear_panel = true);
 void full_refresh();
 void smoke_full_window_test();
 
 // Partial update functions
-void partial_update_inside_temp(const char* in_temp_f, char trend);
-void partial_update_inside_rh(const char* in_rh);
-void partial_update_outside_temp(const char* out_temp_f, char trend);
-void partial_update_outside_rh(const char* out_rh);
-void partial_update_outside_wind(const char* wind_str);
-void partial_update_outside_condition(const char* short_condition);
-void partial_update_weather_icon(const char* weather);
-void partial_update_weather_icon_from_outside(const OutsideReadings& o);
-void partial_update_footer_weather_from_outside(const OutsideReadings& o);
-void partial_update_outside_hilo(float highC, float lowC);
 
 // Drawing functions
 void draw_static_chrome();
@@ -42,7 +36,6 @@ void draw_values(const char* in_temp_f, const char* in_rh, const char* out_temp_
                  const char* in_pressure_str, const char* out_pressure_str);
 
 // Weather icon functions
-void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h, const char* weather);
 void draw_weather_icon_region_at_from_outside(int16_t x, int16_t y, int16_t w, int16_t h,
                                               const OutsideReadings& o);
 
@@ -62,7 +55,6 @@ const int* rect_ptr_by_id(uint8_t rid);
 
 // Dev mode display tick (if enabled)
 #if DEV_NO_SLEEP
-void dev_display_tick();
 #endif
 
 // Global display object access

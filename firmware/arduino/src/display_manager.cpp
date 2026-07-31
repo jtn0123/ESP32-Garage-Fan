@@ -19,13 +19,9 @@
 #define EINK_PANEL_DEPG0213BN 0
 #endif
 
-// Display object - will be moved here from main.cpp later
-// For now, we'll access it via extern from main.cpp
-#if EINK_PANEL_DEPG0213BN
-extern GxEPD2_BW<GxEPD2_213_DEPG0213BN, GxEPD2_213_DEPG0213BN::HEIGHT> display;
-#else
-extern GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display;
-#endif
+// Display object lives in main.cpp; the panel/driver pair is selected in
+// display_hw.h so every consumer agrees on the type.
+#include "display_hw.h"
 
 // Constants needed for display operations
 #define HEADER_NAME_Y_ADJ -8
@@ -33,18 +29,13 @@ extern GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display
 // Note: Layout variables are generated without RECT_ prefix
 // Variables are defined in display_layout.h as HEADER_TIME_CENTER, FOOTER_STATUS_, etc.
 
-// Forward declaration for status pixel (if enabled)
-#if USE_STATUS_PIXEL
-extern void status_pixel_tick();
-#endif
-
 // Forward declaration for draw_in_region template from main.cpp
 // We'll declare it properly to avoid link issues
 void draw_in_region_lambda(const int rect[4], void (*fn)(int16_t, int16_t, int16_t, int16_t, void*),
                            void* ctx);
 
 // Placeholder implementations - will be filled with actual code from main.cpp
-void display_manager_init() {
+void display_manager_init(bool clear_panel) {
   Serial.println("[DISPLAY] Initializing display...");
 
   // Initialize display hardware
@@ -53,11 +44,13 @@ void display_manager_init() {
   display.setTextColor(GxEPD_BLACK);
   display.setFullWindow();
 
-  // Clear display with white background
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-  } while (display.nextPage());
+  if (clear_panel) {
+    // Clear display with white background
+    display.firstPage();
+    do {
+      display.fillScreen(GxEPD_WHITE);
+    } while (display.nextPage());
+  }
 
 #ifdef BOOT_DEBUG
   // Show test pattern during boot

@@ -72,6 +72,4 @@ class LogMQTT {
 
   String buildTopic(LogLevel level);
   String formatEntry(const LogEntry& entry, const char* module_name);
-
-  void subscribeToCommands();
 };

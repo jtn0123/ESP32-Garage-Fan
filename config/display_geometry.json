@@ -1,6 +1,6 @@
 {
   "layout_version": 1,
-  "layout_crc": "0x307DFE54",
+  "layout_crc": "0xBAF5FBB9",
   "canvas": {
     "w": 250,
     "h": 122
@@ -106,6 +106,174 @@
       90,
       72,
       30
+    ],
+    "HEADER_NAME_V3": [
+      6,
+      2,
+      82,
+      12
+    ],
+    "HEADER_UPDATED_V3": [
+      88,
+      2,
+      94,
+      12
+    ],
+    "HEADER_VERSION_V3": [
+      184,
+      2,
+      60,
+      12
+    ],
+    "INSIDE_LABEL_V3": [
+      10,
+      18,
+      42,
+      10
+    ],
+    "INSIDE_TEMP_V3": [
+      6,
+      28,
+      118,
+      32
+    ],
+    "INSIDE_RH_V3": [
+      8,
+      64,
+      58,
+      10
+    ],
+    "INSIDE_PRESS_V3": [
+      60,
+      64,
+      62,
+      10
+    ],
+    "OUTSIDE_LABEL_V3": [
+      133,
+      18,
+      50,
+      10
+    ],
+    "OUT_TEMP_V3": [
+      128,
+      28,
+      118,
+      32
+    ],
+    "OUT_RH_V3": [
+      131,
+      64,
+      52,
+      10
+    ],
+    "OUT_WIND_V3": [
+      185,
+      64,
+      58,
+      10
+    ],
+    "OUT_PRESS_V3": [
+      131,
+      74,
+      110,
+      10
+    ],
+    "HEADER_BAND_V3": [
+      0,
+      0,
+      250,
+      14
+    ],
+    "INSIDE_TAB_V3": [
+      6,
+      16,
+      50,
+      12
+    ],
+    "OUTSIDE_TAB_V3": [
+      129,
+      16,
+      58,
+      12
+    ],
+    "GRAPH_TEMP_TITLE": [
+      6,
+      17,
+      120,
+      11
+    ],
+    "GRAPH_TEMP_IN_CHIP": [
+      158,
+      16,
+      39,
+      12
+    ],
+    "GRAPH_TEMP_OUT_CHIP": [
+      199,
+      16,
+      45,
+      12
+    ],
+    "GRAPH_TEMP_PLOT": [
+      5,
+      29,
+      210,
+      32
+    ],
+    "GRAPH_TEMP_MAX": [
+      217,
+      28,
+      30,
+      9
+    ],
+    "GRAPH_TEMP_MIN": [
+      217,
+      53,
+      30,
+      9
+    ],
+    "GRAPH_RH_TITLE": [
+      6,
+      66,
+      120,
+      11
+    ],
+    "GRAPH_RH_IN_CHIP": [
+      158,
+      65,
+      39,
+      12
+    ],
+    "GRAPH_RH_OUT_CHIP": [
+      199,
+      65,
+      45,
+      12
+    ],
+    "GRAPH_RH_PLOT": [
+      5,
+      78,
+      210,
+      30
+    ],
+    "GRAPH_RH_MAX": [
+      217,
+      77,
+      30,
+      9
+    ],
+    "GRAPH_RH_MIN": [
+      217,
+      100,
+      30,
+      9
+    ],
+    "GRAPH_AXIS": [
+      5,
+      110,
+      240,
+      10
     ]
   }
 }

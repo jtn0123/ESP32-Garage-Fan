@@ -141,16 +141,6 @@ size_t DisplayCapture::base64Encode(const uint8_t* input, size_t input_len, char
 // Global convenience functions
 GFXcanvas1* display_capture_canvas() { return DisplayCapture::getInstance().getCanvas(); }
 
-void display_capture_fill_screen(uint16_t color) {
-  GFXcanvas1* canvas = display_capture_canvas();
-  if (canvas) {
-    // GFXcanvas1: 0 = black, 1 = white (opposite of GxEPD2)
-    // GxEPD_WHITE = 0xFFFF, GxEPD_BLACK = 0x0000
-    canvas->fillScreen(color == 0xFFFF ? 1 : 0);
-    DisplayCapture::getInstance().setHasContent();
-  }
-}
-
 // C linkage for MQTT command handler
 extern "C" void display_capture_handle(const char* payload, size_t length) {
   LOGM_INFO("Screenshot command received");
@@ -200,7 +190,11 @@ extern "C" void display_capture_handle(const char* payload, size_t length) {
     // Publish base64 data to /debug/screenshot/data
     snprintf(topic, sizeof(topic), "espsensor/%s/debug/screenshot/data", client_id);
 
-    const size_t CHUNK_SIZE = 4096;
+    // Must fit inside MQTT_MAX_PACKET_SIZE (1024) alongside the topic and the
+    // ~10-byte MQTT header; the old 4096 exceeded the client buffer, so every
+    // publish failed and the screenshot feature had never actually delivered a
+    // frame. 768 leaves comfortable headroom -> a full frame is 7 chunks.
+    const size_t CHUNK_SIZE = 768;
     size_t offset = 0;
     int chunk_num = 0;
 

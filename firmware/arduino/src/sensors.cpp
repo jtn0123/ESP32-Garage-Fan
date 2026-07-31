@@ -3,6 +3,7 @@
 
 #include "sensors.h"
 #include "profiling.h"
+#include "runtime_config.h"
 #include <Wire.h>
 
 #if USE_BME280
@@ -41,8 +42,8 @@ void sensors_begin() {
   if (g_bme280_initialized)
     return;
 
-    // Explicitly initialize I2C on known pins when available
 #if defined(SDA) && defined(SCL)
+  // Explicitly initialize I2C on known pins when available
   Serial.printf("I2C: using pins SDA=%d SCL=%d\n", SDA, SCL);
 #if I2C_DEBUG_SCAN
   i2c_bus_recover_if_stuck();
@@ -72,7 +73,7 @@ void sensors_begin() {
   }
 #endif
 
-  // Try default I2C address 0x77 then 0x76
+  // Try default I2C address 0x77 (the on-board sensor) then 0x76
   if (!g_bme280.begin(0x77) && !g_bme280.begin(0x76)) {
     Serial.println("BME280 not found");
     g_bme280_initialized = false;
@@ -102,7 +103,12 @@ InsideReadings read_inside_sensors() {
 
   // Forced mode: trigger one measurement for low power
   g_bme280.takeForcedMeasurement();
-  r.temperatureC = g_bme280.readTemperature();
+  // The board's self-heat reaches the sensor, so the calibrated correction is
+  // applied here — the one place raw readings enter the system — rather than at
+  // each consumer. Note the humidity is NOT corrected: a hot sensor reads RH
+  // low, but deriving true RH needs the corrected temperature and psychrometric
+  // conversion, and a half-right correction is worse than an honest raw value.
+  r.temperatureC = g_bme280.readTemperature() + rc_temp_offset_c();
   r.humidityPct = g_bme280.readHumidity();
   // Adafruit_BME280::readPressure returns Pascals; convert to hPa for MQTT/HA
   r.pressureHPa = g_bme280.readPressure() / 100.0f;

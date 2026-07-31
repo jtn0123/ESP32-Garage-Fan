@@ -16,9 +16,6 @@ static Preferences g_wifi_prefs;
 RTC_DATA_ATTR static bool g_time_synced = false;
 RTC_DATA_ATTR static uint32_t g_last_ntp_sync_timestamp = 0;
 
-// WiFi connection state tracking
-static WiFiConnectionState g_wifi_state = WIFI_STATE_IDLE;
-
 bool parse_bssid(const char* str, uint8_t out[6]) {
   if (!str)
     return false;
@@ -39,8 +36,6 @@ bool is_all_zero_bssid(const uint8_t b[6]) {
 }
 
 bool wifi_connect_with_timeout(uint32_t timeout_ms) {
-  g_wifi_state = WIFI_STATE_CONNECTING;
-
   // Try to connect with configured credentials
   WiFi.mode(WIFI_STA);
 
@@ -87,7 +82,6 @@ bool wifi_connect_with_timeout(uint32_t timeout_ms) {
   }
 
   if (WiFi.isConnected()) {
-    g_wifi_state = WIFI_STATE_CONNECTED;
     Serial.printf("[WiFi] Connected! IP: %s, RSSI: %d\n", WiFi.localIP().toString().c_str(),
                   WiFi.RSSI());
 
@@ -96,7 +90,6 @@ bool wifi_connect_with_timeout(uint32_t timeout_ms) {
 
     return true;
   } else {
-    g_wifi_state = WIFI_STATE_FAILED;
     Serial.printf("[WiFi] Connection failed after %dms\n", timeout_ms);
     return false;
   }
@@ -124,7 +117,6 @@ bool wifi_connect_with_exponential_backoff(uint32_t max_attempts, uint32_t initi
   }
 
   Serial.printf("[WiFi] Failed to connect after %d attempts\n", max_attempts);
-  g_wifi_state = WIFI_STATE_FAILED;
   return false;
 }
 
@@ -157,8 +149,6 @@ int wifi_get_rssi() {
   return WiFi.RSSI();
 }
 
-void wifi_set_hostname(const char* hostname) { WiFi.setHostname(hostname); }
-
 void wifi_configure_power_save(bool enable) {
   if (enable) {
     WiFi.setSleep(WIFI_PS_MIN_MODEM);
@@ -167,46 +157,18 @@ void wifi_configure_power_save(bool enable) {
   }
 }
 
-WiFiConnectionState wifi_get_state() {
-  // Update state based on actual connection status
-  if (WiFi.isConnected() && g_wifi_state != WIFI_STATE_CONNECTED) {
-    g_wifi_state = WIFI_STATE_CONNECTED;
-  } else if (!WiFi.isConnected() && g_wifi_state == WIFI_STATE_CONNECTED) {
-    g_wifi_state = WIFI_STATE_DISCONNECTED;
-  }
-  return g_wifi_state;
-}
-
-const char* wifi_state_to_string(WiFiConnectionState state) {
-  switch (state) {
-    case WIFI_STATE_IDLE:
-      return "IDLE";
-    case WIFI_STATE_CONNECTING:
-      return "CONNECTING";
-    case WIFI_STATE_CONNECTED:
-      return "CONNECTED";
-    case WIFI_STATE_FAILED:
-      return "FAILED";
-    case WIFI_STATE_DISCONNECTED:
-      return "DISCONNECTED";
-    default:
-      return "UNKNOWN";
+void wifi_reduce_tx_power() {
+  // Default TX power is 19.5 dBm, sized for reaching an AP across a house. This
+  // node sits at RSSI -53; 11 dBm still leaves ~20 dB of link margin, and every
+  // transmit at lower power is heat the on-board BME280 never sees. Skipped
+  // when the link is already marginal — a dropped connection costs far more
+  // (reconnect bursts at full power) than the savings.
+  if (WiFi.isConnected() && WiFi.RSSI() > -65) {
+    WiFi.setTxPower(WIFI_POWER_11dBm);
   }
 }
 
 #if USE_WIFI_PROVISIONING
-bool wifi_clear_provisioning() {
-  g_wifi_prefs.begin("wifi", false);
-  g_wifi_prefs.clear();
-  g_wifi_prefs.end();
-
-  wifi_prov_mgr_deinit();
-  WiFi.disconnect(true, true);
-  delay(100);
-
-  return true;
-}
-
 void wifi_begin_provisioning() {
   // Implementation would go here - complex provisioning logic
   // For now, just a stub
@@ -217,10 +179,6 @@ bool wifi_is_provisioning_active() {
   return false;  // Stub for now
 }
 #else
-bool wifi_clear_provisioning() {
-  return false;  // Not supported without provisioning
-}
-
 void wifi_begin_provisioning() {
   // No-op without provisioning support
 }
@@ -319,10 +277,10 @@ void wifi_sync_time_ntp() {
 
   Serial.println("[Time] Syncing via NTP...");
 
-  // Configure timezone (EST/EDT - adjust for your location)
-  // Format: "STD+offset" or "STD+offset DST"
-  // EST5EDT = Eastern Standard Time, 5 hours behind UTC, with DST
-  configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov", "time.google.com");
+  // Timezone comes from TIME_TZ (config.h default, overridable via device.yaml
+  // `timezone:`). This was hardcoded to EST5EDT, which put the header clock
+  // three hours ahead on the Pacific-time device it actually ships on.
+  configTzTime(TIME_TZ, "pool.ntp.org", "time.nist.gov", "time.google.com");
 
   // Wait for time sync (max 5 seconds to not delay boot too much)
   uint32_t start = millis();
@@ -345,7 +303,3 @@ void wifi_sync_time_ntp() {
     Serial.println("[Time] NTP sync failed, using existing time");
   }
 }
-
-bool wifi_is_time_synced() { return g_time_synced; }
-
-uint32_t wifi_get_last_ntp_sync() { return g_last_ntp_sync_timestamp; }

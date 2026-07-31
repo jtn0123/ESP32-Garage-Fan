@@ -8,14 +8,34 @@
 #include <Adafruit_NeoPixel.h>
 static Adafruit_NeoPixel* g_status_pixel = nullptr;
 
+// The WS2812 idles at ~0.7-1 mA even when dark (~3% of the always-on power
+// budget), so the power rail is dropped whenever the pixel goes off and
+// re-raised per flash. The LED loses state on power-down, but every caller
+// rewrites the color after raising, so nothing depends on retained state.
+static void pixel_rail(bool on) {
+#ifdef NEOPIXEL_POWER
+  digitalWrite(NEOPIXEL_POWER, on ? HIGH : LOW);
+  if (on)
+    delay(1);  // rail settle before clocking data
+#endif
+}
+
 // Boot stage indicator - single color at a time
 void show_boot_stage(int stage) {
   if (!g_status_pixel) {
+#ifdef NEOPIXEL_POWER
+    // The Feather gates the pixel behind a power-enable pin; without this the
+    // data line wiggles into an unpowered LED and nothing ever lights.
+    pinMode(NEOPIXEL_POWER, OUTPUT);
+    digitalWrite(NEOPIXEL_POWER, HIGH);
+#endif
     g_status_pixel = new Adafruit_NeoPixel(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
     g_status_pixel->begin();
     g_status_pixel->setBrightness(50);  // Not too bright
   }
 
+  if (stage != 0)
+    pixel_rail(true);
   switch (stage) {
     case 1:                                         // Boot/Serial
       g_status_pixel->setPixelColor(0, 255, 0, 0);  // Red
@@ -42,47 +62,46 @@ void show_boot_stage(int stage) {
       break;
   }
   g_status_pixel->show();
+  if (stage == 0)
+    pixel_rail(false);
 }
+// --- runtime pixel effects ---------------------------------------------------
+// Non-blocking blips: set a color with a deadline, pixel_tick() (called from
+// app_loop) douses it. Used for sample ticks and BOOT-button feedback.
+static uint32_t g_pixel_off_ms = 0;
+
+void pixel_flash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms) {
+  if (!g_status_pixel) {
+    show_boot_stage(0);  // lazily initialises the pixel, leaves it off
+  }
+  if (!g_status_pixel)
+    return;
+  pixel_rail(true);
+  g_status_pixel->setPixelColor(0, r, g, b);
+  g_status_pixel->show();
+  g_pixel_off_ms = millis() + ms;
+}
+
+void pixel_tick() {
+  if (g_pixel_off_ms && g_status_pixel && static_cast<int32_t>(millis() - g_pixel_off_ms) >= 0) {
+    g_pixel_off_ms = 0;
+    g_status_pixel->setPixelColor(0, 0, 0, 0);
+    g_status_pixel->show();
+    pixel_rail(false);
+  }
+}
+
 #else
 void show_boot_stage(int stage) {
   // No neopixel available
 }
+void pixel_flash(uint8_t, uint8_t, uint8_t, uint16_t) {}
+void pixel_tick() {}
 #endif
-
-// Enhanced system state dump for debugging
-void dump_system_state() {
-  Serial.println("\n=== SYSTEM STATE DUMP ===");
-
-  // Memory status
-  Serial.printf("[MEMORY] Free heap: %u bytes\n", ESP.getFreeHeap());
-  Serial.printf("[MEMORY] Min free heap: %u bytes\n", ESP.getMinFreeHeap());
-  Serial.printf("[MEMORY] Heap size: %u bytes\n", ESP.getHeapSize());
-  Serial.printf("[MEMORY] Free PSRAM: %u bytes\n", ESP.getFreePsram());
-
-  // Chip information
-  Serial.printf("[CHIP] Model: %s\n", ESP.getChipModel());
-  Serial.printf("[CHIP] Revision: %d\n", ESP.getChipRevision());
-  Serial.printf("[CHIP] Cores: %d\n", ESP.getChipCores());
-  Serial.printf("[CHIP] CPU Freq: %u MHz\n", ESP.getCpuFreqMHz());
-
-  // Reset/Wake information
-  Serial.printf("[BOOT] Reset reason: %d\n", esp_reset_reason());
-
-  // Timing
-  Serial.printf("[TIME] Uptime: %lu ms\n", millis());
-
-  Serial.println("=== END SYSTEM STATE ===");
-  Serial.flush();
-}
 
 void diagnostic_test_init() {
   Serial.println("\n=== HARDWARE DIAGNOSTIC TEST ===");
   Serial.flush();
-
-#ifdef BOOT_DEBUG
-  // Dump full system state in debug mode
-  dump_system_state();
-#endif
 
 // Test 1: Neopixel
 #ifdef NEOPIXEL_PIN

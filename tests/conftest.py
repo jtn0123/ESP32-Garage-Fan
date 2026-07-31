@@ -21,9 +21,13 @@ def mosquitto_broker():
     conf = os.path.join(ROOT, "mosquitto_test.conf")
     port = 18884
 
-    proc = subprocess.Popen(
-        [mosq, "-c", conf, "-v"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    )
+    # DEVNULL, not PIPE: -v logs every packet, nobody drains the pipe, and a
+    # full-suite's worth of traffic fills the 64 KB buffer - at which point
+    # mosquitto blocks on its next write and the frozen broker drops clients.
+    # That surfaced as rc=4 publish/subscribe failures in whichever test ran
+    # after the buffer filled (reproducible only at full-suite volume).
+    _blog = open("/tmp/mosq_fixture.log", "w")
+    proc = subprocess.Popen([mosq, "-c", conf], stdout=_blog, stderr=subprocess.STDOUT)
 
     host = "127.0.0.1"
     deadline = time.time() + 5.0

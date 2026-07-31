@@ -29,17 +29,36 @@ def repo_root() -> Path:
 
 ROOT = repo_root()
 
-# Try to load environment variables from .env file
-try:
-    from dotenv import load_dotenv
 
+def _load_dotenv_once() -> None:
+    """Pull the repo .env into os.environ - called from main(), NOT at import.
+
+    This used to run at module import, which meant any test importing this
+    module for its pure helpers silently injected the developer's real broker
+    host and credentials into the whole pytest process. Downstream integration
+    tests then skipped their local fixture broker and dialed production,
+    failing with auth errors that only reproduced in full-suite runs.
+    """
+    # Parsed directly instead of importing python-dotenv: the build runs under
+    # PlatformIO's bundled Python, and a PIO core upgrade shipped an env
+    # without that package - the ImportError was silently swallowed and the
+    # firmware baked EMPTY WiFi credentials (found the hard way on the core
+    # 3.x bench flash). Matching dotenv semantics: existing environment
+    # variables win over .env values.
     env_path = ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-        print(f"Loaded environment variables from {env_path}")
-except ImportError:
-    # dotenv not installed, will use environment variables only
-    pass
+    if not env_path.exists():
+        return
+    loaded = 0
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if k and k not in os.environ:
+            os.environ[k] = v
+            loaded += 1
+    print(f"Loaded {loaded} environment variables from {env_path}")
 
 
 def parse_duration(s: str) -> int:
@@ -113,6 +132,7 @@ def c_string(s: str) -> str:
 
 
 def main():
+    _load_dotenv_once()
     prj = str(ROOT)
     cfg_dir = os.path.join(prj, "config")
     y_path = os.path.join(cfg_dir, "device.yaml")
@@ -219,6 +239,11 @@ def main():
         f.write("#pragma once\n\n")
         f.write(f"#define ROOM_NAME {c_string(room_name)}\n")
         f.write(f"#define FW_VERSION {c_string(fw_version)}\n")
+        # POSIX TZ string for the on-device clock; config.h supplies the
+        # default (US Pacific) when device.yaml doesn't set one.
+        timezone = str(data.get("timezone", "") or "")
+        if timezone:
+            f.write(f"#define TIME_TZ {c_string(timezone)}\n")
         f.write(f"#define WAKE_INTERVAL_SEC {wake_interval}\n")
         # Guarded so a -DSAMPLE_INTERVAL_SEC build flag still wins, matching how
         # the other tunables in config.h behave.

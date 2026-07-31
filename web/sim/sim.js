@@ -560,15 +560,18 @@
       // /index.html). Neither single path resolves under both, so try each.
       const base = (typeof window !== 'undefined' ? window.location.href : '');
       const candidates = [
-        new URL(`../icons/device_baked/50x50/${name}.png`, base).href,
-        new URL(`icons/device_baked/50x50/${name}.png`, base).href,
+        new URL(`../icons/device_baked/28x28/${name}.png`, base).href,
+        new URL(`icons/device_baked/28x28/${name}.png`, base).href,
       ];
       const key = `baked::${name}::${w}x${h}`;
       const entry = __mdiCache.get(key);
       if (entry && entry.bitmaps && entry.bitmaps.get('img')){
         const img = entry.bitmaps.get('img');
-        // Scale to fit the target size while maintaining aspect ratio
-        const targetSize = Math.min(w, h, STANDARD_ICON_SIZE);
+        // Native size when it fits (a 28px baked icon in the 30px box draws
+        // 1:1, matching the device exactly); only shrink when the box is
+        // smaller. Downscaling a 1-bit outline drops rows and breaks 1px
+        // strokes, so never scale unless forced.
+        const targetSize = Math.min(w - 2, h - 2, Math.max(img.width, img.height));
         const scale = targetSize / Math.max(img.width, img.height);
         const drawW = Math.floor(img.width * scale);
         const drawH = Math.floor(img.height * scale);
@@ -1789,6 +1792,13 @@
     const d = img.data;
     for (let i=0;i<d.length;i+=4){
       const r=d[i], g=d[i+1], b=d[i+2];
+      // Tri-color aware: the panel has three inks, so clearly-red pixels snap
+      // to the red ink (#cc0000) instead of being crushed by the luminance
+      // threshold; everything else quantizes black/white as before.
+      if (r > 120 && r > g * 2 && r > b * 2){
+        d[i]=204; d[i+1]=0; d[i+2]=0; d[i+3]=255;
+        continue;
+      }
       const y = 0.2126*r + 0.7152*g + 0.0722*b;
       const v = y < THRESH ? 0 : 255;
       d[i]=d[i+1]=d[i+2]=v;
@@ -2009,8 +2019,8 @@
     pendingDraw = requestAnimationFrame(()=>{ pendingDraw = 0; draw({}); });
   }
 
-  function text(x,y,str,size=10,weight='normal',regionName=null){
-    ctx.fillStyle = '#000';
+  function text(x,y,str,size=10,weight='normal',regionName=null,color=null){
+    ctx.fillStyle = color || '#000';
     ctx.font = `${weight} ${size}px ${FONT_STACK}`;
     ctx.textBaseline = 'top';
     ctx.fillText(str, x, y);
@@ -2075,6 +2085,53 @@
       // Export layout metrics for tests
       window.__layoutMetrics = { labels: {}, weather: {}, statusLeft: {} };
       window.__tempMetrics = { inside: {}, outside: {} };
+      // Shared {placeholder} expander for text-bearing ops, mirroring the
+      // firmware's spec_expand_template/spec_format_field pair. One expander,
+      // not per-op copies - the textCenteredIn mini-expander drifted once
+      // (no format specs, no DEFAULTS fallback, decimal temps).
+      const expandTemplate = (raw) => String(raw || '').replace(/\{([^}]+)\}/g, (_, k) => {
+        if (k === 'fw_version'){
+          if (data.fw_version !== undefined && data.fw_version !== null && String(data.fw_version) !== '') return String(data.fw_version);
+          if (typeof window !== 'undefined' && typeof window.UI_FW_VERSION === 'string') return window.UI_FW_VERSION;
+        }
+        if (k === 'weather_short') return shortConditionLabel(data.weather || '');
+        const base = k.replace(/[:].*$/, '').replace(/->.*$/, '');
+        let val = (data[base] !== undefined && data[base] !== null)
+          ? data[base]
+          : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[base] : undefined);
+        if (val === undefined || val === null) {
+          const alias = base.replace(/_f$/, '');
+          val = (data[alias] !== undefined && data[alias] !== null)
+            ? data[alias]
+            : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[alias] : undefined);
+        }
+        if (val === undefined || val === null) {
+          if (validationEnabled) missingDataFields.add(base);
+          return '';
+        }
+        const conv = k.match(/->([a-z]+)/);
+        if (conv){
+          const to = conv[1]; const num = parseFloat(String(val));
+          if (isFinite(num) && to === 'mph') val = (num * 2.237);
+        }
+        const fmt = k.match(/:(.*)$/);
+        if (fmt){
+          const m = fmt[1].match(/\.(\d)f/);
+          if (m){
+            const d = parseInt(m[1]);
+            if (!isNaN(d) && d >= 0 && d <= 20) {
+              const num = parseFloat(String(val));
+              if (isFinite(num)) val = num.toFixed(d);
+            }
+          }
+        } else if (base === 'inside_temp_f' || base === 'outside_temp_f') {
+          // Firmware spec_format_field renders these with %.0f - integer
+          // degrees on the glass, so decimal feeds must not widen sim text.
+          const num = parseFloat(String(val));
+          if (isFinite(num)) val = String(Math.round(num));
+        }
+        return String(val);
+      });
       for (const cname of list){
         const ops = (spec.components || {})[cname] || [];
         for (const op of ops){
@@ -2084,6 +2141,56 @@
           // firmware (firmware/arduino/src/main.cpp).
           if (op.when && !specFieldHas(op.when, data)) continue;
           switch(op.op){
+            case 'sparkline': {
+              // 24h history polyline. Series pairs sharing a rect share a scale
+              // (group = hist_temp_* or hist_rh_*) so in/out are comparable.
+              const r = rects[op.rect]; if (!r) break;
+              const arr = data[op.series]; if (!Array.isArray(arr) || arr.length < 2) break;
+              const groupKeys = String(op.series).startsWith('hist_temp')
+                ? ['hist_temp_in','hist_temp_out'] : ['hist_rh_in','hist_rh_out'];
+              let mn=Infinity, mx=-Infinity;
+              for (const gk of groupKeys){
+                const a = data[gk]; if (!Array.isArray(a)) continue;
+                for (const v of a){ if (isFinite(v)) { if (v<mn) mn=v; if (v>mx) mx=v; } }
+              }
+              if (!isFinite(mn) || mx===mn) { mx = mn+1; }
+              const cap = 288;  // 24h of 5-min samples; 'now' anchors right
+              ctx.strokeStyle = (op.color === 'red') ? '#cc0000' : '#000'; ctx.lineWidth=1;
+              ctx.setLineDash(op.style==='dashed' ? [2,2] : []);
+              ctx.beginPath();
+              let started=false;
+              for (let i=0;i<arr.length;i++){
+                const v=arr[i]; if (!isFinite(v)) { started=false; continue; }
+                const px = r[0] + (r[2]-1) - (arr.length-1-i)*(r[2]-1)/(cap-1);
+                const py = r[1] + (r[3]-1) - (v-mn)/(mx-mn)*(r[3]-1);
+                if (!started){ ctx.moveTo(px,py); started=true; } else ctx.lineTo(px,py);
+              }
+              ctx.stroke(); ctx.setLineDash([]);
+              // Plot frame stays black regardless of the series' line color,
+              // matching the device (its frame is hard-coded GxEPD_BLACK).
+              ctx.strokeStyle = '#000';
+              ctx.strokeRect(r[0]-1, r[1]-1, r[2]+2, r[3]+2);
+              break;
+            }
+            case 'fill': {
+              // Solid rect fill (inverted regions). Matches firmware OP_FILL.
+              // 'red' is the tri-color wing's accent; mono panels draw black.
+              const r = rects[op.rect]; if (!r) break;
+              ctx.fillStyle = (op.color === 'white') ? '#fff' : (op.color === 'red') ? '#cc0000' : '#000';
+              ctx.fillRect(r[0], r[1], r[2], r[3]);
+              break;
+            }
+            case 'frame': {
+              // 1px outline (value chips). Four fillRects, not strokeRect,
+              // so the 1-bit canvas stays free of antialiased grays.
+              const r = rects[op.rect]; if (!r) break;
+              ctx.fillStyle = (op.color === 'red') ? '#cc0000' : '#000';
+              ctx.fillRect(r[0], r[1], r[2], 1);
+              ctx.fillRect(r[0], r[1] + r[3] - 1, r[2], 1);
+              ctx.fillRect(r[0], r[1], 1, r[3]);
+              ctx.fillRect(r[0] + r[2] - 1, r[1], 1, r[3]);
+              break;
+            }
             case 'line': {
               const fx = (op.from && op.from[0]) || 0;
               const fy = (op.from && op.from[1]) || 0;
@@ -2098,51 +2205,7 @@
               const r = op.rect ? rects[op.rect] : null;
               const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';
-              let s = String(op.text || '');
-              s = s.replace(/\{([^}]+)\}/g, (_,k)=>{
-                // Basic formatter: support fw_version injection and simple passthrough.
-                // Prefer the data feed's fw_version (what a real device reports);
-                // the git stamp baked into ui_generated.js is only a fallback.
-                if (k === 'fw_version'){
-                  if (data.fw_version !== undefined && data.fw_version !== null && String(data.fw_version) !== '') return String(data.fw_version);
-                  if (typeof window !== 'undefined' && typeof window.UI_FW_VERSION === 'string') return window.UI_FW_VERSION;
-                }
-                if (k === 'weather_short') return shortConditionLabel(data.weather || '');
-                const base = k.replace(/[:].*$/, '').replace(/->.*$/, '');
-                // Prefer provided data; fall back to DEFAULTS when missing
-                let val = (data[base] !== undefined && data[base] !== null)
-                  ? data[base]
-                  : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[base] : undefined);
-                if (val === undefined || val === null) {
-                  // Secondary fallback: allow "_f" alias (e.g., inside_temp_f)
-                  const alias = base.replace(/_f$/, '');
-                  val = (data[alias] !== undefined && data[alias] !== null)
-                    ? data[alias]
-                    : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[alias] : undefined);
-                }
-                if (val === undefined || val === null) {
-                  if (validationEnabled) missingDataFields.add(base);
-                  return '';
-                }
-                // conversions
-                const conv = k.match(/->([a-z]+)/);
-                if (conv){
-                  const to = conv[1]; const num = parseFloat(String(val));
-                  if (isFinite(num) && to === 'mph') val = (num * 2.237);
-                }
-                const fmt = k.match(/:(.*)$/);
-                if (fmt){
-                  const m = fmt[1].match(/\.(\d)f/);
-                  if (m){ 
-                    const d = parseInt(m[1]); 
-                    if (!isNaN(d) && d >= 0 && d <= 20) {
-                      const num = parseFloat(String(val)); 
-                      if (isFinite(num)) val = num.toFixed(d); 
-                    }
-                  }
-                }
-                return String(val);
-              });
+              let s = expandTemplate(op.text);
               if (r){
                 // Pad clipping box slightly to avoid cutting off glyph ascenders/descenders
                 const __pad_top = 1, __pad_bottom = 1, __pad_left = 0, __pad_right = 0;
@@ -2173,7 +2236,7 @@
                 // Add 1px padding from top for better appearance
                 const y = (op.y !== undefined) ? (r[1] + op.y) : (r[1] + 1);
                 // Use our text function for tracking
-                text(x, y, s, fpx, weight, op.rect);
+                text(x, y, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red' || op.color === 'red-inverse') ? '#cc0000' : null);
                 // Export footer metrics for layout tests, keyed by rect
                 if (op.rect === 'FOOTER_BATTERY'){
                   const textW = ctx.measureText(s).width;
@@ -2215,39 +2278,8 @@
               }
               break;
             }
-            case 'timeRight': {
-              const r = rects[op.rect]; if (!r) break;
-              const fpx = ((fonts[op.font||'time']||{}).px) || pxTime;
-              // Resolve op.source template like {time_hhmm}; robust fallbacks to legacy data.time
-              let s = '';
-              try{
-                const src = String(op.source||'').replace(/[{}]/g,'');
-                if (src) {
-                  if (data[src] !== undefined && data[src] !== null && String(data[src]) !== '') {
-                    s = String(data[src]);
-                  } else if (data.time_hhmm !== undefined && data.time_hhmm !== null && String(data.time_hhmm) !== '') {
-                    s = String(data.time_hhmm);
-                  } else {
-                    s = String(data.time||'');
-                  }
-                } else {
-                  s = String(data.time_hhmm || data.time || '');
-                }
-              }catch(e){ s = String((data.time_hhmm||data.time||'')); }
-              // Ensure measurement uses the same font we'll render with
-              ctx.font = `${fpx}px ${FONT_STACK}`; ctx.textBaseline='top';
-              const tw = ctx.measureText(s).width;
-              const tx = r[0] + r[2] - 2 - tw;
-              const ty = r[1] + 1;
-              text(tx, ty, s, fpx, 'normal', op.rect);
-              // Stabilize test sampling by ensuring a solid pixel within the center of the time box
-              // Tests compute center using measured width and sample at y+2 relative to returned y
-              // Draw a 1px dot at that location to avoid font/antialias variability across environments
-              const cx = tx + Math.max(1, Math.floor(tw / 2));
-              ctx.fillStyle = '#000';
-              ctx.fillRect(cx, ty + 2, 1, 1);
-              break;
-            }
+            // 'timeRight' removed - no longer in ui_spec.json (v2's header uses
+            // textCenteredIn); firmware dropped OP_TIMERIGHT the same day.
             case 'labelCentered': {
               const r = rects[op.aboveRect]; if (!r) break;
               const fpx = ((fonts[op.font||'label']||{}).px) || pxLabel;
@@ -2264,40 +2296,30 @@
               break;
             }
             case 'tempGroupCentered': {
+              // Big temperature + units, centered in the op's rect. The metrics
+              // key comes from the op's value template (inside_temp_f /
+              // outside_temp_f), not from rect-name matching - variants can name
+              // rects anything. (INNER/BADGE rect lookups removed: no spec has
+              // ever defined them, so those branches never ran.)
               const r = rects[op.rect]; if (!r) break;
-              // Render number + units centered, prefer INNER area for v2 variants
-              const isV2 = (typeof window !== 'undefined' && true /* always v2 */);
-              // Use standard font size for v2
               const fontSize = SIZE_BIG;
               ctx.font = `bold ${fontSize}px ${FONT_STACK}`; ctx.textBaseline='top';
-              let s = String((op.value||'').toString().replace(/[{}]/g,''));
-              s = String(data[s] ?? '');
-              const inner = isV2 ? (op.rect === 'INSIDE_TEMP' ? rects.INSIDE_TEMP_INNER : (op.rect === 'OUT_TEMP' ? rects.OUT_TEMP_INNER : null)) : null;
-              const area = inner || r;
-              const areaX = area[0], areaY = area[1], areaW = area[2];
-              const badge = isV2 ? (op.rect === 'INSIDE_TEMP' ? rects.INSIDE_TEMP_BADGE : (op.rect === 'OUT_TEMP' ? rects.OUT_TEMP_BADGE : null)) : null;
-              const unitsW = badge ? badge[2] : 14;
+              const field = String(op.value||'').replace(/[{}]/g,'');
+              const s = String(data[field] ?? '');
+              const unitsW = 14;
               const tw = ctx.measureText(s).width;
-              const totalW = Math.min(Math.max(0,areaW-2), tw + unitsW);
-              const left = Math.round(areaX + Math.max(0, Math.floor((areaW - totalW)/2)));
-              // Center text vertically in the area
-              const areaH = area[3] || 28;
-              const yTop = Math.round(areaY + Math.max(0, Math.floor((areaH - fontSize) / 2)));
-              // Track the inner region for validation
-              const innerRegion = inner ? (op.rect === 'INSIDE_TEMP' ? 'INSIDE_TEMP_INNER' : 'OUT_TEMP_INNER') : op.rect;
-              text(left, yTop, s, fontSize, 'bold', innerRegion);
-              if (badge){
-                // Don't draw border around badge - just the text
-                text(badge[0] + 2, badge[1] + Math.max(0, Math.floor((badge[3]-10)/2)), '°F', 10);
-              } else {
-                // Adjust degree and F symbols to align with centered temperature
-                const unitSize = 12;
-                const unitYOffset = 3;
-                text(left + tw + 2, yTop + unitYOffset, '°', unitSize);
-                text(left + tw + 8, yTop + unitYOffset, 'F', unitSize);
-              }
-              const key = (op.rect === 'INSIDE_TEMP') ? 'inside' : (op.rect === 'OUT_TEMP' ? 'outside' : null);
-              if (key){ window.__tempMetrics[key] = { rect: { x: areaX, y: areaY, w: areaW, h: (area[3]||0) }, contentLeft: left, totalW: (tw + unitsW) }; }
+              const totalW = Math.min(Math.max(0, r[2]-2), tw + unitsW);
+              const left = Math.round(r[0] + Math.max(0, Math.floor((r[2] - totalW)/2)));
+              const yTop = Math.round(r[1] + Math.max(0, Math.floor(((r[3]||28) - fontSize) / 2)));
+              // color:"red" renders the digits + units in the tri-color accent
+              const digitColor = (op.color === 'red') ? '#cc0000' : null;
+              text(left, yTop, s, fontSize, 'bold', op.rect, digitColor);
+              const unitSize = 12, unitYOffset = 3;
+              text(left + tw + 2, yTop + unitYOffset, '°', unitSize, 'normal', undefined, digitColor);
+              text(left + tw + 8, yTop + unitYOffset, 'F', unitSize, 'normal', undefined, digitColor);
+              const key = field.startsWith('inside') ? 'inside'
+                        : (field.startsWith('outside') ? 'outside' : null);
+              if (key){ window.__tempMetrics[key] = { rect: { x: r[0], y: r[1], w: r[2], h: (r[3]||0) }, contentLeft: left, totalW: (tw + unitsW) }; }
               break;
             }
             case 'textCenteredIn': {
@@ -2305,139 +2327,66 @@
               const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';
               const raw = String(op.text||'');
-              const s = raw.replace(/\{([^{}]+)\}/g, (_,k)=>{
-                if (k === 'weather_short') return shortConditionLabel(data.weather || '');
-                return String(data[k]||'');
-              });
+              const s = expandTemplate(raw);
               ctx.font = `${weight} ${fpx}px ${FONT_STACK}`; ctx.textBaseline='top';
               const tw = ctx.measureText(s).width;
               // Center text horizontally in rect (matches firmware behavior)
               const x = r[0] + Math.max(0, Math.floor((r[2]-tw)/2));
               const yTop = (op.yOffset? (r[1]+op.yOffset) : r[1]);
-              text(x, yTop, s, fpx, weight, op.rect);
+              text(x, yTop, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red' || op.color === 'red-inverse') ? '#cc0000' : null);
               if (raw.includes('IP ')){
                 window.__layoutMetrics.statusLeft.ip = { x, w: tw };
               }
               break;
             }
             case 'iconIn': {
+              // Icon only - the condition label is always its own text op, in
+              // every variant, matching the firmware exactly. The old "legacy"
+              // icon+label fallback and its isV2 gating produced two real bugs
+              // (doubled labels) and served no spec: deleted.
               const r = rects[op.rect]; if (!r) break;
-              // Track that WEATHER_ICON has rendered content
-              if (op.rect === 'WEATHER_ICON' && validationEnabled) {
-                renderedContent['WEATHER_ICON'] = {
-                  text: 'weather_icon',
-                  fontSize: 0,
+              if (validationEnabled) {
+                renderedContent[op.rect] = {
+                  text: 'weather_icon', fontSize: 0,
                   actualBounds: { x: r[0], y: r[1], width: r[2], height: r[3] }
                 };
               }
-              let barX = r[0], barY = r[1], barW = r[2], barH = r[3];
-              const isV2 = (function(){
-                try{
-                  const mode = (typeof window !== 'undefined' && window.__specMode) ? String(window.__specMode) : '';
-                  const variant = (typeof window !== 'undefined' && window.QS) ? (window.QS.get('variant') || '') : '';
-                  const defVar = (typeof window !== 'undefined' && window.UI_SPEC && window.UI_SPEC.defaultVariant) ? String(window.UI_SPEC.defaultVariant) : '';
-                  return mode.startsWith('v2') || variant.startsWith('v2') || defVar.startsWith('v2');
-                }catch(_){ return false; }
-              })();
-              // For WEATHER_ICON region in v2: left-justify icon in its rect (no border)
-              let iconW, iconH, startX, startY;
-              if (op.rect === 'WEATHER_ICON' && isV2) {
-                // Clear the icon area, clamped to the frame interior so the
-                // 1px display border (x=0/249, y=0/121) is never erased.
-                // The firmware does no clear at all here (full refresh starts
-                // from a blank buffer), so anything we wipe must stay inside.
-                const clearX0 = Math.max(1, barX - 2);
-                const clearY0 = Math.max(1, barY - 2);
-                const clearX1 = Math.min(WIDTH - 1, barX + barW + 2);
-                const clearY1 = Math.min(HEIGHT - 1, barY + barH + 2);
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(clearX0, clearY0, Math.max(0, clearX1 - clearX0), Math.max(0, clearY1 - clearY0));
-                ctx.strokeStyle = '#000'; // Reset for icon drawing
-                // Inset and clip to avoid any boundary overlap/cutoff
-                const inset = 2;
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(barX + inset, barY + inset, Math.max(0, barW - inset*2), Math.max(0, barH - inset*2));
-                ctx.clip();
-                // Fill the rect (minus inset) with the icon, centered within the inner box
-                iconW = Math.max(14, (barW - inset*2));
-                iconH = Math.max(12, (barH - inset*2));
-                startX = barX + inset + Math.max(0, Math.floor(((barW - inset*2) - iconW)/2));
-                startY = barY + inset + Math.max(0, Math.floor(((barH - inset*2) - iconH)/2));
-                // Draw icon only (no surrounding border)
-                // Center circular icons inside the inner box
-                const iconCx = startX + Math.floor(iconW/2);
-                const iconCy = startY + Math.floor(iconH/2);
-                ctx.strokeStyle = '#000'; ctx.fillStyle = '#000';
-                const category = classifyWeather(data.weather);
-                // Try baked bitmap first (matches device), then SVG, then glyph
-                if (!tryDrawBakedBitmap(category, startX, startY, iconW, iconH)){
-                  const drewSvg = tryDrawMdiIcon(category, startX, startY, iconW, iconH);
-                  if (!drewSvg) drawWeatherGlyph(category, startX, startY, iconW, iconH);
-                }
-                // The weather label is drawn by the footer_split textCenteredIn
-                // op on FOOTER_WEATHER (same as firmware) — not here.
-                ctx.restore();
-                break;
-              }
-              // Legacy/other behavior unchanged
-              // Use the actual WEATHER_ICON rect coordinates for rendering
-              const fpx2 = ((fonts['small']||{}).px) || pxSmall;
-              let barX2 = r[0], barY2 = r[1], barW2 = r[2], barH2 = r[3];
-              // Clear border for WEATHER_ICON in legacy path too
-              if (op.rect === 'WEATHER_ICON') {
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(barX2 - 2, barY2 - 2, barW2 + 4, barH2 + 4);
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(barX2, barY2, barW2, barH2);
-                ctx.strokeStyle = '#000';
-              }
-              if (op.rect !== 'WEATHER_ICON') {
-                barX2 = 130; barY2 = 95; barW2 = r[2]; barH2 = Math.min(24, Math.max(12, r[3]));
-                if (typeof window !== 'undefined' && window.__specMode === 'v2_grid' && rects.FOOTER_WEATHER){
-                  const fr = rects.FOOTER_WEATHER;
-                  barW2 = fr[2];
-                  barH2 = Math.min(22, Math.max(12, fr[3] - 4));
-                  barX2 = fr[0];
-                  barY2 = fr[1] + Math.max(0, Math.floor((fr[3] - barH2)/2));
-                }
-              }
-              // Centered icon+text path for legacy
-              if (barW2 <= 0 || barH2 <= 0) break;
-              let iconW2 = Math.max(12, Math.min(26, barW2 - 4));
-              let iconH2 = Math.max(12, Math.min(22, barH2 - 4));
-              const gap2 = Math.max(4, Math.min(10, Math.floor(barW2 * 0.10)));
-              const label2 = shortConditionLabel(data.weather || 'cloudy');
-              ctx.font = `${fpx2}px ${FONT_STACK}`; ctx.textBaseline='top';
-              const textW2 = ctx.measureText(label2).width;
-              const totalW2 = iconW2 + gap2 + textW2;
-              const startX2 = barX2 + Math.max(0, Math.floor((barW2 - totalW2)/2));
-              const iconCx2 = startX2 + Math.floor(iconW2/2);
-              const iconCy2 = barY2 + Math.floor(iconH2/2);
+              const barX = r[0], barY = r[1], barW = r[2], barH = r[3];
+              // Clear the icon area, clamped inside the 1px display border.
+              const clearX0 = Math.max(1, barX - 2);
+              const clearY0 = Math.max(1, barY - 2);
+              const clearX1 = Math.min(WIDTH - 1, barX + barW + 2);
+              const clearY1 = Math.min(HEIGHT - 1, barY + barH + 2);
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(clearX0, clearY0, Math.max(0, clearX1 - clearX0), Math.max(0, clearY1 - clearY0));
+              const inset = 2;
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(barX + inset, barY + inset, Math.max(0, barW - inset*2), Math.max(0, barH - inset*2));
+              ctx.clip();
+              const iconW = Math.max(14, (barW - inset*2));
+              const iconH = Math.max(12, (barH - inset*2));
+              const startX = barX + inset;
+              const startY = barY + inset;
               ctx.strokeStyle = '#000'; ctx.fillStyle = '#000';
-              const category2 = classifyWeather(data.weather);
-              if (!tryDrawBakedBitmap(category2, startX2, barY2, iconW2, iconH2)){
-                const drewSvg2 = tryDrawMdiIcon(category2, startX2, barY2, iconW2, iconH2);
-                if (!drewSvg2) drawWeatherGlyph(category2, startX2, barY2, iconW2, iconH2);
+              const category = classifyWeather(data.weather);
+              if (!tryDrawBakedBitmap(category, startX, startY, iconW, iconH)){
+                const drewSvg = tryDrawMdiIcon(category, startX, startY, iconW, iconH);
+                if (!drewSvg) drawWeatherGlyph(category, startX, startY, iconW, iconH);
               }
-              const labelTop2 = barY2 + Math.max(0, Math.floor((iconH2 - fpx2)/2)) + 1;
-              text(startX2 + iconW2 + gap2, labelTop2, label2, fpx2);
-              window.__layoutMetrics.weather = {
-                bar: { x: barX2, w: barW2, y: barY2 },
-                iconBox: { x: startX2, y: barY2, w: iconW2, h: iconH2 },
-                totalW: iconW2 + gap2 + ctx.measureText(label2).width
-              };
-              break;
-            }
-            case 'shortCondition': {
-              const r = rects[op.rect]; if (!r) break;
-              // v2 doesn't need duplicate label
-              if (typeof window !== 'undefined' && true /* always v2 */){ break; }
-              const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
-              const s = String((window.lastData && window.lastData.weather) || 'Cloudy').split(/[\s-]+/)[0];
-              const ty = r[1] + Math.max(0, Math.floor((r[3] - fpx)/2));
-              text(r[0] + (op.xOffset||0), ty, s, fpx);
+              ctx.restore();
+              if (op.color === 'red'){
+                // Recolor the glyph's dark pixels to the red ink, mirroring the
+                // device passing map_op_color(p3) into draw_icon().
+                const img = ctx.getImageData(barX, barY, barW, barH);
+                const d = img.data;
+                for (let i = 0; i < d.length; i += 4){
+                  if (d[i] < 128 && d[i+1] < 128 && d[i+2] < 128){
+                    d[i] = 204; d[i+1] = 0; d[i+2] = 0;
+                  }
+                }
+                ctx.putImageData(img, barX, barY);
+              }
               break;
             }
             case 'batteryGlyph': {
@@ -2511,9 +2460,48 @@
     window.drawFromSpec = drawFromSpec;
   }
 
+  const __demoHist = (()=>{
+    const N=288, ti=[], to=[], ri=[], ro=[];
+    for (let i=0;i<N;i++){
+      const t=i/N*2*Math.PI;
+      ti.push(73+1.6*Math.sin(t-2)+0.6*Math.sin(9*t));
+      to.push(72+14*Math.sin(t-2.4));
+      ri.push(36+5*Math.sin(t+0.6));
+      ro.push(60-22*Math.sin(t-2.4));
+    }
+    return {ti,to,ri,ro};
+  })();
+  // Variant picker (C2): populated from the spec so new variants appear
+  // automatically; selection overrides for the session and updates the URL.
+  try {
+    const sel = document.getElementById('variantSel');
+    if (sel && window.UI_SPEC && window.UI_SPEC.variants) {
+      const names = Object.keys(window.UI_SPEC.variants);
+      const current = QS.get('variant') || window.UI_SPEC.defaultVariant || names[0];
+      for (const n of names) {
+        const o = document.createElement('option');
+        o.value = n; o.textContent = n + (n === window.UI_SPEC.defaultVariant ? ' (default)' : '');
+        if (n === current) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => {
+        window.__variantOverride = sel.value;
+        const url = new URL(window.location.href);
+        url.searchParams.set('variant', sel.value);
+        window.history.replaceState(null, '', url.toString());
+        if (typeof window.draw === 'function') window.draw();
+        else if (typeof draw === 'function') draw();
+      });
+    }
+  } catch(e) { console.warn('variant picker init failed', e); }
+
   const DEFAULTS = {
     room_name: 'Office',
+    hist_temp_in: __demoHist.ti, hist_temp_out: __demoHist.to,
+    hist_rh_in: __demoHist.ri, hist_rh_out: __demoHist.ro,
+    hist_temp_min: 58, hist_temp_max: 86, hist_rh_min: 31, hist_rh_max: 82,
     time_hhmm: '10:32',
+    date_mmmdd: 'Jul 30',
     inside_temp_f: 72.5,
     inside_hum_pct: 47,
     outside_temp_f: 68.4,
@@ -2626,8 +2614,9 @@
     }
     try{ if (typeof window !== 'undefined') window.lastData = lastData; }catch(e){}
     // Render via spec only
-    const variant = QS.get('variant') || (typeof window!=='undefined' && window.UI_SPEC && window.UI_SPEC.defaultVariant) || 'v2';
-    console.log('Using variant:', variant);
+    const variant = (typeof window!=='undefined' && window.__variantOverride)
+      || QS.get('variant')
+      || (typeof window!=='undefined' && window.UI_SPEC && window.UI_SPEC.defaultVariant) || 'v2';
     
     ctx.fillStyle = '#fff'; ctx.fillRect(0,0,WIDTH,HEIGHT);
     

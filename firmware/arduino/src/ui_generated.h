@@ -9,6 +9,8 @@ struct SpecInfo { int canvas_w; int canvas_h; };
 static constexpr SpecInfo SPEC{ 250, 122 };
 enum VariantId {
     UIVAR_V2 = 0,
+    UIVAR_V3 = 1,
+    UIVAR_V3G = 2,
 };
 }
 

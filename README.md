@@ -1,6 +1,31 @@
-## ESP32 eInk Room Node — Battery‑Friendly Wi‑Fi Sensor with 2.13" e‑ink
+## ESP32 eInk Room Node — Wi‑Fi Sensor with 2.13" e‑ink
 
-"ESP32 eInk Room Node" — battery‑efficient Wi‑Fi sensor node with a 2.13" mono e‑ink display. Wakes on a schedule, reads inside sensors, pulls outside stats (from Home Assistant or MQTT), renders to e‑ink (partial), publishes to HA, and deep‑sleeps.
+Always‑on room sensor with a two‑page e‑ink UI. Reads inside temp/RH/pressure
+(on‑board BME280), pulls outside stats over MQTT, publishes to Home Assistant
+(auto‑discovery), and stays reachable for OTA. A deep‑sleep build exists for
+battery‑first installs, but the always‑on build is the flagship.
+
+**The deployed product today (`feather_esp32s2_always_on`, fw 1.15):**
+
+- **Two‑page UI** from a single spec (`config/ui_spec.json`): live data page
+  (inverted header band, big temps, full metrics, battery + IP) alternating
+  every 15 min with a **24 h sparkline history page**; **BOOT button flips
+  pages instantly** (blue/magenta NeoPixel feedback).
+- **Flash‑free partial refresh**: every 5‑minute sample lands on the glass in
+  ~300 ms with no black flash; full refreshes only at the page‑alternation
+  cadence.
+- **History that survives**: samples land in daily CSVs on the internal FFat
+  partition (SD card optional, auto‑fallback), backfill the sparkline ring at
+  boot, and **mount as a read‑only USB flash drive** when plugged into a
+  computer.
+- **Fully remote dev loop**: OTA deploys (`scripts/deploy.sh`), MQTT debug
+  commands (`espsensor/<id>/cmd/…` — sensors, heap, network, screenshot,
+  page‑flip), a live log stream, and pixel‑exact remote screenshots of the
+  panel.
+- **Design in the simulator first**: `web/sim` renders the same spec with a
+  variant picker; see [docs/UI_SPEC.md](docs/UI_SPEC.md) for the authoring
+  guide and [docs/ALWAYS_ON_AND_OTA.md](docs/ALWAYS_ON_AND_OTA.md) for
+  storage/OTA details. NeoPixel: boot stages, sample blips, idle twinkle.
 
 ### Hardware
 
@@ -213,12 +238,15 @@ build_flags =
 
 Note: The optional status LED heartbeat uses the Adafruit NeoPixel library and is already included in the PlatformIO `lib_deps`. You can disable the LED at build time with `-DUSE_STATUS_PIXEL=0` if optimizing for lowest sleep current.
 
-Developer builds:
-- `env:feather_esp32s2_always_on`: stays awake, samples every `SAMPLE_INTERVAL_SEC` (default 300), keeps a CSV history and rotating logs on microSD, and accepts network OTA. See [docs/ALWAYS_ON_AND_OTA.md](docs/ALWAYS_ON_AND_OTA.md) for the power tradeoff and the OTA workflow.
-- `env:feather_esp32s2_headless`: headless with parity to e‑ink build (same thresholds and availability; sleeps per `WAKE_INTERVAL_SEC`).
-- `env:feather_esp32s2_dev2`: headless, 3 min awake / 3 min sleep cycle for soak testing while limiting heat.
-- `env:feather_esp32s2_headless_1h`: headless, 1‑hour sleep schedule (WAKE_INTERVAL_SEC=3600).
-- `env:feather_esp32s2_headless_always`: headless, always on (DEV_NO_SLEEP=1) for rapid MQTT/HA validation.
+Build environments (see `firmware/arduino/platformio.ini`):
+- `feather_esp32s2_always_on` — **the flagship**: always awake, 5‑min samples,
+  two‑page UI with partial refresh, FFat history + USB drive mode, network
+  OTA. Deploy with `scripts/deploy.sh <ip>`.
+- `feather_esp32s2_display_only` — deep‑sleep battery build with the display.
+- `feather_esp32s2_headless` — deep‑sleep, no display (status pixel feedback).
+- `dev_display` — bench build (`DEV_NO_SLEEP`, verbose, diagnostics).
+- `native_*` — host‑side Unity test envs; run them all with
+  `scripts/test-native.sh`.
 
 ### Flash helper script (recommended)
 

@@ -7,7 +7,6 @@
 #include "safe_strings.h"
 #include "logging/logger.h"
 #include "profiling.h"
-#include "buffer_pool.h"
 #include "crash_handler.h"
 #include "memory_tracking.h"
 #include "power.h"
@@ -106,8 +105,6 @@ void DebugCommands::handleCommand(const char* topic, const uint8_t* payload, siz
     cmdPerf(client);
   } else if (strcmp(cmd, "perf_reset") == 0) {
     cmdPerfReset(client);
-  } else if (strcmp(cmd, "bufpool") == 0) {
-    cmdBufPool(client);
   } else if (strcmp(cmd, "crash") == 0) {
     cmdCrash(client);
   } else if (strcmp(cmd, "crash_clear") == 0) {
@@ -290,17 +287,6 @@ void DebugCommands::cmdPerfReset(PubSubClient* client) {
   publishResponse(client, "{\"cmd\":\"perf_reset\",\"status\":\"ok\"}");
 }
 
-void DebugCommands::cmdBufPool(PubSubClient* client) {
-  char stats[256];
-  BufferPool::getInstance().formatStatsJson(stats, sizeof(stats));
-
-  char response[384];
-  // Safely merge JSON: skip opening brace only if stats starts with '{'
-  const char* stats_content = (stats[0] == '{') ? stats + 1 : stats;
-  snprintf(response, sizeof(response), "{\"cmd\":\"bufpool\",%s}", stats_content);
-  publishResponse(client, response);
-}
-
 void DebugCommands::cmdCrash(PubSubClient* client) {
   char report[512];
   CrashHandler::getInstance().formatCrashReport(report, sizeof(report));
@@ -365,12 +351,11 @@ void DebugCommands::cmdFeatures(PubSubClient* client) {
            "\"debug_commands\":%d,"
            "\"profiling\":%d,"
            "\"memory_tracking\":%d,"
-           "\"crash_handler\":%d,"
-           "\"buffer_pool\":%d}",
+           "\"crash_handler\":%d}",
            FEATURE_HA_DISCOVERY, FEATURE_DIAGNOSTIC_MODE, FEATURE_STATUS_PIXEL,
            FEATURE_PRESSURE_SENSOR, FEATURE_OUTDOOR_WEATHER, FEATURE_BATTERY_MONITOR,
            FEATURE_DEBUG_COMMANDS, FEATURE_PROFILING, FEATURE_MEMORY_TRACKING,
-           FEATURE_CRASH_HANDLER, FEATURE_BUFFER_POOL);
+           FEATURE_CRASH_HANDLER);
   publishResponse(client, response);
 }
 

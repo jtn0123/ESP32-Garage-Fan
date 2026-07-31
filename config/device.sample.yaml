@@ -7,6 +7,8 @@ full_refresh_every: 12         # partials between full clears
 # Optional: firmware version string for HA device registry (sw_version). If not set,
 # it falls back to FW_VERSION env var, then `git describe` or short commit, else 'dev'.
 fw_version: "1.0.0"
+# POSIX TZ string for the on-device clock (default in config.h is US Pacific)
+timezone: "PST8PDT,M3.2.0,M11.1.0"
 outside_source: "mqtt"        # ha|mqtt (v1 defaults to MQTT)
 ha_entities:
   outdoor_temp: sensor.outdoor_temperature

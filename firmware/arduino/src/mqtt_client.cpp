@@ -10,6 +10,10 @@
 #include "debug_commands.h"
 #include "profiling.h"
 #include "safe_strings.h"
+#include "wifi_manager.h"
+#if MQTT_TLS
+#include "storage.h"
+#endif
 #include "power.h"  // For BatteryStatus
 #if LOG_MQTT_ENABLED
 #include "logging/log_mqtt.h"
@@ -21,8 +25,53 @@ extern "C" void display_capture_handle(const char* payload, size_t length);
 #endif
 
 // Static storage
+//
+// MQTT_TLS=1 (compile-time, default off) swaps in WiFiClientSecure. The CA
+// certificate is read from storage at /config/mqtt_ca.pem when present;
+// without one the link falls back to setInsecure() - still encrypted, but
+// the broker is not authenticated - and says so at boot. Heap cost of the
+// TLS session is ~40 KB; the always-on build has the headroom. Point
+// device.yaml's mqtt port at the broker's TLS listener (usually 8883).
+#if MQTT_TLS
+#include <WiFiClientSecure.h>
+static WiFiClientSecure g_wifi_client;
+#else
 static WiFiClient g_wifi_client;
+#endif
 static PubSubClient g_mqtt(g_wifi_client);
+#if MQTT_TLS
+// Owned copy of the CA pem; WiFiClientSecure::setCACert keeps the pointer.
+static char* g_mqtt_ca = nullptr;
+
+static void mqtt_tls_configure() {
+  static bool s_done = false;
+  if (s_done)
+    return;
+  s_done = true;
+  if (storage_is_mounted()) {
+    File f = storage_fs() ? storage_fs()->open("/config/mqtt_ca.pem", "r") : File();
+    if (f && f.size() > 0 && f.size() < 8192) {
+      size_t n = f.size();
+      g_mqtt_ca = static_cast<char*>(malloc(n + 1));
+      if (g_mqtt_ca) {
+        f.readBytes(g_mqtt_ca, n);
+        g_mqtt_ca[n] = 0;
+        g_wifi_client.setCACert(g_mqtt_ca);
+        Serial.println("[MQTT] TLS with CA from /config/mqtt_ca.pem");
+        if (f)
+          f.close();
+        return;
+      }
+    }
+    if (f)
+      f.close();
+  }
+  g_wifi_client.setInsecure();
+  Serial.println(
+      "[MQTT] TLS without CA (encrypted, broker unauthenticated) - "
+      "drop /config/mqtt_ca.pem onto storage to pin the broker");
+}
+#endif
 static OutsideReadings g_outside;
 static char g_mqtt_client_id[40];  // Renamed to avoid conflict with net.h
 static Preferences g_mqtt_prefs;
@@ -70,6 +119,10 @@ static String build_topic(const char* suffix) {
 void mqtt_begin() {
   // Client ID will be set externally via mqtt_set_client_id
   // to avoid WiFi dependency in this module
+
+#if MQTT_TLS
+  mqtt_tls_configure();
+#endif
 
   // Configure MQTT client
   g_mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);
@@ -128,6 +181,10 @@ void mqtt_begin() {
           // Store new interval - will be used on next sleep cycle
           extern void set_custom_sleep_interval(uint32_t sec);
           set_custom_sleep_interval(static_cast<uint32_t>(interval));
+          // The always-on scheduler reads rc_sample_interval_sec(), not the
+          // deep-sleep custom interval above — without this the command printed
+          // success and changed nothing on an always-on node.
+          rc_set_sample_interval_sec(static_cast<uint32_t>(interval));
           Serial.printf("[MQTT] Sleep interval set to %ld seconds\n", interval);
         } else {
           Serial.println("[MQTT] Invalid sleep interval (must be 180-3600 seconds)");
@@ -145,6 +202,13 @@ void mqtt_begin() {
         extern void set_device_mode(const char* mode);
         set_device_mode(buf);
       }
+      return;
+    }
+
+    // Flip the display page (same as pressing BOOT). Payload ignored.
+    if (topic_ends_with(topic, "/cmd/page")) {
+      extern void request_page_flip();
+      request_page_flip();
       return;
     }
 
@@ -344,15 +408,11 @@ bool mqtt_connect() {
 
     // Build discovery payload with device info
     char discovery_payload[256];
+    // Unconditional: wifi_manager is always in the build, and the previous
+    // FEATURE_WIFI guard referenced a flag that was never defined anywhere, so
+    // this always fell through to a hardcoded 0.0.0.0.
     char ip_buf[16];
-#if FEATURE_WIFI
-    // Get IP address from WiFi manager
-    extern String wifi_get_ip();
-    String ip_str = wifi_get_ip();
-    safe_strcpy(ip_buf, ip_str.c_str());
-#else
-    safe_strcpy(ip_buf, "0.0.0.0");
-#endif
+    wifi_get_ip_cstr(ip_buf, sizeof(ip_buf));
 
     snprintf(
         discovery_payload, sizeof(discovery_payload),
@@ -660,7 +720,6 @@ void mqtt_publish_publish_latency_ms(uint32_t publishLatencyMs) {
 }
 
 // Outside readings management
-void mqtt_update_outside_readings(const OutsideReadings& readings) { g_outside = readings; }
 
 OutsideReadings mqtt_get_outside_readings() { return g_outside; }
 

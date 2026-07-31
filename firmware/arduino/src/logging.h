@@ -4,14 +4,17 @@
 #include <Arduino.h>
 #include "generated_config.h"
 
-// Log levels - compile-time configurable (legacy)
-enum OldLogLevel {
-  LOG_LEVEL_ERROR = 0,
-  LOG_LEVEL_WARN = 1,
-  LOG_LEVEL_INFO = 2,
-  LOG_LEVEL_DEBUG = 3,
-  LOG_LEVEL_VERBOSE = 4
-};
+// Log levels - compile-time configurable (legacy).
+//
+// These MUST be #defines, not an enum: they are compared in `#if LOG_LEVEL >=
+// LOG_LEVEL_X` guards below, and the preprocessor substitutes 0 for any
+// identifier it does not know — enum constants included. As an enum, every
+// guard reduced to `0 >= 0` and no build flag could ever strip a log level.
+#define LOG_LEVEL_ERROR 0
+#define LOG_LEVEL_WARN 1
+#define LOG_LEVEL_INFO 2
+#define LOG_LEVEL_DEBUG 3
+#define LOG_LEVEL_VERBOSE 4
 
 // Set default log level based on build type
 #ifndef LOG_LEVEL
@@ -24,16 +27,34 @@ enum OldLogLevel {
 #endif
 #endif
 
+// Mirror of the serial log to the microSD card. Defined in storage.cpp, and
+// declared here rather than pulled in via storage.h so this header stays free of
+// FS.h/SD.h — it is included (directly or through safe_strings.h) by most of the
+// firmware, and the native tests build against it.
+//
+// A no-op until storage_log_set_mirror(true), which app_controller calls only after the
+// card is mounted and `storage.logs_enabled` has been read. Only WARN and ERROR
+// are mirrored: INFO is where the boot-time chatter lives, and an SD write costs
+// milliseconds where a Serial.printf costs microseconds.
+void log_mirror(const char* level, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+
 // Compile-time log level filtering macros
 #if LOG_LEVEL >= LOG_LEVEL_ERROR
-#define LOG_ERROR(fmt, ...) \
-  Serial.printf("[ERROR] %s:%d " fmt "\n", __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)                                                          \
+  do {                                                                               \
+    Serial.printf("[ERROR] %s:%d " fmt "\n", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+    log_mirror("ERROR", "%s:%d " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__);        \
+  } while (0)
 #else
 #define LOG_ERROR(fmt, ...) ((void)0)
 #endif
 
 #if LOG_LEVEL >= LOG_LEVEL_WARN
-#define LOG_WARN(fmt, ...) Serial.printf("[WARN] " fmt "\n", ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...)                            \
+  do {                                                \
+    Serial.printf("[WARN] " fmt "\n", ##__VA_ARGS__); \
+    log_mirror("WARN", fmt, ##__VA_ARGS__);           \
+  } while (0)
 #else
 #define LOG_WARN(fmt, ...) ((void)0)
 #endif
@@ -80,7 +101,7 @@ inline void log_heap_status(const char* context) {
 // This is intentional - function supports all levels but only active levels are compiled in
 template <typename T>
 inline void log_if_changed(const char* name, T& last_value, T current_value,
-                           OldLogLevel level = LOG_LEVEL_INFO) {
+                           int level = LOG_LEVEL_INFO) {
   if (last_value != current_value) {
     // cppcheck-suppress knownConditionTrueFalse
     if (level <= LOG_LEVEL) {

@@ -420,6 +420,12 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
     lines.append("    RECT__COUNT,")
     lines.append("};")
     lines.append("")
+    # Geometry table indexed by RectId. Generated so the renderer's id->rect
+    # lookup can never drift from the enum again: a hand-maintained switch in
+    # display_renderer.cpp once knew only the v2 rects, and every op targeting a
+    # newer rect silently fell back to (0,0) on the device.
+    lines.append("extern const int kRectTable[RECT__COUNT][4];")
+    lines.append("")
     # FontId enum from tokens
     font_order = []
     for n in ["big", "label", "small", "time"]:
@@ -462,6 +468,10 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
             "uint8_t kind; uint8_t rect; uint8_t font; uint8_t align; "
             "int16_t p0; int16_t p1; int16_t p2; int16_t p3; "
             "const char* s0; const char* s1; };"
+            "\n// Text ops with no explicit y in the spec carry this sentinel in p1:"
+            '\n// "not provided" (renderer applies its 1px default inset), which keeps an'
+            "\n// explicit y of 0 distinct instead of silently becoming +1."
+            "\nstatic constexpr int16_t kNoYOffset = INT16_MIN;"
         )
     )
     lines.append("")
@@ -470,6 +480,12 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
     for name in order:
         lines.append(f'    "{name}",')
     lines.append("};")
+    lines.append("")
+    # Index of the spec's defaultVariant, so the firmware's full-refresh entry
+    # point tracks the spec instead of hardcoding an array position.
+    default_variant = str(spec.get("defaultVariant", "") or "")
+    default_idx = order.index(default_variant) if default_variant in order else 0
+    lines.append(f"static constexpr uint8_t kDefaultVariantId = {default_idx};")
     lines.append("")
     # Component name lists per variant (by string for now)
     for name in order:
@@ -575,6 +591,15 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
     lines.append("")
     lines.append("namespace ui {")
     lines.append("")
+    # Rect geometry indexed by RectId (same sorted order as the enum).
+    lines.append("const int kRectTable[RECT__COUNT][4] = {")
+    for name in sorted(rects.keys()):
+        r = rects[name]
+        lines.append(
+            f"    {{{int(r[0])}, {int(r[1])}, {int(r[2])}, {int(r[3])}}},  // RECT_{name.upper()}"
+        )
+    lines.append("};")
+    lines.append("")
     # Emit ops per component
     for cname, ops in components.items():
         arr_name = f"kOps_{cname}"
@@ -595,15 +620,30 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 to = op.get("to") or [0, 0]
                 p0, p1 = int(frm[0]), int(frm[1])
                 p2, p3 = int(to[0]), int(to[1])
+            elif kind == "fill":
+                # Solid fill of the op's rect. p0: 0 black (default), 1 white,
+                # 2 red - the tri-color wing's accent, black on mono panels.
+                p0 = {"black": 0, "white": 1, "red": 2}.get(str(op.get("color", "black")), 0)
+            elif kind == "frame":
+                # 1px outline of the op's rect (value chips, legend boxes).
+                # p0 carries the same color code as fill (red = accent).
+                p0 = {"black": 0, "white": 1, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "text":
                 # Pass template through; device interprets placeholders like {ip}, {fw_version}
                 txt = str(op.get("text", ""))
                 s0 = _cxx_string_literal(txt)
                 try:
                     p0 = int(op.get("x", 0))
-                    p1 = int(op.get("y", 0))
+                    # kNoYOffset sentinel when the spec gives no y: an explicit
+                    # y of 0 must render at the rect top, not the +1 default.
+                    p1 = int(op.get("y", -32768))
                 except Exception:
-                    p0 = p1 = 0
+                    p0, p1 = 0, -32768
+                # p3: 1 = inverse (white) over a fill; 2 = red accent (black
+                # on mono); 3 = red-inverse (red on tri-color, white on mono -
+                # for red text over dark fills, where a black fallback would
+                # vanish into the background).
+                p3 = {"inverse": 1, "red": 2, "red-inverse": 3}.get(str(op.get("color", "")), 0)
             elif kind == "timeRight":
                 src = str(op.get("source", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
@@ -621,6 +661,8 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 val = str(op.get("value", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(val)
                 align = 2
+                # p3 = digit color code (0 black, 2 red accent - black on mono)
+                p3 = {"black": 0, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "textCenteredIn":
                 try:
                     p0 = int(op.get("yOffset", 0))
@@ -628,9 +670,18 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p0 = 0
                 s0 = _cxx_string_literal(str(op.get("text", "")))
                 align = 2
+                p3 = {"inverse": 1, "red": 2, "red-inverse": 3}.get(str(op.get("color", "")), 0)
+            elif kind == "sparkline":
+                # s0 = history series key; p0 = 1 for dashed stroke; p1 =
+                # line color code (0 black, 2 red accent - black on mono).
+                s0 = _cxx_string_literal(str(op.get("series", "")).strip())
+                p0 = 1 if str(op.get("style", "")) == "dashed" else 0
+                p1 = {"black": 0, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "iconIn":
                 src = str(op.get("iconFromWeather", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
+                # p3 = glyph color code (0 black, 2 red accent - black on mono)
+                p3 = {"black": 0, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "shortCondition":
                 try:
                     p0 = int(op.get("xOffset", 0))

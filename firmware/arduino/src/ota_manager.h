@@ -31,7 +31,7 @@ bool ota_in_progress();
 
 bool ota_is_active();
 
-// Apply /firmware/update.bin if present. Call during setup, after sd_begin().
+// Apply /firmware/update.bin if present. Call during setup, after storage_begin().
 // Reboots into the new image on success and does not return. Returns false when
 // there is nothing to apply or the image was rejected.
 bool ota_apply_from_sd();

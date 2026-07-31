@@ -62,18 +62,6 @@ void MemoryTracker::update() {
 #endif
 }
 
-void MemoryTracker::recordAllocation(size_t size, bool success) {
-  stats_.total_allocations++;
-
-  if (success) {
-    if (size > stats_.largest_allocation) {
-      stats_.largest_allocation = size;
-    }
-  } else {
-    stats_.failed_allocations++;
-  }
-}
-
 void MemoryTracker::resetCounters() {
   stats_.total_allocations = 0;
   stats_.failed_allocations = 0;

@@ -31,6 +31,20 @@ a redraw needs both a meaningful change in the displayed values *and*
 `DISPLAY_MIN_REFRESH_INTERVAL_SEC` (default 900) to have elapsed. Sampling every
 5 minutes therefore does not mean redrawing every 5 minutes.
 
+## Panel variants
+
+The 2.13" eInk FeatherWing family shares one pinout, so the wings are
+hardware-interchangeable; the driver is a build-time choice (`display_hw.h`):
+
+- **Mono SSD1680** (Adafruit 4195) — the default; flash-free ~300 ms partial
+  refresh every sample.
+- **Tri-color red/black/white** (Adafruit 4814, SSD1680/Z98c) — build the
+  `feather_esp32s2_always_on_3c` env (`DEPLOY_ENV=feather_esp32s2_always_on_3c
+  scripts/deploy.sh`). Know the physics: **every refresh on this panel is a
+  ~15 s full flash and there is no partial mode**, so the firmware skips the
+  per-sample partial update and repaints on the full-refresh cadence only.
+  Spec ops may declare `color: "red"`; mono panels render the same ops black.
+
 ## Build flags
 
 | Flag | Default | Meaning |
@@ -38,10 +52,11 @@ a redraw needs both a meaningful change in the displayed values *and*
 | `ALWAYS_ON` | `0` | Stay awake and sample from `loop()` instead of deep sleeping |
 | `SAMPLE_INTERVAL_SEC` | `300` | Sampling cadence. Minimum 60 — the BME280 self-heats if polled harder |
 | `DISPLAY_MIN_REFRESH_INTERVAL_SEC` | `900` | Floor between panel redraws |
-| `FEATURE_SD_STORAGE` | `1` | microSD history, logs, config and staged updates |
+| `FEATURE_STORAGE` | `1` | microSD history, logs, config and staged updates |
 | `FEATURE_OTA` | `1` | Network OTA and apply-from-SD |
 | `SD_CS_PIN` | `5` | Card chip select (D5 on the eInk FeatherWing) |
 | `OTA_PORT` | `3232` | ArduinoOTA / espota listener port |
+| `MQTT_TLS` | `0` | MQTT over TLS (WiFiClientSecure, ~40 KB heap). CA pinned from `/config/mqtt_ca.pem` on storage when present, else encrypted-but-unauthenticated. Point the mqtt port at the broker's TLS listener (8883) |
 | `OTA_REQUIRE_PASSWORD` | `0` | Set to 1 to refuse network OTA unless a password is set |
 
 `SAMPLE_INTERVAL_SEC` can also come from `sample_interval` in
@@ -68,6 +83,13 @@ default is used instead.
 /logs/logN.txt        rotating log, log0..log4, with index.txt naming the active one
 /firmware/update.bin  a firmware image to apply at boot
 ```
+
+The card is optional: when none responds, the same layout falls back to the
+board's internal 960 KB `ffat` partition (formatted automatically on first use).
+History, logs and staged updates work identically there; when free space drops
+below 64 KB the oldest day's CSV is dropped, which caps internal history at
+roughly two months. What internal flash cannot do is be pulled out and edited on
+a computer — `/config/device.json` overrides remain a card feature in practice.
 
 Format the card as a single FAT32 partition. On macOS:
 
@@ -112,9 +134,16 @@ MQTT passwords blank if you would rather keep them compiled into the binary.
 
 The card sits on the same hardware SPI bus as the e-ink panel; only the chip
 selects differ (panel D9, card D5). Both drivers use SPI transactions, so they
-coexist, but the card must be mounted *after* the bus exists. `sd_begin()` calls
+coexist, but the card must be mounted *after* the bus exists. `storage_begin()` calls
 `SPI.begin()` itself — which early-returns if the display already started the bus
 — so both the display and headless builds work.
+
+There is a third device on that bus: the Wing's 23K SRAM chip on `SRAM_CS_PIN`
+(D6). Nothing here uses it, but it is the only other part that drives MISO, and
+GxEPD2 — unlike Adafruit_EPD — never touches its chip select. A CS left as a
+floating input is not a deasserted CS, so `storage_begin()` drives D6 high before
+mounting. Symptoms of skipping this are intermittent: mounts that fail on some
+power-ups and succeed on others, which reads as a failing card.
 
 ## OTA updates
 
@@ -209,3 +238,23 @@ iso_time,uptime_s,temp_c,rh_pct,press_hpa,batt_v,batt_pct,rssi_dbm
 Failed readings are written as empty cells rather than `0` or `nan`, so a
 spreadsheet reads them as missing. Before NTP completes, rows are timestamped
 `unsynced` and land in `/data/nodate.csv` rather than being dropped.
+
+Both builds write history — the always-on loop once per `sample_interval_sec`,
+the deep-sleep build once per wake. Retention differs only in when the sweep
+runs: the always-on build folds it into its six-hourly maintenance tick, while
+the deep-sleep build sweeps on the first wake of each new calendar day (the
+marker lives in RTC memory, so a power cycle costs one extra directory scan).
+
+## Device log
+
+`storage.logs_enabled` mirrors the firmware's own `WARN` and `ERROR` output to
+`/logs/logN.txt`, rotating at `SD_LOG_MAX_BYTES` across `SD_LOG_FILE_COUNT`
+files with `/logs/index.txt` naming the active one. Lines are prefixed with
+local time once NTP has landed, and with `+<uptime>s` before that.
+
+`INFO` and below stay on serial only. An SD write costs milliseconds against a
+`Serial.printf`'s microseconds, and boot-time INFO chatter would dominate the
+card without telling you anything a reproduction on serial would not. Note that
+the mirror only opens *after* the card is mounted and the config is read, so the
+handful of lines emitted earlier in boot — including a mount failure itself —
+are visible on serial only.

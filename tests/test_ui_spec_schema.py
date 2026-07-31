@@ -26,6 +26,12 @@ def test_ui_spec_basic_schema_and_bounds():
         assert x >= 0 and y >= 0
         assert x + w <= W and y + h <= H
 
-    # Minimal component presence
-    assert "header" in data["components"]
+    # Every variant's component list must resolve; a variant naming a missing
+    # component would render nothing on that page. (Replaced hardcoded legacy
+    # component names, which outlived the components themselves.)
+    for vname, comps in data["variants"].items():
+        for cname in comps:
+            assert (
+                cname in data["components"]
+            ), f"variant {vname} references missing component {cname}"
     assert "v2" in data["variants"]

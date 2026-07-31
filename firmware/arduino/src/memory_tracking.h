@@ -40,7 +40,6 @@ class MemoryTracker {
   void update();
 
   // Record an allocation attempt
-  void recordAllocation(size_t size, bool success);
 
   // Get current statistics
   const MemoryStats& getStats() const { return stats_; }
@@ -64,7 +63,7 @@ class MemoryTracker {
   MemoryTracker& operator=(const MemoryTracker&) = delete;
 
   // RTC memory storage (persists across deep sleep)
-  RTC_DATA_ATTR static MemoryStats stats_;
+  static MemoryStats stats_;  // RTC_DATA_ATTR on the definition only
 
   bool initialized_ = false;
 

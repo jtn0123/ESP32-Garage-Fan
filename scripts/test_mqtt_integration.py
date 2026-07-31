@@ -39,6 +39,13 @@ class SensorSpec:
 
 class MqttTestClient:
     def __init__(self, host: str, port: int, client_id: Optional[str] = None) -> None:
+        # Guarantee a unique client id. Callers build ids from _now_ms(), and
+        # two clients created in the same millisecond collide - the broker then
+        # disconnects the older twin, which surfaced as rc=4 (not connected)
+        # publish/subscribe failures that only reproduced at full-suite speed.
+        import uuid as _uuid
+
+        client_id = f"{client_id or 'mqtt-test'}-{_uuid.uuid4().hex[:8]}"
         # Create client compatible with both paho-mqtt 1.x and 2.x.
         # In 2.x, the constructor requires a callback API version; we select VERSION1
         # to keep our existing callback signatures working without changes.
@@ -111,6 +118,12 @@ class MqttTestClient:
         # Do not wait synchronously here. Waiting can deadlock when called from within a
         # callback (network loop thread) and is unnecessary for our tests which already
         # synchronize by subscribing and observing deliveries.
+        if result.rc == mqtt.MQTT_ERR_NO_CONN:
+            # Suite-order race: the loop thread may briefly report disconnected
+            # (e.g. broker restarted by a neighbouring test). Wait for the
+            # reconnect the network loop performs automatically, then retry once.
+            if self._connected_event.wait(5.0):
+                result = self.client.publish(topic, payload=payload, retain=retain, qos=qos)
         if result.rc is not mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError(f"Publish failed rc={result.rc} topic={topic}")
 

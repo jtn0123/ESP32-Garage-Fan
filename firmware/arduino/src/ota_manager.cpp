@@ -14,7 +14,7 @@
 #include "logging.h"
 #include "runtime_config.h"
 #include "safe_strings.h"
-#include "sd_store.h"
+#include "storage.h"
 
 namespace {
 
@@ -81,7 +81,7 @@ void ota_begin(const char* hostname) {
     LOG_INFO("OTA: update starting (%s)", what);
     // Close the card cleanly so a half-written log or CSV is not left behind
     // when the device reboots into the new image.
-    sd_end();
+    storage_end();
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -128,7 +128,7 @@ void ota_begin(const char* hostname) {
     LOG_ERROR("OTA: error %u - %s", static_cast<unsigned>(error), reason);
     // The running firmware is untouched by a failed update; remount so logging
     // and history keep working.
-    sd_begin();
+    storage_begin();
   });
 
   ArduinoOTA.begin();
@@ -147,6 +147,18 @@ void ota_begin(const char* hostname) {
 void ota_loop() {
   if (!g_active)
     return;
+  // 4 Hz, not every loop pass. ArduinoOTA.handle() polls its UDP socket, and
+  // WiFiUDP::parsePacket() does a 1460-byte malloc/free on EVERY call, packet or
+  // not — at the loop's ~48 Hz that was ~4 million large alloc/free cycles a
+  // day and the dominant source of the observed 60% heap fragmentation. espota
+  // retries its invitation for seconds, so 250 ms of poll latency is invisible;
+  // once a transfer is accepted, handle() runs it synchronously to completion,
+  // so the throttle costs an in-progress update nothing.
+  static uint32_t s_last_poll_ms = 0;
+  uint32_t now = millis();
+  if (now - s_last_poll_ms < 250)
+    return;
+  s_last_poll_ms = now;
   ArduinoOTA.handle();
 }
 
@@ -155,13 +167,13 @@ bool ota_in_progress() { return g_in_progress; }
 bool ota_is_active() { return g_active; }
 
 bool ota_apply_from_sd() {
-  if (!sd_has_staged_update()) {
+  if (!storage_has_staged_update()) {
     set_sd_result("no staged image");
     return false;
   }
 
   size_t size = 0;
-  File image = sd_open_staged_update(&size);
+  File image = storage_open_staged_update(&size);
   if (!image) {
     set_sd_result("could not open image");
     LOG_ERROR("OTA/SD: could not open %s", SD_UPDATE_PATH);
@@ -174,7 +186,7 @@ bool ota_apply_from_sd() {
     image.close();
     set_sd_result("image is empty");
     LOG_ERROR("OTA/SD: image is empty");
-    sd_finish_staged_update(false);
+    storage_finish_staged_update(false);
     return false;
   }
 
@@ -184,7 +196,7 @@ bool ota_apply_from_sd() {
     set_sd_result("bad magic byte, not an ESP32 image");
     LOG_ERROR("OTA/SD: first byte is 0x%02X, expected 0x%02X - not a firmware image", magic,
               kEspImageMagic);
-    sd_finish_staged_update(false);
+    storage_finish_staged_update(false);
     return false;
   }
 
@@ -192,7 +204,7 @@ bool ota_apply_from_sd() {
     image.close();
     set_sd_result("Update.begin rejected the image");
     LOG_ERROR("OTA/SD: Update.begin failed: %s", Update.errorString());
-    sd_finish_staged_update(false);
+    storage_finish_staged_update(false);
     return false;
   }
 
@@ -232,7 +244,7 @@ bool ota_apply_from_sd() {
     set_sd_result("short read or flash write error");
     LOG_ERROR("OTA/SD: aborted after %u of %u bytes: %s", static_cast<unsigned>(written),
               static_cast<unsigned>(size), Update.errorString());
-    sd_finish_staged_update(false);
+    storage_finish_staged_update(false);
     return false;
   }
 
@@ -240,7 +252,7 @@ bool ota_apply_from_sd() {
     g_in_progress = false;
     set_sd_result("image failed verification");
     LOG_ERROR("OTA/SD: Update.end failed: %s", Update.errorString());
-    sd_finish_staged_update(false);
+    storage_finish_staged_update(false);
     return false;
   }
 
@@ -249,8 +261,8 @@ bool ota_apply_from_sd() {
   LOG_INFO("OTA/SD: image applied successfully, rebooting into it");
 
   // Mark it before rebooting, otherwise the same image is applied on every boot.
-  sd_finish_staged_update(true);
-  sd_end();
+  storage_finish_staged_update(true);
+  storage_end();
 
   delay(200);  // let the serial log drain
   ESP.restart();

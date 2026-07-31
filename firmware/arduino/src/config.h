@@ -115,33 +115,20 @@
 #define LOG_ENABLED 1
 #endif
 
-#ifndef LOG_LEVEL_DEFAULT
-#define LOG_LEVEL_DEFAULT 2  // 0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR, 5=FATAL
-#endif
-
-#ifndef LOG_SERIAL_ENABLED
-#define LOG_SERIAL_ENABLED 1
-#endif
-
-#ifndef LOG_BUFFER_ENABLED
-#define LOG_BUFFER_ENABLED 1
-#endif
-
-#ifndef LOG_NVS_ENABLED
-#define LOG_NVS_ENABLED 1
-#endif
-
 #ifndef LOG_MQTT_ENABLED
 #define LOG_MQTT_ENABLED 1
-#endif
-
-#ifndef LOG_MQTT_RATE_LIMIT_MS
-#define LOG_MQTT_RATE_LIMIT_MS 1000
 #endif
 
 // Status pixel configuration
 #ifndef USE_STATUS_PIXEL
 #define USE_STATUS_PIXEL 0
+#endif
+// The Feather variant names the on-board NeoPixel PIN_NEOPIXEL; the firmware
+// historically guarded on NEOPIXEL_PIN, which nothing defines — so every pixel
+// code path was silently compiled out and the board showed no boot feedback at
+// all. Bridge the name here, where every TU that cares already includes this.
+#if USE_STATUS_PIXEL && defined(PIN_NEOPIXEL) && !defined(NEOPIXEL_PIN)
+#define NEOPIXEL_PIN PIN_NEOPIXEL
 #endif
 
 // microSD card on the eInk FeatherWing.
@@ -150,10 +137,20 @@
 #ifndef SD_CS_PIN
 #define SD_CS_PIN 5
 #endif
-// SPI clock for the card. 20 MHz is well within microSD spec but the bus is
-// shared with the panel and routed through headers, so start conservative.
+// The Wing also carries a 23K SRAM chip on the same bus (CS = D6). Nothing here
+// uses it, but it is the only other device that drives MISO, and GxEPD2 -- unlike
+// Adafruit_EPD -- never touches that pin. Left floating it can answer alongside
+// the card, so storage_begin() parks it high before mounting. See hardware/pinmap.md.
+#ifndef SRAM_CS_PIN
+#define SRAM_CS_PIN 6
+#endif
+// SPI clock for the card. 20 MHz is within microSD spec on paper, but this bus is
+// shared with the panel and routed through stacking headers, and at 20 MHz the
+// card would not enumerate on real hardware. 4 MHz is the SD library's own
+// default and mounts reliably here; the card is written a few times per sample,
+// so the throughput difference is not worth the margin.
 #ifndef SD_SPI_FREQ_HZ
-#define SD_SPI_FREQ_HZ 20000000
+#define SD_SPI_FREQ_HZ 4000000
 #endif
 // Retention sweep for /data/*.csv. 0 disables pruning (keep everything).
 #ifndef SD_HISTORY_RETENTION_DAYS
@@ -166,6 +163,39 @@
 // Size at which the active log file rotates (bytes).
 #ifndef SD_LOG_MAX_BYTES
 #define SD_LOG_MAX_BYTES 262144
+#endif
+
+// Added to the raw inside-temperature reading before it is published, displayed
+// or stored. The BME280 sits close enough to the ESP32 to pick up its self-heat,
+// so an always-on node reads high; measure the steady-state delta against a
+// trusted thermometer and set this negative to correct it (e.g. -6.0f).
+// Runtime-overridable as "temp_offset_c" in /config/device.json.
+#ifndef TEMP_OFFSET_C
+#define TEMP_OFFSET_C 0.0f
+#endif
+
+// LC709203F fuel-gauge APA (Adjustment Pack Application) register value.
+// Default matches the library's 3000 mAh constant; override per hardware. The
+// datasheet table runs ~9 counts per 1000 mAh above 1000 mAh (0x19=1000,
+// 0x2D=2000, 0x36=3000), so larger custom packs extrapolate linearly.
+#ifndef BATTERY_APA
+#define BATTERY_APA 0x36
+#endif
+
+// POSIX TZ string for the header clock and every timestamp (history CSV, logs).
+// Overridable via `timezone:` in config/device.yaml. Default is US Pacific —
+// where the deployed unit lives; the previous hardcoded EST5EDT rendered the
+// header clock three hours ahead.
+#ifndef TIME_TZ
+#define TIME_TZ "PST8PDT,M3.2.0,M11.1.0"
+#endif
+
+// Average current draw of the always-on build after the heat mitigations
+// (80 MHz, modem sleep, 11 dBm TX), used for the footer's battery-days
+// estimate. Refine from the observed discharge slope rather than trusting it
+// to two digits.
+#ifndef ALWAYS_ON_AVG_CURRENT_MA
+#define ALWAYS_ON_AVG_CURRENT_MA 35.0f
 #endif
 
 // Network OTA (ArduinoOTA / espota) listener port.
@@ -187,4 +217,13 @@
 // way; it never uses a password.
 #ifndef OTA_REQUIRE_PASSWORD
 #define OTA_REQUIRE_PASSWORD 0
+#endif
+
+// Optional MQTT-over-TLS (-DMQTT_TLS=1). Off by default: this node lives on a
+// trusted LAN by owner decision, and TLS costs ~40 KB of heap per session.
+// When enabled, the broker CA is read from storage at /config/mqtt_ca.pem;
+// absent that the link is encrypted but unauthenticated (setInsecure), and
+// boot says so. No passwords are introduced either way.
+#ifndef MQTT_TLS
+#define MQTT_TLS 0
 #endif

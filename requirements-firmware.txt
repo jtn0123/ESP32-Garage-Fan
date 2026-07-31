@@ -1,5 +1,2 @@
-platformio>=6.0
+platformio>=6.1.19
 pyyaml>=6.0
-platformio
-pyyaml
-

@@ -82,19 +82,32 @@ void lc_quickstart_if_cold_boot(esp_reset_reason_t reason) {
 void lc_sleep_between_wakes() { /* no-op */ }
 #endif
 
+// Average draw for the days-remaining estimate. Always-on is a measured-ish
+// constant; the deep-sleep build duty-cycles between sleep and active current.
+static float average_current_ma() {
+#if ALWAYS_ON
+  return ALWAYS_ON_AVG_CURRENT_MA;
+#else
+  return SLEEP_CURRENT_MA +
+         (ACTIVE_CURRENT_MA * ACTIVE_SECONDS) / static_cast<float>(WAKE_INTERVAL_SEC);
+#endif
+}
+
 BatteryStatus read_battery_status() {
   BatteryStatus b;
 
 #if USE_MAX17048
-  static bool s_maxfg_attempted = false;
-  if (!g_maxfg_initialized && !s_maxfg_attempted) {
+  static ProbeRetry s_maxfg_probe;
+  if (!g_maxfg_initialized && s_maxfg_probe.due(millis())) {
     enable_i2c_power();
     ensure_i2c_initialized();
-    s_maxfg_attempted = true;
 
     if (g_maxfg.begin()) {
       g_maxfg_initialized = true;
       Serial.println("MAX17048 fuel gauge found");
+      // A late probe means the gauge may still be in the sleep the deep-sleep
+      // path left it in; reading it asleep returns stale values.
+      g_maxfg.sleep(false);
       g_maxfg.setAlertVoltages(2.0, 4.2);
       uint8_t vers = g_maxfg.getChipID();
       Serial.printf("MAX17048 version: 0x%02X\n", vers);
@@ -108,25 +121,32 @@ BatteryStatus read_battery_status() {
     float pct = g_maxfg.cellPercent();
     b.percent = constrain(static_cast<int>(pct), 0, 100);
 
-    // Simple day estimate: 3000mAh / 50mA average = 60 hours = 2.5 days
     if (b.percent >= 0) {
-      b.estimatedDays = (b.percent * 2.5) / 100;
+      // Was hardcoded (percent * 2.5)/100 — a fiction for any pack but the
+      // 3000 mAh / 50 mA one in the old comment. Use the real capacity and the
+      // build's actual duty cycle.
+      b.estimatedDays =
+          estimate_battery_days(b.percent, BATTERY_CAPACITY_MAH, average_current_ma());
     }
   }
 #endif
 
 #if USE_LC709203F
-  static bool s_lcfg_attempted = false;
-  if (!g_lcfg_initialized && !s_lcfg_attempted) {
+  static ProbeRetry s_lcfg_probe;
+  if (!g_lcfg_initialized && s_lcfg_probe.due(millis())) {
     enable_i2c_power();
     ensure_i2c_initialized();
-    s_lcfg_attempted = true;
 
     if (g_lcfg.begin()) {
       g_lcfg_initialized = true;
       Serial.println("LC709203F fuel gauge found");
       g_lcfg.setPowerMode(LC709203F_POWER_OPERATE);
-      g_lcfg.setPackSize(LC709203F_APA_3000MAH);
+      // APA for the actual pack: two 3300 mAh 18650s in parallel = 6600 mAh.
+      // The library's named constants stop at 3000 mAh (0x36); the datasheet
+      // table is close to linear at ~9 counts per 1000 mAh above 1000, so
+      // 6600 mAh extrapolates to ~0x56. With the old 3000 mAh setting the
+      // reported percentage sagged noticeably mid-discharge on this pack.
+      g_lcfg.setPackAPA(BATTERY_APA);
       g_lcfg.setAlarmVoltage(3.4);
     } else {
       Serial.println("LC709203F not found");
@@ -139,7 +159,8 @@ BatteryStatus read_battery_status() {
     b.percent = constrain(static_cast<int>(pct), 0, 100);
 
     if (b.percent >= 0) {
-      b.estimatedDays = (b.percent * 2.5) / 100;
+      b.estimatedDays =
+          estimate_battery_days(b.percent, BATTERY_CAPACITY_MAH, average_current_ma());
     }
   }
 #endif

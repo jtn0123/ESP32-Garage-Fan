@@ -221,12 +221,14 @@ class TestOpCoverage:
     # Ops that must have firmware handlers
     REQUIRED_OPS = {
         "line",
+        "fill",  # solid underlay (v3 inverted header/tabs)
         "text",
         "textCenteredIn",
-        "timeRight",
         "tempGroupCentered",
         "iconIn",
         "batteryGlyph",
+        "sparkline",  # 24h history polyline (v3g graphs page)
+        "frame",  # 1px outline box (v3g current-reading chips)
     }
 
     def test_all_used_ops_are_known(self):

@@ -4,7 +4,7 @@
 - **E‑ink control**: `EINK_CS=D9`, `EINK_DC=D10`
 - **Optional**: `EINK_BUSY=D7` (for precise waits; otherwise library delays)
 - **RST**: handled by the Wing’s auto‑reset (also tied to Feather `RESET`), typically no GPIO needed
-- **SRAM_CS=D6** (present on Wing; unused initially)
+- **SRAM_CS=D6** (present on Wing; unused, but parked HIGH — see below)
 - **SD_CS=D5** (on Wing; microSD, shares the SPI bus with the panel)
 - **I²C**: `SDA`, `SCL` → sensors
 
@@ -14,7 +14,7 @@
 | EINK_DC    | D10  | Panel data/command                    |
 | EINK_BUSY  | D7   | Busy (input), optional                |
 | EINK_RST   | —    | Not required (Wing auto‑reset)        |
-| SRAM_CS    | D6   | On‑Wing SRAM; not used for v1         |
+| SRAM_CS    | D6   | On‑Wing SRAM; unused, driven HIGH     |
 | SD_CS      | D5   | On‑Wing microSD (`SD_CS_PIN`)         |
 | SPI_SCK    | SCK  | SPI clock                             |
 | SPI_MOSI   | MOSI | SPI data out                          |
@@ -29,6 +29,12 @@ distinguished only by chip select (panel D9, card D5). Both drivers use SPI
 transactions so they coexist, but the card must be mounted after the bus is up —
 see `sd_begin()` in `firmware/arduino/src/sd_store.cpp` and
 `docs/ALWAYS_ON_AND_OTA.md`.
+
+SRAM note: the Wing’s 23K SRAM shares that bus too, and it is the only device
+besides the card that drives MISO. This firmware never uses it, and GxEPD2 —
+unlike Adafruit_EPD — never deasserts it either, so `sd_begin()` drives `D6`
+high before mounting. Leaving that chip select floating does not reliably fail;
+it fails intermittently, which is much harder to recognise as a bus problem.
 
 ## GxEPD2 driver class (SSD1680 122×250)
 

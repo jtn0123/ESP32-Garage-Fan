@@ -74,7 +74,7 @@ class CrashHandler {
   CrashHandler& operator=(const CrashHandler&) = delete;
 
   // RTC memory storage (survives deep sleep and resets)
-  RTC_DATA_ATTR static CrashInfo crash_info_;
+  static CrashInfo crash_info_;  // RTC_DATA_ATTR on the definition only
 
   bool initialized_ = false;
 
