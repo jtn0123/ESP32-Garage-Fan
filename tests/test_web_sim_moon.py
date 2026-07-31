@@ -128,8 +128,9 @@ def test_partial_refresh_header_time_remains_binary():
             # Sample multiple points inside the time box and assert binary pixels
             for dx in [2, int(w / 3), int(2 * w / 3), w - 3]:
                 r, g, b, a = page.evaluate(_CANVAS_RGBA_JS, [x + dx, y + 2])
-                assert r in (0, 255) and g in (0, 255) and b in (0, 255)
-                assert r == g == b
+                # Three-ink panel: white, black, or the tri-color red (204,0,0)
+                # - the v3 header band is red on the tri-color design.
+                assert (r, g, b) in ((0, 0, 0), (255, 255, 255), (204, 0, 0))
             browser.close()
     finally:
         server.terminate()
