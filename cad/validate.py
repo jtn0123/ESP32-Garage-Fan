@@ -19,13 +19,12 @@ Checks, in order:
 Exit code is non-zero if any check fails, so this can gate a print.
 """
 
-import sys
 from pathlib import Path
+import sys
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from build123d import Align, Box, Cylinder, Pos  # noqa: E402
-
 import room_node_case as m  # noqa: E402
 
 BOT = (Align.CENTER, Align.CENTER, Align.MIN)
@@ -52,13 +51,9 @@ def phantom_wing():
     which is exactly backwards: the posts are supposed to pass through those
     holes. (First run flagged 44.0 mm3, which is precisely four posts.)
     """
-    wing = Pos(0, 0, m.FACE) * Box(
-        m.WING_L, m.WING_W, m.WING_POCKET_D, align=BOT
-    )
+    wing = Pos(0, 0, m.FACE) * Box(m.WING_L, m.WING_W, m.WING_POCKET_D, align=BOT)
     for x, y in m._boss_xy():
-        wing -= Pos(x, y, m.FACE - 1) * Cylinder(
-            m.WING_HOLE_D / 2, m.WING_POCKET_D + 2, align=BOT
-        )
+        wing -= Pos(x, y, m.FACE - 1) * Cylinder(m.WING_HOLE_D / 2, m.WING_POCKET_D + 2, align=BOT)
     return wing
 
 
@@ -79,17 +74,13 @@ def phantom_wing_back():
 def phantom_feather():
     """Feather PCB, centred on the wing, flush at the USB-C end."""
     cx = m.USB_END_X + m.FEATHER_L / 2
-    return Pos(cx, 0, m.FEATHER_Z) * Box(
-        m.FEATHER_L, m.FEATHER_W, m.FEATHER_PCB_T, align=BOT
-    )
+    return Pos(cx, 0, m.FEATHER_Z) * Box(m.FEATHER_L, m.FEATHER_W, m.FEATHER_PCB_T, align=BOT)
 
 
 def phantom_feather_tall():
     """Feather + its tallest top-side component (JST, ~5.6mm) facing -Z."""
     cx = m.USB_END_X + m.FEATHER_L / 2
-    return Pos(cx, 0, m.FEATHER_Z - 5.6) * Box(
-        m.FEATHER_L, m.FEATHER_W, 5.6, align=BOT
-    )
+    return Pos(cx, 0, m.FEATHER_Z - 5.6) * Box(m.FEATHER_L, m.FEATHER_W, 5.6, align=BOT)
 
 
 def phantom_holder():
@@ -99,9 +90,7 @@ def phantom_holder():
 
 def phantom_active_area():
     """The 250x122 pixels that must be visible through the window."""
-    return Pos(m.DISP_OFF_X, m.DISP_OFF_Y, -1) * Box(
-        m.DISP_L, m.DISP_W, m.FACE + 2, align=BOT
-    )
+    return Pos(m.DISP_OFF_X, m.DISP_OFF_Y, -1) * Box(m.DISP_L, m.DISP_W, m.FACE + 2, align=BOT)
 
 
 def main() -> int:
@@ -111,8 +100,7 @@ def main() -> int:
     print("\n1. solids are printable")
     for name, part in (("front_shell", front), ("rear_pod", rear)):
         ok = bool(part.is_valid) and part.volume > 0
-        check(ok, f"{name} is a valid closed solid",
-              f"{part.volume / 1000:.1f} cm3")
+        check(ok, f"{name} is a valid closed solid", f"{part.volume / 1000:.1f} cm3")
 
     print("\n2. components fit without hitting case material")
     for name, ph in (
@@ -122,20 +110,20 @@ def main() -> int:
         ("Feather top components", phantom_feather_tall()),
     ):
         clash = vol(front & ph)
-        check(clash < 1.0, name,
-              "clear" if clash < 1.0 else f"{clash:.1f} mm3 of interference")
+        check(clash < 1.0, name, "clear" if clash < 1.0 else f"{clash:.1f} mm3 of interference")
 
     clash = vol(rear & phantom_holder())
-    check(clash < 1.0, "18650 holder in the pod",
-          "clear" if clash < 1.0 else f"{clash:.1f} mm3 of interference")
+    check(
+        clash < 1.0,
+        "18650 holder in the pod",
+        "clear" if clash < 1.0 else f"{clash:.1f} mm3 of interference",
+    )
 
     print("\n3. screw bosses clear the electronics")
-    fx = m.FEATHER_L / 2 + m.USB_END_X + m.FEATHER_L / 2
     for x, y in m._boss_xy():
         cx = m.USB_END_X + m.FEATHER_L / 2
         inside_feather = (
-            abs(x - cx) < m.FEATHER_L / 2 + m.BOSS_D / 2
-            and abs(y) < m.FEATHER_W / 2 + m.BOSS_D / 2
+            abs(x - cx) < m.FEATHER_L / 2 + m.BOSS_D / 2 and abs(y) < m.FEATHER_W / 2 + m.BOSS_D / 2
         )
         check(not inside_feather, f"boss ({x:+.1f}, {y:+.1f}) clears the Feather")
 
@@ -151,44 +139,52 @@ def main() -> int:
         check(on_pcb, f"boss ({x:+.1f}, {y:+.1f}) bears on the wing PCB")
 
     print("\n4. the two halves line up")
-    check(abs(m.FRONT_L - (m.WING_L + 2 * (m.WALL + m.TOL))) < 0.01,
-          "front shell sized to the wing")
+    check(
+        abs(m.FRONT_L - (m.WING_L + 2 * (m.WALL + m.TOL))) < 0.01, "front shell sized to the wing"
+    )
     # the pod's taper starts at the front shell's footprint
-    check(abs(m.POD_L - (m.BH_L + 2 * (m.WALL + m.TOL))) < 0.01,
-          "rear pod sized to the holder")
-    check(m.SCREW_CLEAR_D > m.BOSS_PILOT_D,
-          "screw clears its pilot hole",
-          f"{m.SCREW_CLEAR_D} > {m.BOSS_PILOT_D}")
-    check(m.SCREW_HEAD_D < m.BOSS_D + 1.0,
-          "screw head lands on the boss",
-          f"head {m.SCREW_HEAD_D} vs boss {m.BOSS_D}")
+    check(abs(m.POD_L - (m.BH_L + 2 * (m.WALL + m.TOL))) < 0.01, "rear pod sized to the holder")
+    check(
+        m.SCREW_CLEAR_D > m.BOSS_PILOT_D,
+        "screw clears its pilot hole",
+        f"{m.SCREW_CLEAR_D} > {m.BOSS_PILOT_D}",
+    )
+    check(
+        m.SCREW_HEAD_D < m.BOSS_D + 1.0,
+        "screw head lands on the boss",
+        f"head {m.SCREW_HEAD_D} vs boss {m.BOSS_D}",
+    )
     floor_z = m.POD_D - m.BH_H
-    check(floor_z > m.SCREW_HEAD_DEPTH + 1.5,
-          "pod floor thick enough to counterbore",
-          f"{floor_z:.1f}mm floor, {m.SCREW_HEAD_DEPTH}mm counterbore")
+    check(
+        floor_z > m.SCREW_HEAD_DEPTH + 1.5,
+        "pod floor thick enough to counterbore",
+        f"{floor_z:.1f}mm floor, {m.SCREW_HEAD_DEPTH}mm counterbore",
+    )
 
     print("\n5. the window exposes the whole active area")
     # window minus active area should leave the AA entirely uncovered
     aa = phantom_active_area()
     covered = vol(front & aa)
-    check(covered < 1.0, "no case material over the active area",
-          "clear" if covered < 1.0 else f"{covered:.1f} mm3 covering pixels")
+    check(
+        covered < 1.0,
+        "no case material over the active area",
+        "clear" if covered < 1.0 else f"{covered:.1f} mm3 covering pixels",
+    )
     bez_x = (m.FRONT_L - m.DISP_L) / 2 - m.DISP_BLEED
     bez_y = (m.FRONT_W - m.DISP_W) / 2 - m.DISP_BLEED
-    check(bez_x > 2.0 and bez_y > 2.0, "bezel wide enough to be rigid",
-          f"{bez_x:.1f} x {bez_y:.1f} mm")
+    check(
+        bez_x > 2.0 and bez_y > 2.0,
+        "bezel wide enough to be rigid",
+        f"{bez_x:.1f} x {bez_y:.1f} mm",
+    )
 
     print("\n6. printability")
     check(m.WALL >= 1.2, "wall thickness", f"{m.WALL} mm")
     check(m.FACE >= 1.2, "front face thickness", f"{m.FACE} mm")
     check(m.TOL >= 0.15, "pocket clearance", f"{m.TOL} mm per side")
     overhang = m.FRONT_D - m.FACE
-    NOTES.append(
-        f"front shell prints face-down: {overhang:.1f}mm of wall, no supports"
-    )
-    NOTES.append(
-        "rear pod prints pocket-up; the taper is a ~40 deg overhang, fine unsupported"
-    )
+    NOTES.append(f"front shell prints face-down: {overhang:.1f}mm of wall, no supports")
+    NOTES.append("rear pod prints pocket-up; the taper is a ~40 deg overhang, fine unsupported")
 
     print("\nnotes")
     for n in NOTES:
