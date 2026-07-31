@@ -27,9 +27,7 @@ def mosquitto_broker():
     # That surfaced as rc=4 publish/subscribe failures in whichever test ran
     # after the buffer filled (reproducible only at full-suite volume).
     _blog = open("/tmp/mosq_fixture.log", "w")
-    proc = subprocess.Popen(
-        [mosq, "-c", conf], stdout=_blog, stderr=subprocess.STDOUT
-    )
+    proc = subprocess.Popen([mosq, "-c", conf], stdout=_blog, stderr=subprocess.STDOUT)
 
     host = "127.0.0.1"
     deadline = time.time() + 5.0
@@ -65,4 +63,3 @@ def mosquitto_broker():
                 proc.kill()
             except Exception:
                 pass
-

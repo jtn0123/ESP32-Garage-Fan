@@ -25,7 +25,6 @@ from build123d import (
     export_stl,
     fillet,
 )
-
 from room_node_case import (  # noqa: E402  (shared dimensions + helpers)
     BH_H,
     BH_L,
@@ -47,10 +46,10 @@ from room_node_case import (  # noqa: E402  (shared dimensions + helpers)
     _vents,
 )
 
-TILT = 12.0            # degrees the head leans back
+TILT = 12.0  # degrees the head leans back
 
 HEAD_L = WING_L + 2 * (WALL + TOL)
-HEAD_W = WING_W + 2 * (WALL + TOL)   # becomes the head's HEIGHT stood up
+HEAD_W = WING_W + 2 * (WALL + TOL)  # becomes the head's HEIGHT stood up
 HEAD_D = FACE + CAVITY_D
 
 BASE_L = BH_L + 2 * (WALL + TOL)
@@ -66,12 +65,8 @@ def head():
     body = Box(HEAD_L, HEAD_W, HEAD_D, align=BOT)
     body = fillet(body.edges().filter_by(Axis.Z), CORNER_R)
 
-    body -= Pos(0, 0, FACE) * Box(
-        HEAD_L - 2 * WALL, HEAD_W - 2 * WALL, CAVITY_D + 1, align=BOT
-    )
-    body -= Pos(0, 0, FACE) * Box(
-        WING_L + 2 * TOL, WING_W + 2 * TOL, WING_POCKET_D, align=BOT
-    )
+    body -= Pos(0, 0, FACE) * Box(HEAD_L - 2 * WALL, HEAD_W - 2 * WALL, CAVITY_D + 1, align=BOT)
+    body -= Pos(0, 0, FACE) * Box(WING_L + 2 * TOL, WING_W + 2 * TOL, WING_POCKET_D, align=BOT)
     body -= Pos(DISP_OFF_X, DISP_OFF_Y, -0.5) * Box(
         DISP_L + 2 * DISP_BLEED, DISP_W + 2 * DISP_BLEED, FACE + 1, align=BOT
     )
@@ -86,13 +81,9 @@ def base():
     body = fillet(body.edges().filter_by(Axis.Z), CORNER_R)
 
     # Holder pocket, loaded from underneath
-    body -= Pos(0, 0, -0.5) * Box(
-        BH_L + 2 * TOL, BH_W + 2 * TOL, BH_H + 0.5, align=BOT
-    )
+    body -= Pos(0, 0, -0.5) * Box(BH_L + 2 * TOL, BH_W + 2 * TOL, BH_H + 0.5, align=BOT)
     # Wire route up through the back of the base into the head
-    body -= Pos(0, BASE_W / 2 - 10, BASE_H - FACE - 0.5) * Box(
-        12, 9, FACE + 1, align=BOT
-    )
+    body -= Pos(0, BASE_W / 2 - 10, BASE_H - FACE - 0.5) * Box(12, 9, FACE + 1, align=BOT)
     return body
 
 
@@ -112,11 +103,14 @@ def main() -> None:
     # like a carry handle.
     stood = Rot(-90 - TILT, 0, 0) * h
     bb = stood.bounding_box()
-    stood = Pos(
-        -bb.center().X,
-        (BASE_W / 2 - WALL) - bb.max.Y,   # back face flush inside the base
-        BASE_H - bb.min.Z,                # bottom edge seated on the base top
-    ) * stood
+    stood = (
+        Pos(
+            -bb.center().X,
+            (BASE_W / 2 - WALL) - bb.max.Y,  # back face flush inside the base
+            BASE_H - bb.min.Z,  # bottom edge seated on the base top
+        )
+        * stood
+    )
 
     asm = b + stood
     export_step(asm, str(OUT / "clock_assembly.step"))

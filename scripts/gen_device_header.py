@@ -29,6 +29,7 @@ def repo_root() -> Path:
 
 ROOT = repo_root()
 
+
 def _load_dotenv_once() -> None:
     """Pull the repo .env into os.environ - called from main(), NOT at import.
 

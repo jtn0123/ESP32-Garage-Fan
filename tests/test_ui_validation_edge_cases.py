@@ -57,7 +57,9 @@ class TestUIValidationEdgeCases:
         import json as _json
         from pathlib import Path as _Path
 
-        spec = _json.loads((_Path(__file__).resolve().parents[1] / "config" / "ui_spec.json").read_text())
+        spec = _json.loads(
+            (_Path(__file__).resolve().parents[1] / "config" / "ui_spec.json").read_text()
+        )
         variant_rects = {}
         for vname, comps in spec.get("variants", {}).items():
             used = set()
@@ -94,7 +96,10 @@ class TestUIValidationEdgeCases:
         expected_collisions = [
             ("HEADER_NAME", "HEADER_TIME_CENTER"),  # Time can overlap with name
             ("INSIDE_HUMIDITY", "INSIDE_PRESSURE"),  # Pressure and humidity can overlap
-            ("INSIDE_PRESS_V3", "INSIDE_RH_V3"),  # v3: RH left-aligned, pressure right-aligned; shared middle slack
+            (
+                "INSIDE_PRESS_V3",
+                "INSIDE_RH_V3",
+            ),  # v3: RH left-aligned, pressure right-aligned; shared middle slack
             ("OUT_PRESSURE", "OUT_WIND"),  # Pressure and wind can overlap
         ]
 

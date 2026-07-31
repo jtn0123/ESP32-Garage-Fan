@@ -78,9 +78,11 @@ def test_canvas_is_binary_after_draw():
             grid = [(x, y) for x in range(0, 250, 25) for y in range(0, 122, 12)]
             for x, y in grid:
                 r, g, b, a = page.evaluate(_CANVAS_RGBA_JS, [x, y])
-                assert (r, g, b) in ((0, 0, 0), (255, 255, 255), (204, 0, 0)), (
-                    f"non-ink pixel {(r, g, b)} at {(x, y)}"
-                )
+                assert (r, g, b) in (
+                    (0, 0, 0),
+                    (255, 255, 255),
+                    (204, 0, 0),
+                ), f"non-ink pixel {(r, g, b)} at {(x, y)}"
             browser.close()
     finally:
         server.terminate()

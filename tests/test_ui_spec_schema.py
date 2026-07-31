@@ -31,5 +31,7 @@ def test_ui_spec_basic_schema_and_bounds():
     # component names, which outlived the components themselves.)
     for vname, comps in data["variants"].items():
         for cname in comps:
-            assert cname in data["components"], f"variant {vname} references missing component {cname}"
+            assert (
+                cname in data["components"]
+            ), f"variant {vname} references missing component {cname}"
     assert "v2" in data["variants"]

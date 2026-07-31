@@ -469,7 +469,7 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
             "int16_t p0; int16_t p1; int16_t p2; int16_t p3; "
             "const char* s0; const char* s1; };"
             "\n// Text ops with no explicit y in the spec carry this sentinel in p1:"
-            "\n// \"not provided\" (renderer applies its 1px default inset), which keeps an"
+            '\n// "not provided" (renderer applies its 1px default inset), which keeps an'
             "\n// explicit y of 0 distinct instead of silently becoming +1."
             "\nstatic constexpr int16_t kNoYOffset = INT16_MIN;"
         )
@@ -595,7 +595,9 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
     lines.append("const int kRectTable[RECT__COUNT][4] = {")
     for name in sorted(rects.keys()):
         r = rects[name]
-        lines.append(f"    {{{int(r[0])}, {int(r[1])}, {int(r[2])}, {int(r[3])}}},  // RECT_{name.upper()}")
+        lines.append(
+            f"    {{{int(r[0])}, {int(r[1])}, {int(r[2])}, {int(r[3])}}},  // RECT_{name.upper()}"
+        )
     lines.append("};")
     lines.append("")
     # Emit ops per component
