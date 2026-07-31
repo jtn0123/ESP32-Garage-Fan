@@ -48,7 +48,6 @@ void mqtt_publish_diagnostic_mode(bool active);
 void mqtt_publish_publish_latency_ms(uint32_t publishLatencyMs);
 
 // Outside readings management
-void mqtt_update_outside_readings(const OutsideReadings& readings);
 
 // Access to MQTT client for logging
 PubSubClient* mqtt_get_client();

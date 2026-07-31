@@ -11,6 +11,12 @@ static Adafruit_NeoPixel* g_status_pixel = nullptr;
 // Boot stage indicator - single color at a time
 void show_boot_stage(int stage) {
   if (!g_status_pixel) {
+#ifdef NEOPIXEL_POWER
+    // The Feather gates the pixel behind a power-enable pin; without this the
+    // data line wiggles into an unpowered LED and nothing ever lights.
+    pinMode(NEOPIXEL_POWER, OUTPUT);
+    digitalWrite(NEOPIXEL_POWER, HIGH);
+#endif
     g_status_pixel = new Adafruit_NeoPixel(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
     g_status_pixel->begin();
     g_status_pixel->setBrightness(50);  // Not too bright
@@ -49,40 +55,9 @@ void show_boot_stage(int stage) {
 }
 #endif
 
-// Enhanced system state dump for debugging
-void dump_system_state() {
-  Serial.println("\n=== SYSTEM STATE DUMP ===");
-
-  // Memory status
-  Serial.printf("[MEMORY] Free heap: %u bytes\n", ESP.getFreeHeap());
-  Serial.printf("[MEMORY] Min free heap: %u bytes\n", ESP.getMinFreeHeap());
-  Serial.printf("[MEMORY] Heap size: %u bytes\n", ESP.getHeapSize());
-  Serial.printf("[MEMORY] Free PSRAM: %u bytes\n", ESP.getFreePsram());
-
-  // Chip information
-  Serial.printf("[CHIP] Model: %s\n", ESP.getChipModel());
-  Serial.printf("[CHIP] Revision: %d\n", ESP.getChipRevision());
-  Serial.printf("[CHIP] Cores: %d\n", ESP.getChipCores());
-  Serial.printf("[CHIP] CPU Freq: %u MHz\n", ESP.getCpuFreqMHz());
-
-  // Reset/Wake information
-  Serial.printf("[BOOT] Reset reason: %d\n", esp_reset_reason());
-
-  // Timing
-  Serial.printf("[TIME] Uptime: %lu ms\n", millis());
-
-  Serial.println("=== END SYSTEM STATE ===");
-  Serial.flush();
-}
-
 void diagnostic_test_init() {
   Serial.println("\n=== HARDWARE DIAGNOSTIC TEST ===");
   Serial.flush();
-
-#ifdef BOOT_DEBUG
-  // Dump full system state in debug mode
-  dump_system_state();
-#endif
 
 // Test 1: Neopixel
 #ifdef NEOPIXEL_PIN

@@ -40,7 +40,6 @@ class MemoryTracker {
   void update();
 
   // Record an allocation attempt
-  void recordAllocation(size_t size, bool success);
 
   // Get current statistics
   const MemoryStats& getStats() const { return stats_; }

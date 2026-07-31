@@ -20,8 +20,6 @@ void LogMQTT::begin() {
   published_count_ = 0;
   dropped_count_ = 0;
 
-  subscribeToCommands();
-
   initialized_ = true;
 }
 
@@ -136,20 +134,6 @@ String LogMQTT::formatEntry(const LogEntry& entry, const char* module_name) {
   serializeJson(doc, output);
 
   return output;
-}
-
-void LogMQTT::subscribeToCommands() {
-  PubSubClient* client = getMQTTClient();
-  if (!client || !client->connected())
-    return;
-
-  String clear_topic = String(TOPIC_PREFIX) + client_id_ + TOPIC_CMD_CLEAR;
-  String level_topic = String(TOPIC_PREFIX) + client_id_ + TOPIC_CMD_LEVEL;
-  String filter_topic = String(TOPIC_PREFIX) + client_id_ + TOPIC_CMD_FILTER;
-
-  client->subscribe(clear_topic.c_str());
-  client->subscribe(level_topic.c_str());
-  client->subscribe(filter_topic.c_str());
 }
 
 void LogMQTT::handleCommand(const char* topic, const uint8_t* payload, size_t length) {

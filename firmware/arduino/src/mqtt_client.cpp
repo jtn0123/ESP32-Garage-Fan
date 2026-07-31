@@ -661,7 +661,6 @@ void mqtt_publish_publish_latency_ms(uint32_t publishLatencyMs) {
 }
 
 // Outside readings management
-void mqtt_update_outside_readings(const OutsideReadings& readings) { g_outside = readings; }
 
 OutsideReadings mqtt_get_outside_readings() { return g_outside; }
 

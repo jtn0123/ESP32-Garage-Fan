@@ -51,7 +51,6 @@ void draw_weather_icon_region_at_from_outside(int16_t x, int16_t y, int16_t w, i
 
 // Weather icon determination
 IconId map_weather_to_icon(const char* w);
-IconId map_openweather_to_icon(const OutsideReadings& o);
 
 // Helper functions for region drawing
 void draw_in_region(const int rect[4], DrawFnLambda drawFn);
@@ -69,6 +68,5 @@ void draw_values(const char* in_temp_f, const char* in_rh, const char* out_temp_
                  const char* out_rh, const char* time_str, const char* status);
 
 // Development/debug functions
-void dev_display_tick();
 
 #endif  // USE_DISPLAY

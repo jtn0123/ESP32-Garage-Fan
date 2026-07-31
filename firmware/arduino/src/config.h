@@ -115,33 +115,20 @@
 #define LOG_ENABLED 1
 #endif
 
-#ifndef LOG_LEVEL_DEFAULT
-#define LOG_LEVEL_DEFAULT 2  // 0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR, 5=FATAL
-#endif
-
-#ifndef LOG_SERIAL_ENABLED
-#define LOG_SERIAL_ENABLED 1
-#endif
-
-#ifndef LOG_BUFFER_ENABLED
-#define LOG_BUFFER_ENABLED 1
-#endif
-
-#ifndef LOG_NVS_ENABLED
-#define LOG_NVS_ENABLED 1
-#endif
-
 #ifndef LOG_MQTT_ENABLED
 #define LOG_MQTT_ENABLED 1
-#endif
-
-#ifndef LOG_MQTT_RATE_LIMIT_MS
-#define LOG_MQTT_RATE_LIMIT_MS 1000
 #endif
 
 // Status pixel configuration
 #ifndef USE_STATUS_PIXEL
 #define USE_STATUS_PIXEL 0
+#endif
+// The Feather variant names the on-board NeoPixel PIN_NEOPIXEL; the firmware
+// historically guarded on NEOPIXEL_PIN, which nothing defines — so every pixel
+// code path was silently compiled out and the board showed no boot feedback at
+// all. Bridge the name here, where every TU that cares already includes this.
+#if USE_STATUS_PIXEL && defined(PIN_NEOPIXEL) && !defined(NEOPIXEL_PIN)
+#define NEOPIXEL_PIN PIN_NEOPIXEL
 #endif
 
 // microSD card on the eInk FeatherWing.

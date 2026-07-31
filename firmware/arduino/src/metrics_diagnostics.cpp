@@ -12,10 +12,6 @@
 #include "logging.h"       // Add logging infrastructure
 #include "runtime_config.h"
 
-#if USE_STATUS_PIXEL
-#include <Adafruit_NeoPixel.h>
-#endif
-
 // Error statistics (persist across deep sleep)
 RTC_DATA_ATTR ErrorStats g_error_stats = {0};
 
@@ -28,13 +24,6 @@ RTC_DATA_ATTR static uint32_t rtc_crash_count = 0;            // Count of abnorm
 RTC_DATA_ATTR static uint32_t rtc_cumulative_uptime_sec = 0;  // Total awake time in seconds
 RTC_DATA_ATTR static uint32_t rtc_last_boot_timestamp = 0;    // Timestamp of last boot
 RTC_DATA_ATTR static esp_reset_reason_t rtc_last_reset_reason = ESP_RST_UNKNOWN;
-
-// Status pixel object if enabled
-#if USE_STATUS_PIXEL
-static Adafruit_NeoPixel* g_status_pixel = nullptr;
-static uint8_t g_pixel_phase = 0;
-#endif
-
 // Check if diagnostic mode is active
 bool is_diagnostic_mode_active() { return g_diagnostic_mode; }
 
@@ -181,10 +170,6 @@ void pump_network_ms(uint32_t duration_ms) {
   while (millis() - start < duration_ms) {
     net_loop();
     delay(10);
-
-#if USE_STATUS_PIXEL
-    status_pixel_tick();
-#endif
   }
 }
 
@@ -200,78 +185,6 @@ void net_time_hhmm(char* out, size_t out_size) {
 
   snprintf(out, out_size, "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
 }
-
-// Status pixel operations
-#if USE_STATUS_PIXEL
-
-void status_pixel_begin() {
-  if (g_status_pixel)
-    return;  // Already initialized
-
-#ifdef STATUS_PIXEL_PIN
-  g_status_pixel = new Adafruit_NeoPixel(1, STATUS_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
-  if (!g_status_pixel) {
-    LOG_ERROR("Failed to allocate NeoPixel");
-    return;
-  }
-  g_status_pixel->begin();
-  g_status_pixel->setBrightness(20);
-  g_status_pixel->show();
-#else
-  // No STATUS_PIXEL_PIN defined - skip initialization
-  LOG_DEBUG("Status pixel disabled - no pin defined");
-#endif
-}
-
-void status_pixel_end() {
-  if (g_status_pixel) {
-    g_status_pixel->clear();
-    g_status_pixel->show();
-    delete g_status_pixel;
-    g_status_pixel = nullptr;
-  }
-}
-
-void status_pixel_off() {
-  if (g_status_pixel) {
-    g_status_pixel->clear();
-    g_status_pixel->show();
-  }
-}
-
-void status_pixel_tick() {
-  if (!g_status_pixel) {
-    return;
-  }
-
-  // Simple color cycling for status indication
-  static uint32_t last_change = 0;
-  uint32_t now = millis();
-
-  if (now - last_change >= 250) {
-    g_pixel_phase = (g_pixel_phase + 1) % 4;
-
-    switch (g_pixel_phase) {
-      case 0:
-        g_status_pixel->setPixelColor(0, 0, 0, 255);  // Blue
-        break;
-      case 1:
-        g_status_pixel->setPixelColor(0, 0, 255, 0);  // Green
-        break;
-      case 2:
-        g_status_pixel->setPixelColor(0, 255, 0, 0);  // Red
-        break;
-      case 3:
-        g_status_pixel->setPixelColor(0, 255, 255, 0);  // Yellow
-        break;
-    }
-
-    g_status_pixel->show();
-    last_change = now;
-  }
-}
-
-#endif  // USE_STATUS_PIXEL
 
 // Boot and crash tracking functions
 void update_boot_counters() {

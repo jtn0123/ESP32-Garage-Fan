@@ -57,8 +57,6 @@ extern GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display
 
 // External variables from main.cpp
 extern float get_last_outside_f();
-extern uint16_t partial_counter;
-extern bool g_full_only_mode;
 
 // Constants for display layout
 #define HEADER_NAME_Y_ADJ -8
@@ -123,9 +121,6 @@ inline void draw_in_region(const int rect[4], DrawFn drawFn) {
   do {
     display.fillScreen(GxEPD_WHITE);
     drawFn(x, y, w, h);
-#if USE_STATUS_PIXEL
-    status_pixel_tick();
-#endif
     yield();
   } while (display.nextPage());
 }
@@ -267,158 +262,13 @@ void full_refresh() {
   } while (display.nextPage());
   reset_partial_counter();
   return;
+#else
+// The legacy hardcoded renderer that lived here was removed: every env that
+// compiles this file sets USE_UI_SPEC=1, so it had been unreachable dead code
+// (~190 lines) since the spec renderer landed. Fail loudly rather than silently
+// resurrecting a second, divergent layout implementation.
+#error "full_refresh() requires USE_UI_SPEC=1 (legacy renderer removed)"
 #endif
-
-  // Legacy hardcoded rendering (USE_UI_SPEC=0)
-  // Initialize SmartRefresh regions on first use
-  static bool regions_registered = false;
-  if (!regions_registered) {
-    SmartRefresh& sr = SmartRefresh::getInstance();
-    sr.registerRegion(0);  // Inside temp
-    sr.registerRegion(1);  // Inside humidity
-    sr.registerRegion(2);  // Inside pressure
-    sr.registerRegion(3);  // Outside temp
-    sr.registerRegion(4);  // Outside humidity
-    sr.registerRegion(5);  // Weather
-    sr.registerRegion(6);  // Time
-    regions_registered = true;
-  }
-
-  display.setFullWindow();
-  display.firstPage();
-  do {
-    // Draw static chrome (borders, labels, room name, version)
-    draw_static_chrome();
-
-    // Draw current time
-    char time_str[6];
-    net_time_hhmm(time_str, sizeof(time_str));
-    // Track time changes (though we always redraw in full refresh)
-    SmartRefresh::getInstance().hasContentChanged(6, time_str);
-    draw_header_time_direct(time_str);
-
-    // Get current sensor readings
-    InsideReadings inside = read_inside_sensors();
-    OutsideReadings outside = net_get_outside();
-
-    // Format inside temperature
-    char in_temp[8];
-    if (isfinite(inside.temperatureC)) {
-      float tempF = inside.temperatureC * 9.0f / 5.0f + 32.0f;
-      snprintf(in_temp, sizeof(in_temp), "%.0f", tempF);
-    } else {
-      safe_strcpy(in_temp, "--");
-    }
-
-    // Format inside humidity
-    char in_rh[8];
-    if (isfinite(inside.humidityPct)) {
-      snprintf(in_rh, sizeof(in_rh), "%.0f", inside.humidityPct);
-    } else {
-      safe_strcpy(in_rh, "--");
-    }
-
-    // Format outside temperature
-    char out_temp[8];
-    if (outside.validTemp && isfinite(outside.temperatureC)) {
-      float tempF = outside.temperatureC * 9.0f / 5.0f + 32.0f;
-      snprintf(out_temp, sizeof(out_temp), "%.0f", tempF);
-    } else {
-      safe_strcpy(out_temp, "--");
-    }
-
-    // Format outside humidity
-    char out_rh[8];
-    if (outside.validHum && isfinite(outside.humidityPct)) {
-      snprintf(out_rh, sizeof(out_rh), "%.0f", outside.humidityPct);
-    } else {
-      safe_strcpy(out_rh, "--");
-    }
-
-    // Track content changes for smart refresh statistics
-    SmartRefresh& sr = SmartRefresh::getInstance();
-    sr.hasContentChanged(0, in_temp);   // Inside temp
-    sr.hasContentChanged(1, in_rh);     // Inside humidity
-    sr.hasContentChanged(3, out_temp);  // Outside temp
-    sr.hasContentChanged(4, out_rh);    // Outside humidity
-
-    // Draw inside temperature (use coordinates directly from layout)
-    draw_temp_number_and_units_direct(INSIDE_TEMP[0], INSIDE_TEMP[1], INSIDE_TEMP[2],
-                                      INSIDE_TEMP[3], in_temp);
-
-    // Draw inside humidity
-    display.setTextColor(GxEPD_BLACK);
-    display.setTextSize(1);
-    display.setCursor(INSIDE_HUMIDITY[0], INSIDE_HUMIDITY[1] + INSIDE_HUMIDITY[3] - 4);
-    display.print(in_rh);
-    display.print("% RH");
-
-    // Draw inside pressure if available
-    if (isfinite(inside.pressureHPa)) {
-      char pressure_str[12];
-      snprintf(pressure_str, sizeof(pressure_str), "%.0f", inside.pressureHPa);
-      sr.hasContentChanged(2, pressure_str);  // Track pressure changes
-      display.setCursor(INSIDE_PRESSURE[0], INSIDE_PRESSURE[1] + INSIDE_PRESSURE[3] - 4);
-      display.print(pressure_str);
-    }
-
-    // Draw outside temperature
-    draw_temp_number_and_units_direct(OUT_TEMP[0], OUT_TEMP[1], OUT_TEMP[2], OUT_TEMP[3], out_temp);
-
-    // Draw outside humidity
-    display.setCursor(OUT_HUMIDITY[0], OUT_HUMIDITY[1] + OUT_HUMIDITY[3] - 4);
-    display.print(out_rh);
-    display.print("% RH");
-
-    // Draw outside pressure if available
-    if (outside.validPressure && isfinite(outside.pressureHPa)) {
-      char out_pressure[12];
-      snprintf(out_pressure, sizeof(out_pressure), "%.0f hPa", outside.pressureHPa);
-      display.setCursor(OUT_PRESSURE[0], OUT_PRESSURE[1] + OUT_PRESSURE[3] - 4);
-      display.print(out_pressure);
-    }
-
-    // Draw wind speed if available (convert from m/s to mph)
-    if (outside.validWind && isfinite(outside.windMps)) {
-      char wind_str[12];
-      float windMph = outside.windMps * 2.237f;  // m/s to mph conversion
-      snprintf(wind_str, sizeof(wind_str), "%.0f mph", windMph);
-      display.setCursor(OUT_WIND[0], OUT_WIND[1] + OUT_WIND[3] - 4);
-      display.print(wind_str);
-    }
-
-    // Draw weather icon and text
-    if (outside.validWeather && outside.weather[0]) {
-      // Draw icon in WEATHER_ICON region
-      draw_weather_icon_region_at(WEATHER_ICON[0], WEATHER_ICON[1], WEATHER_ICON[2],
-                                  WEATHER_ICON[3], outside.weather);
-
-      // Draw weather text centered in FOOTER_WEATHER region (y=109)
-      // This matches the simulator's ui_spec.json layout
-      char short_condition[24];
-      make_short_condition_cstr(outside.weather, short_condition, sizeof(short_condition));
-      sr.hasContentChanged(5, short_condition);  // Track weather changes
-      display.setTextColor(GxEPD_BLACK);
-      display.setTextSize(1);
-      int16_t tw = text_width_default_font(short_condition, 1);
-      // Clamp text position to prevent negative x when text is wider than region
-      int16_t tx = FOOTER_WEATHER[0] + (FOOTER_WEATHER[2] - tw) / 2;
-      if (tx < FOOTER_WEATHER[0])
-        tx = FOOTER_WEATHER[0];             // Don't go left of region
-      int16_t ty = FOOTER_WEATHER[1] + 19;  // y=90+19=109, matches ui_spec.json
-      display.setCursor(tx, ty);
-      display.print(short_condition);
-    }
-
-    // Draw battery status and IP
-    BatteryStatus bs = read_battery_status();
-    char ip_str[32];
-    net_ip_cstr(ip_str, sizeof(ip_str));
-    draw_status_line_direct(bs, ip_str);
-  } while (display.nextPage());
-
-  // Reset partial counter after full refresh
-  reset_partial_counter();
 }
 
 // Smoke test for display
@@ -433,19 +283,6 @@ void smoke_full_window_test() {
     display.setCursor(20, 60);
     display.print(F("ESP32 READY"));
   } while (display.nextPage());
-}
-
-// Development display tick (for testing)
-void dev_display_tick() {
-#if SMOKE_TEST || DEV_DISPLAY_TEST
-  static uint32_t last_tick = 0;
-  uint32_t now = millis();
-
-  if (now - last_tick >= 5000) {
-    smoke_full_window_test();
-    last_tick = now;
-  }
-#endif
 }
 
 // Draw from UI spec (generated UI)
@@ -535,46 +372,6 @@ IconId map_weather_to_icon(const char* w) {
     return ICON_WEATHER_CLOUDY;
   if (s.indexOf("night") >= 0)
     return ICON_WEATHER_NIGHT;
-  return ICON_WEATHER_SUNNY;
-}
-
-// Map OpenWeather primary item (id/icon) to our icon set; fallback to string mapping
-IconId map_openweather_to_icon(const OutsideReadings& o) {
-  // Prefer explicit icon code when provided (e.g., "10n") for day/night
-  if (o.validWeather && o.weather[0]) {
-    const char* ic = o.weather;
-    // Normalize length
-    if (strlen(ic) >= 2) {
-      if (strncmp(ic, "01", 2) == 0)
-        return (strchr(ic, 'n') ? ICON_WEATHER_NIGHT : ICON_WEATHER_SUNNY);
-      if (strncmp(ic, "02", 2) == 0)
-        return (strchr(ic, 'n') ? ICON_WEATHER_NIGHT_PARTLY_CLOUDY : ICON_WEATHER_PARTLY_CLOUDY);
-      if (strncmp(ic, "03", 2) == 0)
-        return ICON_WEATHER_CLOUDY;
-      if (strncmp(ic, "04", 2) == 0)
-        return ICON_WEATHER_CLOUDY;
-      if (strncmp(ic, "09", 2) == 0)
-        return ICON_WEATHER_DRIZZLE;  // showers/drizzle
-      if (strncmp(ic, "10", 2) == 0)
-        return ICON_WEATHER_POURING;  // rain
-      if (strncmp(ic, "11", 2) == 0)
-        return ICON_WEATHER_LIGHTNING;
-      if (strncmp(ic, "13", 2) == 0)
-        return ICON_WEATHER_SNOWY;
-      if (strncmp(ic, "50", 2) == 0)
-        return ICON_WEATHER_FOG;  // atmosphere group
-      // Edge codes often seen
-      if (strncmp(ic, "51", 2) == 0 || strncmp(ic, "53", 2) == 0)
-        return ICON_WEATHER_DRIZZLE;  // drizzle variants
-      if (strncmp(ic, "61", 2) == 0)
-        return ICON_WEATHER_DRIZZLE;  // light rain
-      if (strncmp(ic, "80", 2) == 0)
-        return ICON_WEATHER_POURING;  // shower rain
-    }
-  }
-  // Fallback: heuristics from free-form string
-  if (o.validWeather && o.weather[0])
-    return map_weather_to_icon(o.weather);
   return ICON_WEATHER_SUNNY;
 }
 

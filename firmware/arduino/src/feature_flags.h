@@ -65,11 +65,6 @@
 #define FEATURE_CRASH_HANDLER 1
 #endif
 
-// Buffer pool
-#ifndef FEATURE_BUFFER_POOL
-#define FEATURE_BUFFER_POOL 1
-#endif
-
 // microSD storage: sensor history CSV, rotating log files, config overrides and
 // staged firmware images.
 #ifndef FEATURE_SD_STORAGE

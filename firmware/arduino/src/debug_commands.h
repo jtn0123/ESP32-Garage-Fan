@@ -19,7 +19,6 @@
 // - {"cmd": "sensors"}                 -> Returns sensor readings
 // - {"cmd": "perf"}                    -> Returns performance profiling stats
 // - {"cmd": "perf_reset"}              -> Resets performance counters
-// - {"cmd": "bufpool"}                 -> Returns buffer pool statistics
 // - {"cmd": "crash"}                   -> Returns crash diagnostics
 // - {"cmd": "crash_clear"}             -> Clears crash information
 // - {"cmd": "memory"}                  -> Returns memory tracking stats
@@ -63,7 +62,6 @@ class DebugCommands {
   void cmdSensors(PubSubClient* client);
   void cmdPerf(PubSubClient* client);
   void cmdPerfReset(PubSubClient* client);
-  void cmdBufPool(PubSubClient* client);
   void cmdCrash(PubSubClient* client);
   void cmdCrashClear(PubSubClient* client);
   void cmdMemory(PubSubClient* client);

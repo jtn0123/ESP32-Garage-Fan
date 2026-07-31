@@ -33,11 +33,6 @@ extern GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display
 // Note: Layout variables are generated without RECT_ prefix
 // Variables are defined in display_layout.h as HEADER_TIME_CENTER, FOOTER_STATUS_, etc.
 
-// Forward declaration for status pixel (if enabled)
-#if USE_STATUS_PIXEL
-extern void status_pixel_tick();
-#endif
-
 // Forward declaration for draw_in_region template from main.cpp
 // We'll declare it properly to avoid link issues
 void draw_in_region_lambda(const int rect[4], void (*fn)(int16_t, int16_t, int16_t, int16_t, void*),

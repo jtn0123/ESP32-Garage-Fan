@@ -141,16 +141,6 @@ size_t DisplayCapture::base64Encode(const uint8_t* input, size_t input_len, char
 // Global convenience functions
 GFXcanvas1* display_capture_canvas() { return DisplayCapture::getInstance().getCanvas(); }
 
-void display_capture_fill_screen(uint16_t color) {
-  GFXcanvas1* canvas = display_capture_canvas();
-  if (canvas) {
-    // GFXcanvas1: 0 = black, 1 = white (opposite of GxEPD2)
-    // GxEPD_WHITE = 0xFFFF, GxEPD_BLACK = 0x0000
-    canvas->fillScreen(color == 0xFFFF ? 1 : 0);
-    DisplayCapture::getInstance().setHasContent();
-  }
-}
-
 // C linkage for MQTT command handler
 extern "C" void display_capture_handle(const char* payload, size_t length) {
   LOGM_INFO("Screenshot command received");

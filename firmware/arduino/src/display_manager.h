@@ -20,16 +20,6 @@ void full_refresh();
 void smoke_full_window_test();
 
 // Partial update functions
-void partial_update_inside_temp(const char* in_temp_f, char trend);
-void partial_update_inside_rh(const char* in_rh);
-void partial_update_outside_temp(const char* out_temp_f, char trend);
-void partial_update_outside_rh(const char* out_rh);
-void partial_update_outside_wind(const char* wind_str);
-void partial_update_outside_condition(const char* short_condition);
-void partial_update_weather_icon(const char* weather);
-void partial_update_weather_icon_from_outside(const OutsideReadings& o);
-void partial_update_footer_weather_from_outside(const OutsideReadings& o);
-void partial_update_outside_hilo(float highC, float lowC);
 
 // Drawing functions
 void draw_static_chrome();
@@ -62,7 +52,6 @@ const int* rect_ptr_by_id(uint8_t rid);
 
 // Dev mode display tick (if enabled)
 #if DEV_NO_SLEEP
-void dev_display_tick();
 #endif
 
 // Global display object access

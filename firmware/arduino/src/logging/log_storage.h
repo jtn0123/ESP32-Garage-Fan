@@ -33,13 +33,6 @@ class LogStorage {
 
   void dumpToSerial();
 
-  bool exportToBuffer(uint8_t* buffer, size_t& size, size_t max_size);
-
-  size_t getOldestTimestamp();
-  size_t getNewestTimestamp();
-
-  void pruneOldEntries(uint32_t max_age_ms);
-
  private:
   LogStorage() = default;
   ~LogStorage() = default;

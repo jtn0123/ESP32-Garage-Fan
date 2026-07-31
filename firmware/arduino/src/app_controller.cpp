@@ -244,18 +244,9 @@ void app_setup() {
   MemoryTracker::getInstance().begin();
 #endif
 
-// Show we're alive with neopixel if available
-#ifdef NEOPIXEL_PIN
-  pinMode(NEOPIXEL_PIN, OUTPUT);
-#ifdef NEOPIXEL_POWER
-  pinMode(NEOPIXEL_POWER, OUTPUT);
-  digitalWrite(NEOPIXEL_POWER, HIGH);
-#endif
-  // Quick red flash to show boot
-  analogWrite(NEOPIXEL_PIN, 10);
-  delay(100);
-  analogWrite(NEOPIXEL_PIN, 0);
-#endif
+  // Boot feedback is show_boot_stage() (diagnostic_test.cpp), already called at
+  // every stage. The analogWrite "red flash" that used to sit here was PWM into
+  // a NeoPixel data line — a protocol-driven part that PWM cannot light.
 
   Serial.println("[2] Starting initialization");
   Serial.flush();
@@ -408,6 +399,20 @@ void app_setup() {
     net_begin();
     ensure_mqtt_connected();
     publish_ha_discovery_once();
+
+#if FEATURE_CRASH_HANDLER
+    // The crash detected at boot finally gets shipped. It was formatted and
+    // printed above with a "will publish via MQTT after connection" note, but
+    // nothing ever did — mqtt_publish_last_crash() had no callers. Cleared only
+    // after a successful publish so an offline boot retries next time.
+    if (mqtt_is_connected() && CrashHandler::getInstance().hasCrashInfo()) {
+      char crash_report[256];
+      CrashHandler::getInstance().formatCrashReport(crash_report, sizeof(crash_report));
+      mqtt_publish_last_crash(crash_report);
+      CrashHandler::getInstance().clearCrashInfo();
+      Serial.println("[NET] Previous crash report published");
+    }
+#endif
   }
 
   // The WiFi + MQTT block above can spend ~25 s against an unreachable AP and a
@@ -446,6 +451,10 @@ void app_setup() {
   Serial.printf("=== Always-on mode: sampling every %u s, panel redraw floor %d s ===\n",
                 rc_sample_interval_sec(), DISPLAY_MIN_REFRESH_INTERVAL_SEC);
 #endif
+
+  // Boot finished: douse the stage LED. Leaving it lit costs battery around the
+  // clock and makes "green" meaningless as a boot-progress signal.
+  show_boot_stage(0);
 
   run_sleep_phase();
 }
@@ -643,6 +652,13 @@ void app_loop() {
     if (now - g_last_maintenance_ms >= MAINTENANCE_INTERVAL_MS) {
       g_last_maintenance_ms = now;
       account_uptime();
+      // Both had accumulated state that nothing ever read out: the error
+      // counters grew in RTC memory unpublished, and crash reports always
+      // showed min_free_heap=0 because the sampler was never called.
+      publish_error_stats();
+#if FEATURE_CRASH_HANDLER
+      CrashHandler::getInstance().updateHeapStats();
+#endif
       // Close and reopen so anything buffered in the Preferences handle is
       // committed rather than sitting there until a brownout discards it.
       nvs_end_cache();

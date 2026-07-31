@@ -35,14 +35,6 @@
 #endif
 
 // WiFi connection state management
-enum WiFiConnectionState {
-  WIFI_STATE_IDLE,
-  WIFI_STATE_CONNECTING,
-  WIFI_STATE_CONNECTED,
-  WIFI_STATE_FAILED,
-  WIFI_STATE_DISCONNECTED
-};
-
 // WiFi management functions
 bool wifi_connect_with_timeout(uint32_t timeout_ms);
 bool wifi_connect_with_exponential_backoff(uint32_t max_attempts = 5,
@@ -51,18 +43,13 @@ bool wifi_is_connected();
 String wifi_get_ip();
 void wifi_get_ip_cstr(char* out, size_t out_size);
 int wifi_get_rssi();
-bool wifi_clear_provisioning();
 void wifi_begin_provisioning();
 bool wifi_is_provisioning_active();
-WiFiConnectionState wifi_get_state();
-const char* wifi_state_to_string(WiFiConnectionState state);
 
 // BSSID utilities
 bool parse_bssid(const char* str, uint8_t out[6]);
 bool is_all_zero_bssid(const uint8_t b[6]);
 
-// WiFi configuration
-void wifi_set_hostname(const char* hostname);
 void wifi_configure_power_save(bool enable);
 // Drop TX power to 11 dBm when the link has margin to spare (RSSI > -65).
 // Board heat management for the always-on build; no-op on a weak link.
@@ -74,5 +61,3 @@ void wifi_reduce_tx_power();
 // - Time persists in RTC during deep sleep, only needs initial sync
 void wifi_sync_time_ntp();
 void wifi_set_time_from_compile();
-bool wifi_is_time_synced();
-uint32_t wifi_get_last_ntp_sync();

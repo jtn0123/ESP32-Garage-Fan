@@ -50,8 +50,4 @@ void net_time_hhmm(char* out, size_t out_size);
 
 // Status pixel operations (if enabled)
 #if USE_STATUS_PIXEL
-void status_pixel_begin();
-void status_pixel_end();  // Cleanup - frees NeoPixel memory
-void status_pixel_off();
-void status_pixel_tick();
 #endif

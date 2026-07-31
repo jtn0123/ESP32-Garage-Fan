@@ -24,8 +24,6 @@ uint32_t get_wake_count();
 void increment_wake_count();
 void reset_wake_count();
 
-// System diagnostics
-void print_boot_diagnostics();
 MemoryDiagnostics get_memory_diagnostics();
 const char* get_reset_reason_string(esp_reset_reason_t reason);
 bool reset_reason_is_crash(esp_reset_reason_t reason);
@@ -42,11 +40,6 @@ uint32_t nvs_load_uint(const char* key, uint32_t defaultValue);
 uint16_t nvs_load_ushort(const char* key, uint16_t defaultValue);
 uint8_t nvs_load_uchar(const char* key, uint8_t defaultValue);
 
-// Serial command handling
-void handle_serial_command_line(const String& line);
-
-// System utilities
-void print_memory_stats();
 uint32_t get_display_deadline_ms();
 void set_display_deadline_ms(uint32_t deadline);
 

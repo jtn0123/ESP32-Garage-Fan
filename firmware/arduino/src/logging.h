@@ -4,14 +4,17 @@
 #include <Arduino.h>
 #include "generated_config.h"
 
-// Log levels - compile-time configurable (legacy)
-enum OldLogLevel {
-  LOG_LEVEL_ERROR = 0,
-  LOG_LEVEL_WARN = 1,
-  LOG_LEVEL_INFO = 2,
-  LOG_LEVEL_DEBUG = 3,
-  LOG_LEVEL_VERBOSE = 4
-};
+// Log levels - compile-time configurable (legacy).
+//
+// These MUST be #defines, not an enum: they are compared in `#if LOG_LEVEL >=
+// LOG_LEVEL_X` guards below, and the preprocessor substitutes 0 for any
+// identifier it does not know — enum constants included. As an enum, every
+// guard reduced to `0 >= 0` and no build flag could ever strip a log level.
+#define LOG_LEVEL_ERROR 0
+#define LOG_LEVEL_WARN 1
+#define LOG_LEVEL_INFO 2
+#define LOG_LEVEL_DEBUG 3
+#define LOG_LEVEL_VERBOSE 4
 
 // Set default log level based on build type
 #ifndef LOG_LEVEL
@@ -98,7 +101,7 @@ inline void log_heap_status(const char* context) {
 // This is intentional - function supports all levels but only active levels are compiled in
 template <typename T>
 inline void log_if_changed(const char* name, T& last_value, T current_value,
-                           OldLogLevel level = LOG_LEVEL_INFO) {
+                           int level = LOG_LEVEL_INFO) {
   if (last_value != current_value) {
     // cppcheck-suppress knownConditionTrueFalse
     if (level <= LOG_LEVEL) {

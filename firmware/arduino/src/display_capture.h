@@ -78,7 +78,4 @@ extern "C" void display_capture_handle(const char* payload, size_t length);
 // Returns nullptr if capture system not initialized
 GFXcanvas1* display_capture_canvas();
 
-// Legacy convenience functions (now use canvas internally)
-void display_capture_fill_screen(uint16_t color);
-
 #endif  // USE_DISPLAY

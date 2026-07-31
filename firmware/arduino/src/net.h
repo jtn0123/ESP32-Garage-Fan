@@ -1,7 +1,12 @@
 #pragma once
 
-// Network module - refactored to use separate WiFi, MQTT, and HA discovery modules
-// This file now serves as a compatibility wrapper for the refactored modules
+// Network module - thin facade over the WiFi, MQTT, and HA discovery modules.
+//
+// This file used to carry a "compatibility wrapper" layer of ~20 net_publish_*
+// inlines mirroring every mqtt_publish_* function; none of them had a caller
+// (live publishing goes through MQTTBatcher in app_controller), so the layer
+// and its orphaned backends were removed. Only the functions with real call
+// sites remain.
 
 #include <cstdio>
 #include "wifi_manager.h"
@@ -13,20 +18,8 @@
 
 // Static storage for backward compatibility
 static char g_client_id[40];
-static OutsideReadings g_outside;
 static bool g_diagnostic_mode_requested = false;
 static bool g_diagnostic_mode_request_value = false;
-
-// Offline sample structure for data persistence
-struct OfflineSample {
-  uint32_t timestamp;
-  float tempC;
-  float rhPct;
-  float pressureHPa;
-  bool hasTemp;
-  bool hasRh;
-  bool hasPressure;
-};
 
 // Initialize networking components. Idempotent: the always-on loop calls this
 // from its link-check path so a node that booted before the router was up still
@@ -66,47 +59,13 @@ inline void net_loop() {
   }
 }
 
-// WiFi wrapper functions
-inline bool net_wifi_is_connected() { return wifi_is_connected(); }
-
-inline String net_ip() { return wifi_get_ip(); }
-
 inline void net_ip_cstr(char* out, size_t out_size) { wifi_get_ip_cstr(out, out_size); }
 
-inline bool net_wifi_clear_provisioning() { return wifi_clear_provisioning(); }
-
-// MQTT wrapper functions
-inline void net_publish_inside(float tempC, float rhPct) { mqtt_publish_inside(tempC, rhPct); }
-
-inline void net_publish_pressure(float pressureHPa) { mqtt_publish_pressure(pressureHPa); }
-
-inline void net_publish_battery(float voltage, int percent) {
-  mqtt_publish_battery(voltage, percent);
-}
-
 inline void net_publish_wifi_rssi(int rssiDbm) { mqtt_publish_wifi_rssi(rssiDbm); }
-
-inline void net_publish_status(const char* payload, bool retain = true) {
-  mqtt_publish_status(payload, retain);
-}
 
 inline void net_publish_debug_json(const char* payload, bool retain = false) {
   mqtt_publish_debug_json(payload, retain);
 }
-
-inline void net_publish_last_crash(const char* reason_or_null) {
-  mqtt_publish_last_crash(reason_or_null);
-}
-
-inline void net_publish_debug_probe(const char* payload, bool retain = false) {
-  mqtt_publish_debug_probe(payload, retain);
-}
-
-inline void net_publish_boot_reason(const char* reason) { mqtt_publish_boot_reason(reason); }
-
-inline void net_publish_boot_count(uint32_t count) { mqtt_publish_boot_count(count); }
-
-inline void net_publish_crash_count(uint32_t count) { mqtt_publish_crash_count(count); }
 
 inline void net_publish_uptime(uint32_t uptime_sec) { mqtt_publish_uptime(uptime_sec); }
 
@@ -119,69 +78,8 @@ inline void net_publish_memory_diagnostics(uint32_t free_heap, uint32_t min_heap
 
 inline void net_publish_diagnostic_mode(bool active) { mqtt_publish_diagnostic_mode(active); }
 
-inline void net_publish_publish_latency_ms(uint32_t publishLatencyMs) {
-  mqtt_publish_publish_latency_ms(publishLatencyMs);
-}
-
 // Home Assistant discovery wrapper
 inline void net_publish_ha_discovery() { ha_discovery_publish_all(); }
-
-// WiFi connection with retry logic
-inline bool net_wifi_connect_with_retry(uint32_t timeout_ms, uint32_t max_attempts = 3) {
-  for (uint32_t attempt = 0; attempt < max_attempts; attempt++) {
-    if (wifi_connect_with_timeout(timeout_ms)) {
-      return true;
-    }
-    delay(500);
-  }
-  return false;
-}
-
-// MQTT connection with retry logic
-inline bool net_mqtt_connect_with_retry(uint32_t timeout_ms, uint32_t max_attempts = 3) {
-  uint32_t start = millis();
-
-  while ((millis() - start) < (timeout_ms * max_attempts)) {
-    if (mqtt_connect()) {
-      return true;
-    }
-    delay(1000);
-  }
-  return false;
-}
-
-// Full network initialization
-inline bool net_init_and_connect() {
-  // Connect to WiFi
-  if (!net_wifi_connect_with_retry(WIFI_CONNECT_TIMEOUT_MS)) {
-    Serial.println(F("WiFi connection failed"));
-    return false;
-  }
-
-  Serial.print(F("WiFi connected, IP: "));
-  Serial.println(wifi_get_ip());
-
-  // Connect to MQTT
-  if (!net_mqtt_connect_with_retry(MQTT_CONNECT_TIMEOUT_MS)) {
-    Serial.println(F("MQTT connection failed"));
-    return false;
-  }
-
-  Serial.println(F("MQTT connected"));
-
-  // Publish discovery
-  net_publish_ha_discovery();
-
-  return true;
-}
-
-// Ensure WiFi is connected (reconnect if needed)
-inline void ensure_wifi_connected() {
-  if (!wifi_is_connected()) {
-    Serial.println(F("WiFi disconnected, reconnecting..."));
-    wifi_connect_with_timeout(WIFI_CONNECT_TIMEOUT_MS);
-  }
-}
 
 // Ensure MQTT is connected (reconnect if needed)
 inline void ensure_mqtt_connected() {
@@ -191,19 +89,10 @@ inline void ensure_mqtt_connected() {
   }
 }
 
-// Outside readings management (for backward compatibility)
-inline void net_set_outside_readings(const OutsideReadings& readings) {
-  g_outside = readings;
-  mqtt_update_outside_readings(readings);
-}
-
 inline OutsideReadings net_get_outside_readings() { return mqtt_get_outside_readings(); }
 
 // Backward compatibility alias
 inline OutsideReadings net_get_outside() { return net_get_outside_readings(); }
-
-// Additional compatibility functions
-inline bool net_mqtt_is_connected() { return mqtt_is_connected(); }
 
 inline void net_prepare_for_sleep() {
   // Disconnect cleanly before sleep
