@@ -1,0 +1,2 @@
+# Generated geometry — rebuild with: venv/bin/python cad/room_node_case.py
+out/*.stl
