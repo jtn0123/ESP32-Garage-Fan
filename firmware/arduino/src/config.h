@@ -150,10 +150,20 @@
 #ifndef SD_CS_PIN
 #define SD_CS_PIN 5
 #endif
-// SPI clock for the card. 20 MHz is well within microSD spec but the bus is
-// shared with the panel and routed through headers, so start conservative.
+// The Wing also carries a 23K SRAM chip on the same bus (CS = D6). Nothing here
+// uses it, but it is the only other device that drives MISO, and GxEPD2 -- unlike
+// Adafruit_EPD -- never touches that pin. Left floating it can answer alongside
+// the card, so sd_begin() parks it high before mounting. See hardware/pinmap.md.
+#ifndef SRAM_CS_PIN
+#define SRAM_CS_PIN 6
+#endif
+// SPI clock for the card. 20 MHz is within microSD spec on paper, but this bus is
+// shared with the panel and routed through stacking headers, and at 20 MHz the
+// card would not enumerate on real hardware. 4 MHz is the SD library's own
+// default and mounts reliably here; the card is written a few times per sample,
+// so the throughput difference is not worth the margin.
 #ifndef SD_SPI_FREQ_HZ
-#define SD_SPI_FREQ_HZ 20000000
+#define SD_SPI_FREQ_HZ 4000000
 #endif
 // Retention sweep for /data/*.csv. 0 disables pruning (keep everything).
 #ifndef SD_HISTORY_RETENTION_DAYS
@@ -166,6 +176,15 @@
 // Size at which the active log file rotates (bytes).
 #ifndef SD_LOG_MAX_BYTES
 #define SD_LOG_MAX_BYTES 262144
+#endif
+
+// Added to the raw inside-temperature reading before it is published, displayed
+// or stored. The BME280 sits close enough to the ESP32 to pick up its self-heat,
+// so an always-on node reads high; measure the steady-state delta against a
+// trusted thermometer and set this negative to correct it (e.g. -6.0f).
+// Runtime-overridable as "temp_offset_c" in /config/device.json.
+#ifndef TEMP_OFFSET_C
+#define TEMP_OFFSET_C 0.0f
 #endif
 
 // Network OTA (ArduinoOTA / espota) listener port.

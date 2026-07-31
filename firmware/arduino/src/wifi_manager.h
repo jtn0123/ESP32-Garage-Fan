@@ -64,6 +64,9 @@ bool is_all_zero_bssid(const uint8_t b[6]);
 // WiFi configuration
 void wifi_set_hostname(const char* hostname);
 void wifi_configure_power_save(bool enable);
+// Drop TX power to 11 dBm when the link has margin to spare (RSSI > -65).
+// Board heat management for the always-on build; no-op on a weak link.
+void wifi_reduce_tx_power();
 
 // Time sync functions
 // - wifi_sync_time_ntp(): Syncs time via NTP when WiFi connected (automatic)

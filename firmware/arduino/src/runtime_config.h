@@ -37,12 +37,20 @@ struct RuntimeConfig {
   bool history_enabled;
   bool logs_enabled;
   uint16_t history_retention_days;
+  // Added to the raw inside-temperature reading; negative corrects a sensor
+  // that reads high from board self-heat. See TEMP_OFFSET_C in config.h.
+  float temp_offset_c;
 };
 
 // Bounds shared with the validator and the MQTT command handler.
 #define RC_MIN_SAMPLE_INTERVAL_SEC 60
 #define RC_MAX_SAMPLE_INTERVAL_SEC 3600
 #define RC_DEFAULT_SAMPLE_INTERVAL_SEC 300
+
+// A correction bigger than +/-20 C is a wiring or placement problem, not an
+// offset; reject it rather than silently publishing fiction.
+#define RC_MIN_TEMP_OFFSET_C (-20.0)
+#define RC_MAX_TEMP_OFFSET_C (20.0)
 
 // Populate the effective config from the compile-time defaults. Safe to call
 // more than once; later calls reset to defaults.
@@ -83,6 +91,7 @@ uint32_t rc_sample_interval_sec();
 bool rc_history_enabled();
 bool rc_logs_enabled();
 uint16_t rc_history_retention_days();
+float rc_temp_offset_c();
 
 // Runtime override of the sampling cadence (MQTT command). Bounded by
 // RC_MIN/MAX_SAMPLE_INTERVAL_SEC; out-of-range values are ignored.

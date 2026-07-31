@@ -69,6 +69,13 @@ default is used instead.
 /firmware/update.bin  a firmware image to apply at boot
 ```
 
+The card is optional: when none responds, the same layout falls back to the
+board's internal 960 KB `ffat` partition (formatted automatically on first use).
+History, logs and staged updates work identically there; when free space drops
+below 64 KB the oldest day's CSV is dropped, which caps internal history at
+roughly two months. What internal flash cannot do is be pulled out and edited on
+a computer — `/config/device.json` overrides remain a card feature in practice.
+
 Format the card as a single FAT32 partition. On macOS:
 
 ```bash
@@ -115,6 +122,13 @@ selects differ (panel D9, card D5). Both drivers use SPI transactions, so they
 coexist, but the card must be mounted *after* the bus exists. `sd_begin()` calls
 `SPI.begin()` itself — which early-returns if the display already started the bus
 — so both the display and headless builds work.
+
+There is a third device on that bus: the Wing's 23K SRAM chip on `SRAM_CS_PIN`
+(D6). Nothing here uses it, but it is the only other part that drives MISO, and
+GxEPD2 — unlike Adafruit_EPD — never touches its chip select. A CS left as a
+floating input is not a deasserted CS, so `sd_begin()` drives D6 high before
+mounting. Symptoms of skipping this are intermittent: mounts that fail on some
+power-ups and succeed on others, which reads as a failing card.
 
 ## OTA updates
 
@@ -209,3 +223,23 @@ iso_time,uptime_s,temp_c,rh_pct,press_hpa,batt_v,batt_pct,rssi_dbm
 Failed readings are written as empty cells rather than `0` or `nan`, so a
 spreadsheet reads them as missing. Before NTP completes, rows are timestamped
 `unsynced` and land in `/data/nodate.csv` rather than being dropped.
+
+Both builds write history — the always-on loop once per `sample_interval_sec`,
+the deep-sleep build once per wake. Retention differs only in when the sweep
+runs: the always-on build folds it into its six-hourly maintenance tick, while
+the deep-sleep build sweeps on the first wake of each new calendar day (the
+marker lives in RTC memory, so a power cycle costs one extra directory scan).
+
+## Device log
+
+`storage.logs_enabled` mirrors the firmware's own `WARN` and `ERROR` output to
+`/logs/logN.txt`, rotating at `SD_LOG_MAX_BYTES` across `SD_LOG_FILE_COUNT`
+files with `/logs/index.txt` naming the active one. Lines are prefixed with
+local time once NTP has landed, and with `+<uptime>s` before that.
+
+`INFO` and below stay on serial only. An SD write costs milliseconds against a
+`Serial.printf`'s microseconds, and boot-time INFO chatter would dominate the
+card without telling you anything a reproduction on serial would not. Note that
+the mirror only opens *after* the card is mounted and the config is read, so the
+handful of lines emitted earlier in boot — including a mount failure itself —
+are visible on serial only.

@@ -81,6 +81,13 @@ void rc_begin() {
     LOG_WARN("Config: SD_HISTORY_RETENTION_DAYS=%d out of range [0,3650], using 90",
              SD_HISTORY_RETENTION_DAYS);
   }
+
+  g_rc.temp_offset_c = 0.0f;
+  if (!merge_float(&g_rc.temp_offset_c, true, TEMP_OFFSET_C, RC_MIN_TEMP_OFFSET_C,
+                   RC_MAX_TEMP_OFFSET_C)) {
+    LOG_WARN("Config: TEMP_OFFSET_C out of range [%d,%d], using 0",
+             static_cast<int>(RC_MIN_TEMP_OFFSET_C), static_cast<int>(RC_MAX_TEMP_OFFSET_C));
+  }
 }
 
 bool rc_apply_json(const char* json, char* err, size_t err_size) {
@@ -118,6 +125,11 @@ bool rc_apply_json(const char* json, char* err, size_t err_size) {
   applied +=
       merge_u32(&g_rc.sample_interval_sec, doc["sample_interval_sec"] | static_cast<int64_t>(-1),
                 RC_MIN_SAMPLE_INTERVAL_SEC, RC_MAX_SAMPLE_INTERVAL_SEC);
+
+  // Floats have no workable sentinel (a negative offset is a legitimate value),
+  // so presence comes from the key's type instead.
+  applied += merge_float(&g_rc.temp_offset_c, doc["temp_offset_c"].is<float>(),
+                         doc["temp_offset_c"] | 0.0, RC_MIN_TEMP_OFFSET_C, RC_MAX_TEMP_OFFSET_C);
 
   JsonObject wifi = doc["wifi"];
   if (!wifi.isNull()) {
@@ -183,6 +195,7 @@ uint32_t rc_sample_interval_sec() { return g_rc.sample_interval_sec; }
 bool rc_history_enabled() { return g_rc.history_enabled; }
 bool rc_logs_enabled() { return g_rc.logs_enabled; }
 uint16_t rc_history_retention_days() { return g_rc.history_retention_days; }
+float rc_temp_offset_c() { return g_rc.temp_offset_c; }
 
 bool rc_set_sample_interval_sec(uint32_t sec) {
   return merge_u32(&g_rc.sample_interval_sec, sec, RC_MIN_SAMPLE_INTERVAL_SEC,
@@ -197,6 +210,7 @@ void rc_log_summary() {
   LOG_INFO("Sample interval: %u s", g_rc.sample_interval_sec);
   LOG_INFO("OTA: %s (password %s)", g_rc.ota_enabled ? "enabled" : "disabled",
            g_rc.ota_password[0] ? "set" : "NOT SET");
+  LOG_INFO("Temp offset: %.1f C", static_cast<double>(g_rc.temp_offset_c));
   LOG_INFO("SD history: %s, SD logs: %s", g_rc.history_enabled ? "on" : "off",
            g_rc.logs_enabled ? "on" : "off");
   LOG_INFO("Overrides from SD: %u field(s)", g_override_count);

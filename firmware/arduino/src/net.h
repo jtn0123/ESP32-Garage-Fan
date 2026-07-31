@@ -7,6 +7,7 @@
 #include "wifi_manager.h"
 #include "mqtt_client.h"
 #include "ha_discovery.h"
+#include "logging/log_mqtt.h"
 #include "common_types.h"
 #include "generated_config.h"
 
@@ -35,10 +36,14 @@ inline void net_begin() {
   snprintf(g_client_id, sizeof(g_client_id), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2],
            mac[3], mac[4], mac[5]);
 
-  // Initialize modules
-  mqtt_begin();
+  // The id must be registered before mqtt_begin(): the first connect builds its
+  // LWT and discovery topics immediately, and with the id still unset those all
+  // land under espsensor/unknown/ where nothing is subscribed. The MQTT log
+  // sink builds espsensor/<id>/logs/# topics the same way.
   mqtt_set_client_id(g_client_id);
   ha_discovery_begin(g_client_id);
+  LogMQTT::getInstance()->setClientId(g_client_id);
+  mqtt_begin();
 }
 
 // Main network loop

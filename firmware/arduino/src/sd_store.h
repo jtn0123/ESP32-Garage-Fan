@@ -9,10 +9,12 @@
 //   /logs/logN.txt       rotating log sink; NVS only holds the last 50 entries
 //   /firmware/update.bin  a firmware image to apply at boot (see ota_manager.h)
 //
-// The card is optional. When it is absent, unreadable, or the feature is
-// compiled out, every function here degrades to a no-op and the device runs
-// exactly as it did before — nothing in the boot path is allowed to depend on
-// storage being present.
+// The card is optional. When no card responds, the same layout falls back to
+// the board's internal 960 KB `ffat` partition — history, logs, config and
+// staged updates all work identically, except that internal flash cannot be
+// pulled out and edited on a computer. Only when *both* backends fail (or the
+// feature is compiled out) does everything degrade to a no-op; nothing in the
+// boot path is allowed to depend on storage being present.
 //
 // Note the SPI bus is shared with the e-ink panel (panel CS = D9, card CS = D5),
 // so sd_begin() must run after the display has initialised the bus.
@@ -22,6 +24,11 @@
 #include <time.h>
 #include "config.h"
 #include "feature_flags.h"
+
+// Epoch below which a timestamp is assumed to be the RTC's pre-NTP default
+// rather than a real wall clock. Shared so callers that schedule work by date
+// agree with the file-naming and retention logic here.
+#define SD_MIN_PLAUSIBLE_EPOCH 1577836800L  // 2020-01-01T00:00:00Z
 
 struct SdInfo {
   bool mounted = false;
@@ -53,7 +60,17 @@ bool sd_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct
 uint16_t sd_prune_history(uint16_t retention_days);
 
 // Append a line to the rotating log, rotating first if the active file is full.
+// The line is prefixed with a timestamp (ISO local time once NTP has landed,
+// otherwise "+<uptime_s>"), so callers pass only the message.
 bool sd_log_write(const char* line);
+
+// Turn the serial-log mirror on or off. While on, every LOG_WARN/LOG_ERROR (and
+// every Logger sink message at or above its threshold) is also appended to
+// /logs. Off until app_controller has mounted the card and read the
+// `storage.logs_enabled` setting, so nothing is written before there is a card
+// to write to.
+void sd_log_set_mirror(bool enabled);
+bool sd_log_mirror_enabled();
 
 // --- staged firmware image ---------------------------------------------------
 // Path constants are exposed so ota_manager can report them without duplicating

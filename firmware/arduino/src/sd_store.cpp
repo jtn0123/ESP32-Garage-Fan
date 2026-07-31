@@ -5,15 +5,21 @@
 
 #include <math.h>
 #include <time.h>
+#include <cstdarg>
 #include <cstdio>
+
+// logging.h is outside the feature guard because it declares log_mirror(), whose
+// definition at the bottom of this file has to exist in both build variants.
+#include "logging.h"
 
 // SD.h/SPI.h stay behind the feature guard so a FEATURE_SD_STORAGE=0 build does
 // not pull the SD library into the link at all.
 #if FEATURE_SD_STORAGE
 
+#include <FFat.h>
 #include <SD.h>
 #include <SPI.h>
-#include "logging.h"
+#include <climits>
 #include "safe_strings.h"
 #include "runtime_config.h"
 
@@ -39,17 +45,29 @@ bool g_mounted = false;
 uint8_t g_log_index = 0;
 bool g_log_index_loaded = false;
 
+// Which filesystem backs the storage paths. The sd_ prefix on this module's API
+// is historical: when no card responds, the same layout lives on the board's
+// internal 960 KB `ffat` partition instead, and every consumer is none the
+// wiser. SD wins when both are available because it is removable — a card can
+// be edited on a computer, which internal flash never can.
+enum class Backend : uint8_t { kNone, kSdCard, kInternal };
+Backend g_backend = Backend::kNone;
+fs::FS* g_fs = nullptr;
+
+// Keep this much of the internal partition free. One day's CSV is ~16 KB at a
+// 5-minute cadence, so this floor forces the oldest day out well before an
+// append can fail mid-write.
+constexpr uint64_t kInternalFreeFloorBytes = 64 * 1024;
+
 void set_error(const char* msg) { safe_strcpy(g_info.last_error, msg); }
 
 // A year below 2020 means NTP has not landed yet and the RTC is at its epoch
 // default; timestamps derived from it would be worse than useless.
-bool epoch_is_plausible(time_t epoch) {
-  return epoch > 1577836800;  // 2020-01-01T00:00:00Z
-}
+bool epoch_is_plausible(time_t epoch) { return epoch > SD_MIN_PLAUSIBLE_EPOCH; }
 
 void ensure_dir(const char* path) {
-  if (!SD.exists(path)) {
-    SD.mkdir(path);
+  if (!g_fs->exists(path)) {
+    g_fs->mkdir(path);
   }
 }
 
@@ -76,7 +94,7 @@ void load_log_index() {
     return;
   g_log_index_loaded = true;
 
-  File f = SD.open(kLogIndexPath, FILE_READ);
+  File f = g_fs->open(kLogIndexPath, FILE_READ);
   if (!f)
     return;
   char buf[8] = {0};
@@ -91,7 +109,7 @@ void load_log_index() {
 }
 
 void save_log_index() {
-  File f = SD.open(kLogIndexPath, FILE_WRITE);
+  File f = g_fs->open(kLogIndexPath, FILE_WRITE);
   if (!f)
     return;
   f.printf("%u\n", static_cast<unsigned>(g_log_index));
@@ -130,6 +148,38 @@ bool history_day_from_name(const char* name, long* out_days) {
   return true;
 }
 
+// Drop the oldest dated history file. Used only on the internal backend, where
+// 960 KB fills in about two months and someone has to lose.
+bool remove_oldest_history() {
+  File dir = g_fs->open(kDataDir);
+  if (!dir)
+    return false;
+
+  char oldest[48] = {0};
+  long oldest_day = LONG_MAX;
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      const char* full = entry.name();
+      const char* base = strrchr(full, '/');
+      base = base ? base + 1 : full;
+      long day = 0;
+      if (history_day_from_name(base, &day) && day < oldest_day) {
+        oldest_day = day;
+        snprintf(oldest, sizeof(oldest), "%s/%s", kDataDir, base);
+      }
+    }
+    entry.close();
+    entry = dir.openNextFile();
+  }
+  dir.close();
+
+  if (!oldest[0])
+    return false;
+  LOG_WARN("Storage: internal flash low - dropping %s", oldest);
+  return g_fs->remove(oldest);
+}
+
 }  // namespace
 
 bool sd_begin() {
@@ -138,6 +188,14 @@ bool sd_begin() {
 
   g_info = SdInfo();
 
+  // Park the Wing's SRAM chip select before anything reads the bus. That chip is
+  // the only other device on MISO, and neither GxEPD2 nor this firmware ever
+  // selects it — but an input-floating CS is not the same as a deasserted one,
+  // and a half-selected SRAM answering over the card is exactly the sort of
+  // intermittent mount failure that looks like a bad card.
+  pinMode(SRAM_CS_PIN, OUTPUT);
+  digitalWrite(SRAM_CS_PIN, HIGH);
+
   // The SD driver only ever calls beginTransaction(); it never starts the bus
   // itself. With a display build GxEPD2 has already done so, but the headless
   // build has no other SPI user, so do it here. SPIClass::begin() early-returns
@@ -145,37 +203,78 @@ bool sd_begin() {
   // what lets the card share the bus with the panel (panel CS D9, card CS D5).
   SPI.begin();
 
-  if (!SD.begin(SD_CS_PIN, SPI, SD_SPI_FREQ_HZ)) {
-    set_error("SD.begin failed (card absent?)");
-    LOG_WARN("SD: mount failed on CS=%d - continuing without card", SD_CS_PIN);
-    return false;
-  }
+  // Walk the bus clock down rather than giving up on the first refusal. A card
+  // that will not enumerate at the configured speed often will at the 400 kHz
+  // rate the SD spec mandates for initialisation, and a slow mount beats no card.
+  // Each attempt reports separately so a log from the field distinguishes "no
+  // card in the slot" from "card present, bus will not negotiate".
+  static const uint32_t kMountFreqs[] = {SD_SPI_FREQ_HZ, 4000000, 1000000, 400000};
+  bool mounted = false;
+  for (size_t i = 0; i < sizeof(kMountFreqs) / sizeof(kMountFreqs[0]); i++) {
+    // Re-park the SRAM select each pass: a failed SD.begin() can leave the bus
+    // pins reconfigured.
+    pinMode(SRAM_CS_PIN, OUTPUT);
+    digitalWrite(SRAM_CS_PIN, HIGH);
 
-  uint8_t card_type = SD.cardType();
-  if (card_type == CARD_NONE) {
+    if (SD.begin(SD_CS_PIN, SPI, kMountFreqs[i])) {
+      LOG_INFO("SD: mounted at %lu Hz (attempt %u)", static_cast<unsigned long>(kMountFreqs[i]),
+               static_cast<unsigned>(i + 1));
+      mounted = true;
+      break;
+    }
+    // INFO, not WARN: a cardless node falls back to internal flash by design,
+    // and four warnings per boot would cry wolf on a configuration that is fine.
+    LOG_INFO("SD: begin failed at %lu Hz (CS=%d, cardType=%u)",
+             static_cast<unsigned long>(kMountFreqs[i]), SD_CS_PIN,
+             static_cast<unsigned>(SD.cardType()));
     SD.end();
-    set_error("no card detected");
-    LOG_WARN("SD: no card detected");
-    return false;
+    delay(10);
   }
 
-  switch (card_type) {
-    case CARD_MMC:
-      g_info.type = "MMC";
-      break;
-    case CARD_SD:
-      g_info.type = "SDSC";
-      break;
-    case CARD_SDHC:
-      g_info.type = "SDHC";
-      break;
-    default:
-      g_info.type = "unknown";
-      break;
+  if (mounted && SD.cardType() == CARD_NONE) {
+    SD.end();
+    mounted = false;
+    LOG_WARN("SD: bus answered but no card detected");
   }
 
-  g_info.total_bytes = SD.totalBytes();
-  g_info.used_bytes = SD.usedBytes();
+  if (mounted) {
+    g_backend = Backend::kSdCard;
+    g_fs = &SD;
+    switch (SD.cardType()) {
+      case CARD_MMC:
+        g_info.type = "MMC";
+        break;
+      case CARD_SD:
+        g_info.type = "SDSC";
+        break;
+      case CARD_SDHC:
+        g_info.type = "SDHC";
+        break;
+      default:
+        g_info.type = "unknown";
+        break;
+    }
+    g_info.total_bytes = SD.totalBytes();
+    g_info.used_bytes = SD.usedBytes();
+  } else {
+    // No card responded — fall back to the internal `ffat` partition (960 KB in
+    // the stock Adafruit table, unused until now). Same layout, same paths; the
+    // one thing it cannot do is be pulled out and edited on a computer.
+    // format-on-fail is deliberate: the partition ships from the factory
+    // unformatted, and the first boot is exactly when formatting it is cheap.
+    if (!FFat.begin(true)) {
+      set_error("no card, FFat mount failed");
+      LOG_WARN("Storage: no card and internal FFat failed - running without storage");
+      return false;
+    }
+    g_backend = Backend::kInternal;
+    g_fs = &FFat;
+    g_info.type = "FFat";
+    g_info.total_bytes = FFat.totalBytes();
+    g_info.used_bytes = FFat.usedBytes();
+    LOG_INFO("Storage: no card - using internal flash");
+  }
+
   g_info.mounted = true;
   g_mounted = true;
 
@@ -183,15 +282,21 @@ bool sd_begin() {
   ensure_dir(kLogDir);
   ensure_dir(kFirmwareDir);
 
-  LOG_INFO("SD: mounted %s, %llu MB total, %llu MB used", g_info.type,
-           g_info.total_bytes / (1024ULL * 1024ULL), g_info.used_bytes / (1024ULL * 1024ULL));
+  LOG_INFO("Storage: mounted %s, %llu KB total, %llu KB used", g_info.type,
+           g_info.total_bytes / 1024ULL, g_info.used_bytes / 1024ULL);
   return true;
 }
 
 void sd_end() {
   if (!g_mounted)
     return;
-  SD.end();
+  if (g_backend == Backend::kSdCard) {
+    SD.end();
+  } else if (g_backend == Backend::kInternal) {
+    FFat.end();
+  }
+  g_backend = Backend::kNone;
+  g_fs = nullptr;
   g_mounted = false;
   g_info.mounted = false;
 }
@@ -204,12 +309,12 @@ bool sd_load_config() {
   if (!g_mounted)
     return false;
 
-  if (!SD.exists(kConfigPath)) {
+  if (!g_fs->exists(kConfigPath)) {
     LOG_INFO("SD: no %s, using compiled-in config", kConfigPath);
     return false;
   }
 
-  File f = SD.open(kConfigPath, FILE_READ);
+  File f = g_fs->open(kConfigPath, FILE_READ);
   if (!f) {
     LOG_WARN("SD: could not open %s", kConfigPath);
     return false;
@@ -254,12 +359,24 @@ bool sd_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct
   if (!g_mounted)
     return false;
 
+  // On the internal partition, make room *before* the append: a write that dies
+  // against a full filesystem leaves a truncated row, and 960 KB fills in about
+  // two months at a 5-minute cadence. Bounded so a scan that frees nothing (only
+  // nodate.csv left, remove failing) cannot loop.
+  if (g_backend == Backend::kInternal) {
+    int guard = 4;
+    while (FFat.freeBytes() < kInternalFreeFloorBytes && guard-- > 0) {
+      if (!remove_oldest_history())
+        break;
+    }
+  }
+
   char path[48];
   history_path_for(epoch, path, sizeof(path));
 
-  bool is_new = !SD.exists(path);
+  bool is_new = !g_fs->exists(path);
 
-  File f = SD.open(path, FILE_APPEND);
+  File f = g_fs->open(path, FILE_APPEND);
   if (!f) {
     LOG_WARN("SD: cannot append to %s", path);
     return false;
@@ -317,7 +434,7 @@ uint16_t sd_prune_history(uint16_t retention_days) {
   long today = static_cast<long>(now / 86400);
   uint16_t removed = 0;
 
-  File dir = SD.open(kDataDir);
+  File dir = g_fs->open(kDataDir);
   if (!dir)
     return 0;
 
@@ -357,7 +474,7 @@ uint16_t sd_prune_history(uint16_t retention_days) {
   dir.close();
 
   for (uint8_t i = 0; i < doomed_count; i++) {
-    if (SD.remove(doomed[i])) {
+    if (g_fs->remove(doomed[i])) {
       removed++;
       LOG_INFO("SD: pruned %s", doomed[i]);
     }
@@ -377,7 +494,7 @@ bool sd_log_write(const char* line) {
   char path[32];
   log_path_for(g_log_index, path, sizeof(path));
 
-  File f = SD.open(path, FILE_APPEND);
+  File f = g_fs->open(path, FILE_APPEND);
   if (!f)
     return false;
 
@@ -386,19 +503,34 @@ bool sd_log_write(const char* line) {
     g_log_index = (g_log_index + 1) % SD_LOG_FILE_COUNT;
     log_path_for(g_log_index, path, sizeof(path));
     // Starting a fresh generation: drop whatever the oldest file held.
-    SD.remove(path);
+    g_fs->remove(path);
     save_log_index();
-    f = SD.open(path, FILE_APPEND);
+    f = g_fs->open(path, FILE_APPEND);
     if (!f)
       return false;
   }
 
+  // Timestamp here rather than at the call sites: this is the one choke point,
+  // and a log whose lines cannot be placed in time is not worth the write.
+  time_t now = time(nullptr);
+  char stamp[24];
+  if (epoch_is_plausible(now)) {
+    struct tm tm_local;
+    localtime_r(&now, &tm_local);
+    strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &tm_local);
+  } else {
+    // Pre-NTP lines still need to be orderable, so fall back to uptime.
+    snprintf(stamp, sizeof(stamp), "+%lus", static_cast<unsigned long>(millis() / 1000));
+  }
+
+  f.print(stamp);
+  f.print(' ');
   f.println(line);
   f.close();
   return true;
 }
 
-bool sd_has_staged_update() { return g_mounted && SD.exists(SD_UPDATE_PATH); }
+bool sd_has_staged_update() { return g_mounted && g_fs->exists(SD_UPDATE_PATH); }
 
 File sd_open_staged_update(size_t* size_out) {
   if (size_out)
@@ -406,7 +538,7 @@ File sd_open_staged_update(size_t* size_out) {
   if (!g_mounted)
     return File();
 
-  File f = SD.open(SD_UPDATE_PATH, FILE_READ);
+  File f = g_fs->open(SD_UPDATE_PATH, FILE_READ);
   if (f && size_out)
     *size_out = f.size();
   return f;
@@ -418,11 +550,11 @@ void sd_finish_staged_update(bool success) {
 
   const char* target = success ? SD_UPDATE_APPLIED_PATH : SD_UPDATE_FAILED_PATH;
   // rename() will not overwrite, so clear any result from a previous attempt.
-  SD.remove(target);
-  if (!SD.rename(SD_UPDATE_PATH, target)) {
+  g_fs->remove(target);
+  if (!g_fs->rename(SD_UPDATE_PATH, target)) {
     // If the rename fails the image would be retried forever, so remove it.
     LOG_WARN("SD: could not rename staged image to %s - deleting it", target);
-    SD.remove(SD_UPDATE_PATH);
+    g_fs->remove(SD_UPDATE_PATH);
   }
 }
 
@@ -447,3 +579,44 @@ File sd_open_staged_update(size_t* size_out) {
 void sd_finish_staged_update(bool) {}
 
 #endif  // FEATURE_SD_STORAGE
+
+// --- serial log mirror -------------------------------------------------------
+// Deliberately outside the feature guard: logging.h declares log_mirror() for
+// every translation unit that logs, so exactly one definition must exist whether
+// or not the SD library is compiled in. With FEATURE_SD_STORAGE=0 the mirror can
+// never be enabled and sd_log_write() is a stub, so this costs one branch.
+
+namespace {
+bool g_mirror_enabled = false;
+// log_mirror() is reached from inside sd_store's own LOG_WARN/LOG_ERROR calls
+// (sd_begin and sd_prune_history both log). Those do not recurse today, but a
+// logging call added to the write path later would loop until the stack ran out,
+// which is a bad way to find out.
+bool g_mirror_active = false;
+}  // namespace
+
+void sd_log_set_mirror(bool enabled) { g_mirror_enabled = enabled; }
+
+bool sd_log_mirror_enabled() { return g_mirror_enabled; }
+
+void log_mirror(const char* level, const char* fmt, ...) {
+  if (!g_mirror_enabled || g_mirror_active || !sd_is_mounted())
+    return;
+
+  g_mirror_active = true;
+
+  // Sized to match Logger::MAX_MESSAGE_LENGTH plus the level tag; anything
+  // longer is truncated rather than heap-allocated on a logging path.
+  char line[160];
+  int n = snprintf(line, sizeof(line), "[%s] ", level);
+  if (n > 0 && static_cast<size_t>(n) < sizeof(line)) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(line + n, sizeof(line) - n, fmt, args);
+    va_end(args);
+  }
+
+  sd_log_write(line);
+
+  g_mirror_active = false;
+}

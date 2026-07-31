@@ -10,6 +10,7 @@
 #include "debug_commands.h"
 #include "profiling.h"
 #include "safe_strings.h"
+#include "wifi_manager.h"
 #include "power.h"  // For BatteryStatus
 #if LOG_MQTT_ENABLED
 #include "logging/log_mqtt.h"
@@ -344,15 +345,11 @@ bool mqtt_connect() {
 
     // Build discovery payload with device info
     char discovery_payload[256];
+    // Unconditional: wifi_manager is always in the build, and the previous
+    // FEATURE_WIFI guard referenced a flag that was never defined anywhere, so
+    // this always fell through to a hardcoded 0.0.0.0.
     char ip_buf[16];
-#if FEATURE_WIFI
-    // Get IP address from WiFi manager
-    extern String wifi_get_ip();
-    String ip_str = wifi_get_ip();
-    safe_strcpy(ip_buf, ip_str.c_str());
-#else
-    safe_strcpy(ip_buf, "0.0.0.0");
-#endif
+    wifi_get_ip_cstr(ip_buf, sizeof(ip_buf));
 
     snprintf(
         discovery_payload, sizeof(discovery_payload),

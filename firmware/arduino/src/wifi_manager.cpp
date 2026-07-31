@@ -167,6 +167,17 @@ void wifi_configure_power_save(bool enable) {
   }
 }
 
+void wifi_reduce_tx_power() {
+  // Default TX power is 19.5 dBm, sized for reaching an AP across a house. This
+  // node sits at RSSI -53; 11 dBm still leaves ~20 dB of link margin, and every
+  // transmit at lower power is heat the on-board BME280 never sees. Skipped
+  // when the link is already marginal — a dropped connection costs far more
+  // (reconnect bursts at full power) than the savings.
+  if (WiFi.isConnected() && WiFi.RSSI() > -65) {
+    WiFi.setTxPower(WIFI_POWER_11dBm);
+  }
+}
+
 WiFiConnectionState wifi_get_state() {
   // Update state based on actual connection status
   if (WiFi.isConnected() && g_wifi_state != WIFI_STATE_CONNECTED) {

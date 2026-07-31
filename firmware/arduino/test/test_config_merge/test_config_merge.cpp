@@ -93,9 +93,7 @@ void test_merge_u32_allows_zero_when_range_permits() {
   TEST_ASSERT_EQUAL_UINT32(0, dst);
 }
 
-void test_merge_u32_rejects_null_dest() {
-  TEST_ASSERT_FALSE(merge_u32(nullptr, 100, 0, 200));
-}
+void test_merge_u32_rejects_null_dest() { TEST_ASSERT_FALSE(merge_u32(nullptr, 100, 0, 200)); }
 
 // === merge_u16 ==============================================================
 
@@ -115,9 +113,7 @@ void test_merge_u16_rejects_port_zero_and_overflow() {
   TEST_ASSERT_EQUAL_UINT16(1883, dst);
 }
 
-void test_merge_u16_rejects_null_dest() {
-  TEST_ASSERT_FALSE(merge_u16(nullptr, 100, 1, 65535));
-}
+void test_merge_u16_rejects_null_dest() { TEST_ASSERT_FALSE(merge_u16(nullptr, 100, 1, 65535)); }
 
 // === merge_bool =============================================================
 
@@ -135,9 +131,7 @@ void test_merge_bool_ignores_when_absent() {
   TEST_ASSERT_TRUE(dst);
 }
 
-void test_merge_bool_rejects_null_dest() {
-  TEST_ASSERT_FALSE(merge_bool(nullptr, true, true));
-}
+void test_merge_bool_rejects_null_dest() { TEST_ASSERT_FALSE(merge_bool(nullptr, true, true)); }
 
 // === realistic scenarios ====================================================
 
@@ -155,6 +149,33 @@ void test_blank_template_leaves_everything_compiled_in() {
   TEST_ASSERT_EQUAL_STRING("HomeNetwork", ssid);
   TEST_ASSERT_EQUAL_STRING("secret", pass);
   TEST_ASSERT_EQUAL_UINT16(1883, port);
+}
+
+// === merge_float =============================================================
+
+void test_merge_float_applies_in_range_including_negative_and_zero() {
+  float offset = 0.0f;
+  TEST_ASSERT_TRUE(merge_float(&offset, true, -8.5, -20.0, 20.0));
+  TEST_ASSERT_EQUAL_FLOAT(-8.5f, offset);
+  TEST_ASSERT_TRUE(merge_float(&offset, true, 0.0, -20.0, 20.0));
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, offset);
+}
+
+void test_merge_float_ignores_when_absent() {
+  float offset = 1.5f;
+  TEST_ASSERT_FALSE(merge_float(&offset, false, -8.5, -20.0, 20.0));
+  TEST_ASSERT_EQUAL_FLOAT(1.5f, offset);
+}
+
+void test_merge_float_rejects_out_of_range_rather_than_clamping() {
+  float offset = 1.5f;
+  TEST_ASSERT_FALSE(merge_float(&offset, true, -20.1, -20.0, 20.0));
+  TEST_ASSERT_FALSE(merge_float(&offset, true, 20.1, -20.0, 20.0));
+  TEST_ASSERT_EQUAL_FLOAT(1.5f, offset);
+}
+
+void test_merge_float_rejects_null_dest() {
+  TEST_ASSERT_FALSE(merge_float(nullptr, true, 1.0, -20.0, 20.0));
 }
 
 void test_partial_card_overrides_only_named_fields() {
@@ -198,6 +219,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_merge_bool_applies_when_present);
   RUN_TEST(test_merge_bool_ignores_when_absent);
   RUN_TEST(test_merge_bool_rejects_null_dest);
+
+  RUN_TEST(test_merge_float_applies_in_range_including_negative_and_zero);
+  RUN_TEST(test_merge_float_ignores_when_absent);
+  RUN_TEST(test_merge_float_rejects_out_of_range_rather_than_clamping);
+  RUN_TEST(test_merge_float_rejects_null_dest);
 
   RUN_TEST(test_blank_template_leaves_everything_compiled_in);
   RUN_TEST(test_partial_card_overrides_only_named_fields);
