@@ -15,7 +15,11 @@ struct BatteryStatus;
 struct OutsideReadings;
 
 // Main display functions
-void display_manager_init();
+// clear_panel: spend a full refresh blanking the panel before use. The
+// always-on boot path passes false - its first real draw follows within
+// seconds and each full refresh costs ~3 s of watchdog budget plus one of
+// the panel's rated cycles. Diagnostic/debug builds keep the clear.
+void display_manager_init(bool clear_panel = true);
 void full_refresh();
 void smoke_full_window_test();
 

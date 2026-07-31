@@ -82,6 +82,10 @@ enum UiOpKind {
 //     the op is unconditional. Renderers must skip the op when the guard
 //     field has no value.
 struct UiOpHeader { uint8_t kind; uint8_t rect; uint8_t font; uint8_t align; int16_t p0; int16_t p1; int16_t p2; int16_t p3; const char* s0; const char* s1; };
+// Text ops with no explicit y in the spec carry this sentinel in p1:
+// "not provided" (renderer applies its 1px default inset), which keeps an
+// explicit y of 0 distinct instead of silently becoming +1.
+static constexpr int16_t kNoYOffset = INT16_MIN;
 
 static constexpr const char* kVariantNames[] = {
     "v2",

@@ -8,6 +8,18 @@
 #include <Adafruit_NeoPixel.h>
 static Adafruit_NeoPixel* g_status_pixel = nullptr;
 
+// The WS2812 idles at ~0.7-1 mA even when dark (~3% of the always-on power
+// budget), so the power rail is dropped whenever the pixel goes off and
+// re-raised per flash. The LED loses state on power-down, but every caller
+// rewrites the color after raising, so nothing depends on retained state.
+static void pixel_rail(bool on) {
+#ifdef NEOPIXEL_POWER
+  digitalWrite(NEOPIXEL_POWER, on ? HIGH : LOW);
+  if (on)
+    delay(1);  // rail settle before clocking data
+#endif
+}
+
 // Boot stage indicator - single color at a time
 void show_boot_stage(int stage) {
   if (!g_status_pixel) {
@@ -22,6 +34,8 @@ void show_boot_stage(int stage) {
     g_status_pixel->setBrightness(50);  // Not too bright
   }
 
+  if (stage != 0)
+    pixel_rail(true);
   switch (stage) {
     case 1:                                         // Boot/Serial
       g_status_pixel->setPixelColor(0, 255, 0, 0);  // Red
@@ -48,6 +62,8 @@ void show_boot_stage(int stage) {
       break;
   }
   g_status_pixel->show();
+  if (stage == 0)
+    pixel_rail(false);
 }
 // --- runtime pixel effects ---------------------------------------------------
 // Non-blocking blips: set a color with a deadline, pixel_tick() (called from
@@ -60,6 +76,7 @@ void pixel_flash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms) {
   }
   if (!g_status_pixel)
     return;
+  pixel_rail(true);
   g_status_pixel->setPixelColor(0, r, g, b);
   g_status_pixel->show();
   g_pixel_off_ms = millis() + ms;
@@ -70,6 +87,7 @@ void pixel_tick() {
     g_pixel_off_ms = 0;
     g_status_pixel->setPixelColor(0, 0, 0, 0);
     g_status_pixel->show();
+    pixel_rail(false);
   }
 }
 

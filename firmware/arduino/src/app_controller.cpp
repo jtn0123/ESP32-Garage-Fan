@@ -289,7 +289,9 @@ void app_setup() {
 
 #if USE_DISPLAY
   Serial.println("[BOOT-2c] Initializing display...");
-  display_manager_init();  // This will show "12:34" test pattern in debug mode
+  // Skip the init full-clear: the display phase below always follows with a
+  // real full draw, so the clear was a second ~3 s refresh spent on nothing.
+  display_manager_init(false);
   Serial.println("[BOOT-2c] Display initialized");
 #endif
 

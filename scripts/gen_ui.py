@@ -468,6 +468,10 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
             "uint8_t kind; uint8_t rect; uint8_t font; uint8_t align; "
             "int16_t p0; int16_t p1; int16_t p2; int16_t p3; "
             "const char* s0; const char* s1; };"
+            "\n// Text ops with no explicit y in the spec carry this sentinel in p1:"
+            "\n// \"not provided\" (renderer applies its 1px default inset), which keeps an"
+            "\n// explicit y of 0 distinct instead of silently becoming +1."
+            "\nstatic constexpr int16_t kNoYOffset = INT16_MIN;"
         )
     )
     lines.append("")
@@ -628,9 +632,11 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 s0 = _cxx_string_literal(txt)
                 try:
                     p0 = int(op.get("x", 0))
-                    p1 = int(op.get("y", 0))
+                    # kNoYOffset sentinel when the spec gives no y: an explicit
+                    # y of 0 must render at the rect top, not the +1 default.
+                    p1 = int(op.get("y", -32768))
                 except Exception:
-                    p0 = p1 = 0
+                    p0, p1 = 0, -32768
                 # p3 = 1 draws the text inverse (white), for use over a fill.
                 p3 = 1 if str(op.get("color", "")) == "inverse" else 0
             elif kind == "timeRight":

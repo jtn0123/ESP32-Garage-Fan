@@ -429,7 +429,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
         case ui::OP_TEXT: {
           const int* r = rect_ptr_by_id(op.rect);
           int16_t tx = op.p0;
-          int16_t ty = op.p1;
+          int16_t ty = (op.p1 == ui::kNoYOffset) ? 0 : op.p1;
           String out = spec_expand_template(op.s0 ? String(op.s0) : String(""));
           // p3=1: inverse (white) text, drawn over an OP_FILL band.
           gfx.setTextColor(op.p3 ? GxEPD_WHITE : GxEPD_BLACK);
@@ -443,8 +443,8 @@ void draw_from_spec_full_impl(uint8_t variantId) {
               tx = r[0] + r[2] - 2 - tw;
             else if (op.align == ALIGN_CENTER)
               tx = r[0] + (r[2] - tw) / 2;
-            // Use y-offset (p1) if provided, otherwise default to +1
-            ty = r[1] + (op.p1 != 0 ? op.p1 : 1);
+            // Use y-offset (p1) if provided - an explicit 0 counts - else +1
+            ty = r[1] + (op.p1 == ui::kNoYOffset ? 1 : op.p1);
           }
           gfx.setCursor(tx, ty);
           gfx.print(out.c_str());

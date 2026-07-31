@@ -39,7 +39,7 @@ void draw_in_region_lambda(const int rect[4], void (*fn)(int16_t, int16_t, int16
                            void* ctx);
 
 // Placeholder implementations - will be filled with actual code from main.cpp
-void display_manager_init() {
+void display_manager_init(bool clear_panel) {
   Serial.println("[DISPLAY] Initializing display...");
 
   // Initialize display hardware
@@ -48,11 +48,13 @@ void display_manager_init() {
   display.setTextColor(GxEPD_BLACK);
   display.setFullWindow();
 
-  // Clear display with white background
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-  } while (display.nextPage());
+  if (clear_panel) {
+    // Clear display with white background
+    display.firstPage();
+    do {
+      display.fillScreen(GxEPD_WHITE);
+    } while (display.nextPage());
+  }
 
 #ifdef BOOT_DEBUG
   // Show test pattern during boot
