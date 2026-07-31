@@ -56,6 +56,7 @@ hardware-interchangeable; the driver is a build-time choice (`display_hw.h`):
 | `FEATURE_OTA` | `1` | Network OTA and apply-from-SD |
 | `SD_CS_PIN` | `5` | Card chip select (D5 on the eInk FeatherWing) |
 | `OTA_PORT` | `3232` | ArduinoOTA / espota listener port |
+| `MQTT_TLS` | `0` | MQTT over TLS (WiFiClientSecure, ~40 KB heap). CA pinned from `/config/mqtt_ca.pem` on storage when present, else encrypted-but-unauthenticated. Point the mqtt port at the broker's TLS listener (8883) |
 | `OTA_REQUIRE_PASSWORD` | `0` | Set to 1 to refuse network OTA unless a password is set |
 
 `SAMPLE_INTERVAL_SEC` can also come from `sample_interval` in

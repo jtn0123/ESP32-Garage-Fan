@@ -218,3 +218,12 @@
 #ifndef OTA_REQUIRE_PASSWORD
 #define OTA_REQUIRE_PASSWORD 0
 #endif
+
+// Optional MQTT-over-TLS (-DMQTT_TLS=1). Off by default: this node lives on a
+// trusted LAN by owner decision, and TLS costs ~40 KB of heap per session.
+// When enabled, the broker CA is read from storage at /config/mqtt_ca.pem;
+// absent that the link is encrypted but unauthenticated (setInsecure), and
+// boot says so. No passwords are introduced either way.
+#ifndef MQTT_TLS
+#define MQTT_TLS 0
+#endif

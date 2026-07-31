@@ -302,6 +302,7 @@ void storage_end() {
 }
 
 bool storage_is_mounted() { return g_mounted; }
+fs::FS* storage_fs() { return g_mounted ? g_fs : nullptr; }
 
 const StorageInfo& storage_get_info() { return g_info; }
 
@@ -675,6 +676,7 @@ static StorageInfo g_disabled_info;
 bool storage_begin() { return false; }
 void storage_end() {}
 bool storage_is_mounted() { return false; }
+fs::FS* storage_fs() { return nullptr; }
 const StorageInfo& storage_get_info() { return g_disabled_info; }
 bool storage_load_config() { return false; }
 bool storage_append_history(time_t, uint32_t, float, float, float, float, int, int, float, float) {

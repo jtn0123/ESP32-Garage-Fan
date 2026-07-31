@@ -11,6 +11,9 @@
 #include "profiling.h"
 #include "safe_strings.h"
 #include "wifi_manager.h"
+#if MQTT_TLS
+#include "storage.h"
+#endif
 #include "power.h"  // For BatteryStatus
 #if LOG_MQTT_ENABLED
 #include "logging/log_mqtt.h"
@@ -22,8 +25,52 @@ extern "C" void display_capture_handle(const char* payload, size_t length);
 #endif
 
 // Static storage
+//
+// MQTT_TLS=1 (compile-time, default off) swaps in WiFiClientSecure. The CA
+// certificate is read from storage at /config/mqtt_ca.pem when present;
+// without one the link falls back to setInsecure() - still encrypted, but
+// the broker is not authenticated - and says so at boot. Heap cost of the
+// TLS session is ~40 KB; the always-on build has the headroom. Point
+// device.yaml's mqtt port at the broker's TLS listener (usually 8883).
+#if MQTT_TLS
+#include <WiFiClientSecure.h>
+static WiFiClientSecure g_wifi_client;
+#else
 static WiFiClient g_wifi_client;
+#endif
 static PubSubClient g_mqtt(g_wifi_client);
+#if MQTT_TLS
+// Owned copy of the CA pem; WiFiClientSecure::setCACert keeps the pointer.
+static char* g_mqtt_ca = nullptr;
+
+static void mqtt_tls_configure() {
+  static bool s_done = false;
+  if (s_done)
+    return;
+  s_done = true;
+  if (storage_is_mounted()) {
+    File f = storage_fs() ? storage_fs()->open("/config/mqtt_ca.pem", "r") : File();
+    if (f && f.size() > 0 && f.size() < 8192) {
+      size_t n = f.size();
+      g_mqtt_ca = static_cast<char*>(malloc(n + 1));
+      if (g_mqtt_ca) {
+        f.readBytes(g_mqtt_ca, n);
+        g_mqtt_ca[n] = 0;
+        g_wifi_client.setCACert(g_mqtt_ca);
+        Serial.println("[MQTT] TLS with CA from /config/mqtt_ca.pem");
+        if (f)
+          f.close();
+        return;
+      }
+    }
+    if (f)
+      f.close();
+  }
+  g_wifi_client.setInsecure();
+  Serial.println("[MQTT] TLS without CA (encrypted, broker unauthenticated) - "
+                 "drop /config/mqtt_ca.pem onto storage to pin the broker");
+}
+#endif
 static OutsideReadings g_outside;
 static char g_mqtt_client_id[40];  // Renamed to avoid conflict with net.h
 static Preferences g_mqtt_prefs;
@@ -71,6 +118,10 @@ static String build_topic(const char* suffix) {
 void mqtt_begin() {
   // Client ID will be set externally via mqtt_set_client_id
   // to avoid WiFi dependency in this module
+
+#if MQTT_TLS
+  mqtt_tls_configure();
+#endif
 
   // Configure MQTT client
   g_mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);

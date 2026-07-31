@@ -44,6 +44,10 @@ struct StorageInfo {
 bool storage_begin();
 void storage_end();
 bool storage_is_mounted();
+// The active filesystem (SD or FFat), or nullptr when nothing is mounted.
+// For consumers that read their own files off storage (e.g. the optional
+// MQTT TLS CA at /config/mqtt_ca.pem).
+fs::FS* storage_fs();
 const StorageInfo& storage_get_info();
 
 // Read /config/device.json and overlay it onto the runtime config. Returns true
