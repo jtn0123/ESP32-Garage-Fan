@@ -87,19 +87,45 @@ static void derive_hostname() {
   snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
 }
 
+// Publish the retained Home Assistant discovery configs, once per boot. Split
+// from the connect path because MQTT can come up either during setup or — after
+// a power-outage boot race — from the link-check loop, and whichever happens
+// first should publish. Without this call HA never auto-creates the entities:
+// the only other caller of ha_discovery_publish_all() was net_init_and_connect(),
+// which nothing invokes.
+static void publish_ha_discovery_once() {
+  static bool s_published = false;
+  if (s_published || !mqtt_is_connected())
+    return;
+  s_published = true;
+  net_publish_ha_discovery();
+  Serial.println("[NET] HA discovery published");
+}
+
 // Bring up mDNS and the OTA listener. Safe to call repeatedly -- ota_begin()
 // returns immediately once running -- so callers can just retry while WiFi is up.
 static void start_network_services() {
   if (!wifi_is_connected())
     return;
 
-  if (MDNS.begin(g_hostname)) {
-    Serial.printf("[NET] mDNS started: %s.local\n", g_hostname);
-    MDNS.addService("espsensor", "tcp", 80);
-    MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
-    MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
-  } else {
-    Serial.println("[NET] mDNS failed to start");
+  // mDNS success is tracked on its own rather than inferred from OTA state: the
+  // old guard (`!ota_is_active()`) meant a boot-time mDNS failure became
+  // permanent the moment OTA came up, and <room>.local never resolved again.
+  // Failures after the first are retried silently -- at a 30 s cadence a
+  // persistent failure would otherwise print 2880 lines a day.
+  static bool s_mdns_ok = false;
+  static bool s_mdns_fail_logged = false;
+  if (!s_mdns_ok) {
+    if (MDNS.begin(g_hostname)) {
+      s_mdns_ok = true;
+      Serial.printf("[NET] mDNS started: %s.local\n", g_hostname);
+      MDNS.addService("espsensor", "tcp", 80);
+      MDNS.addServiceTxt("espsensor", "tcp", "version", FW_VERSION);
+      MDNS.addServiceTxt("espsensor", "tcp", "room", rc_room_name());
+    } else if (!s_mdns_fail_logged) {
+      s_mdns_fail_logged = true;
+      Serial.println("[NET] mDNS failed to start (will keep retrying quietly)");
+    }
   }
 
   // After mDNS, so the OTA service record lands in the responder set up above
@@ -182,6 +208,11 @@ void app_setup() {
     log_config.mqtt_enabled = true;
     Logger::getInstance().begin(log_config);
   }
+
+  // Classify this reset and bump the RTC boot/crash counters. This was never
+  // called, so /debug/boot_count and /debug/crash_count published 0 forever and
+  // a watchdog reboot-loop in the field would have been invisible in telemetry.
+  update_boot_counters();
 
   // Immediate debug output
   Serial.println("\n\n=== ESP32 BOOT SEQUENCE ===");
@@ -340,6 +371,13 @@ void app_setup() {
                 ESP.getMinFreeHeap());
 #endif
 
+  // Display init, storage mount and sensor bring-up above can consume ~8 s of
+  // the 30 s watchdog budget; the WiFi backoff below can take 21 s on its own
+  // when the AP is unreachable. Without a feed between them, a boot with the
+  // router down trips the watchdog just before setup completes and the device
+  // reboot-loops until the AP returns.
+  esp_task_wdt_reset();
+
   // Initialize network with exponential backoff
   Serial.println("[BOOT-3] Attempting WiFi connection...");
   show_boot_stage(3);  // Blue for WiFi
@@ -369,7 +407,12 @@ void app_setup() {
   if (wifi_is_connected()) {
     net_begin();
     ensure_mqtt_connected();
+    publish_ha_discovery_once();
   }
+
+  // The WiFi + MQTT block above can spend ~25 s against an unreachable AP and a
+  // half-dead broker; give the boot phases below a fresh watchdog budget.
+  esp_task_wdt_reset();
 
   // Run main phases
   run_sensor_phase();
@@ -548,16 +591,26 @@ void app_loop() {
       }
     }
 
+    // The reconnect above can block for ~17 s (backoff + NTP); start MQTT's
+    // budget fresh so the two together cannot cross the 30 s watchdog.
+    esp_task_wdt_reset();
+
     // Gate on whether the services are running, NOT on observing a reconnect
     // here. If WiFi was down at boot and the IDF stack reconnected on its own,
     // this check only ever sees an already-connected link, no transition
     // happens, and OTA would stay dead for the whole session -- precisely when
     // it is most needed. start_network_services() is cheap to retry.
-    if (wifi_is_connected() && !ota_is_active()) {
+    if (wifi_is_connected()) {
       start_network_services();
-    }
 
-    ensure_mqtt_connected();
+      // net_begin() is idempotent and normally ran during setup — but if WiFi
+      // was down at boot (power outage: the ESP boots faster than the router),
+      // setup skipped it and MQTT was never configured. Without this call the
+      // node would retry a null broker address every 30 s forever.
+      net_begin();
+      ensure_mqtt_connected();
+      publish_ha_discovery_once();
+    }
   }
 
   // Pump MQTT so retained outside data and commands are handled between samples.

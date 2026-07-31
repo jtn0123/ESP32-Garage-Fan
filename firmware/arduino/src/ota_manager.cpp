@@ -147,6 +147,18 @@ void ota_begin(const char* hostname) {
 void ota_loop() {
   if (!g_active)
     return;
+  // 4 Hz, not every loop pass. ArduinoOTA.handle() polls its UDP socket, and
+  // WiFiUDP::parsePacket() does a 1460-byte malloc/free on EVERY call, packet or
+  // not — at the loop's ~48 Hz that was ~4 million large alloc/free cycles a
+  // day and the dominant source of the observed 60% heap fragmentation. espota
+  // retries its invitation for seconds, so 250 ms of poll latency is invisible;
+  // once a transfer is accepted, handle() runs it synchronously to completion,
+  // so the throttle costs an in-progress update nothing.
+  static uint32_t s_last_poll_ms = 0;
+  uint32_t now = millis();
+  if (now - s_last_poll_ms < 250)
+    return;
+  s_last_poll_ms = now;
   ArduinoOTA.handle();
 }
 

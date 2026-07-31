@@ -126,7 +126,12 @@ BatteryStatus read_battery_status() {
       g_lcfg_initialized = true;
       Serial.println("LC709203F fuel gauge found");
       g_lcfg.setPowerMode(LC709203F_POWER_OPERATE);
-      g_lcfg.setPackSize(LC709203F_APA_3000MAH);
+      // APA for the actual pack: two 3300 mAh 18650s in parallel = 6600 mAh.
+      // The library's named constants stop at 3000 mAh (0x36); the datasheet
+      // table is close to linear at ~9 counts per 1000 mAh above 1000, so
+      // 6600 mAh extrapolates to ~0x56. With the old 3000 mAh setting the
+      // reported percentage sagged noticeably mid-discharge on this pack.
+      g_lcfg.setPackAPA(BATTERY_APA);
       g_lcfg.setAlarmVoltage(3.4);
     } else {
       Serial.println("LC709203F not found");

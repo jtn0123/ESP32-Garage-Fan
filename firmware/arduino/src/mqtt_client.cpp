@@ -129,6 +129,10 @@ void mqtt_begin() {
           // Store new interval - will be used on next sleep cycle
           extern void set_custom_sleep_interval(uint32_t sec);
           set_custom_sleep_interval(static_cast<uint32_t>(interval));
+          // The always-on scheduler reads rc_sample_interval_sec(), not the
+          // deep-sleep custom interval above — without this the command printed
+          // success and changed nothing on an always-on node.
+          rc_set_sample_interval_sec(static_cast<uint32_t>(interval));
           Serial.printf("[MQTT] Sleep interval set to %ld seconds\n", interval);
         } else {
           Serial.println("[MQTT] Invalid sleep interval (must be 180-3600 seconds)");

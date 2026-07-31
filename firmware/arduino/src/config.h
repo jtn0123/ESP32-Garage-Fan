@@ -187,6 +187,14 @@
 #define TEMP_OFFSET_C 0.0f
 #endif
 
+// LC709203F fuel-gauge APA (Adjustment Pack Application) register value.
+// Default matches the library's 3000 mAh constant; override per hardware. The
+// datasheet table runs ~9 counts per 1000 mAh above 1000 mAh (0x19=1000,
+// 0x2D=2000, 0x36=3000), so larger custom packs extrapolate linearly.
+#ifndef BATTERY_APA
+#define BATTERY_APA 0x36
+#endif
+
 // Network OTA (ArduinoOTA / espota) listener port.
 #ifndef OTA_PORT
 #define OTA_PORT 3232

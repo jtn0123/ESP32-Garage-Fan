@@ -28,8 +28,16 @@ struct OfflineSample {
   bool hasPressure;
 };
 
-// Initialize networking components
+// Initialize networking components. Idempotent: the always-on loop calls this
+// from its link-check path so a node that booted before the router was up still
+// gets MQTT wired once WiFi appears — without the guard, that late call would
+// re-run mqtt_begin() and re-register callbacks every 30 s.
 inline void net_begin() {
+  static bool s_begun = false;
+  if (s_begun)
+    return;
+  s_begun = true;
+
   // Generate client ID
   uint8_t mac[6];
   WiFi.macAddress(mac);
