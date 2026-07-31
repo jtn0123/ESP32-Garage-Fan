@@ -26,7 +26,7 @@
 // At file scope rather than in the anonymous namespace below: cpplint reads the
 // wrapped continuation line as an indented namespace body.
 static constexpr const char* kHistoryHeader =
-    "iso_time,uptime_s,temp_c,rh_pct,press_hpa,batt_v,batt_pct,rssi_dbm\n";
+    "iso_time,uptime_s,temp_c,rh_pct,press_hpa,batt_v,batt_pct,rssi_dbm,out_temp_c,out_rh_pct\n";
 
 namespace {
 
@@ -355,7 +355,7 @@ bool sd_load_config() {
 }
 
 bool sd_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct, float pressHPa,
-                       float battV, int battPct, int rssiDbm) {
+                       float battV, int battPct, int rssiDbm, float outTempC, float outRhPct) {
   if (!g_mounted)
     return false;
 
@@ -417,10 +417,103 @@ bool sd_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct
   }
   f.print(',');
   f.print(rssiDbm);
+  f.print(',');
+  write_float(outTempC, 2);
+  if (isfinite(outRhPct)) {
+    f.print(outRhPct, 0);
+  }
   f.print('\n');
 
   f.close();
   return true;
+}
+
+// Parse one CSV data row. Columns:
+// iso_time,uptime_s,temp_c,rh_pct,press_hpa,batt_v,batt_pct,rssi_dbm[,out_temp_c,out_rh_pct]
+// Empty cells and missing trailing columns yield NAN.
+static bool parse_history_row(const char* line, float* tempC, float* rhPct, float* outTempC,
+                              float* outRhPct) {
+  if (!line || !line[0] || strncmp(line, "iso_time", 8) == 0)
+    return false;
+  float cols[10];
+  for (int i = 0; i < 10; i++) cols[i] = NAN;
+  int col = 0;
+  const char* p = line;
+  while (col < 10) {
+    if (*p != ',' && *p != '\0' && *p != '\n') {
+      char* endp = nullptr;
+      float v = strtof(p, &endp);
+      if (endp != p)
+        cols[col] = v;
+    }
+    const char* comma = strchr(p, ',');
+    if (!comma)
+      break;
+    p = comma + 1;
+    col++;
+  }
+  *tempC = cols[2];
+  *rhPct = cols[3];
+  *outTempC = cols[8];
+  *outRhPct = cols[9];
+  // A row with no finite inside temp is noise (or the header).
+  return isfinite(*tempC) || isfinite(*rhPct);
+}
+
+static uint16_t backfill_one_file(const char* path, HistoryRowSink sink) {
+  File f = g_fs->open(path, FILE_READ);
+  if (!f)
+    return 0;
+  uint16_t rows = 0;
+  char line[160];
+  size_t len = 0;
+  while (f.available()) {
+    int ch = f.read();
+    if (ch < 0)
+      break;
+    if (ch == '\n' || len >= sizeof(line) - 1) {
+      line[len] = '\0';
+      float t, r, ot, orh;
+      if (parse_history_row(line, &t, &r, &ot, &orh)) {
+        sink(t, r, ot, orh);
+        rows++;
+      }
+      len = 0;
+    } else if (ch != '\r') {
+      line[len++] = static_cast<char>(ch);
+    }
+  }
+  if (len > 0) {
+    line[len] = '\0';
+    float t, r, ot, orh;
+    if (parse_history_row(line, &t, &r, &ot, &orh)) {
+      sink(t, r, ot, orh);
+      rows++;
+    }
+  }
+  f.close();
+  return rows;
+}
+
+uint16_t sd_backfill_history(HistoryRowSink sink) {
+  if (!g_mounted || !sink)
+    return 0;
+  time_t now = time(nullptr);
+  if (!epoch_is_plausible(now))
+    return 0;  // no trustworthy clock, no way to pick the right files
+
+  uint16_t rows = 0;
+  char path[48];
+  // Yesterday first so the sink receives samples in chronological order; the
+  // ring keeps the newest HIST_CAP either way.
+  history_path_for(now - 86400, path, sizeof(path));
+  rows += backfill_one_file(path, sink);
+  history_path_for(now, path, sizeof(path));
+  rows += backfill_one_file(path, sink);
+  if (rows > 0) {
+    LOG_INFO("Storage: backfilled %u history rows into the ring", rows);
+  }
+  return rows;
 }
 
 uint16_t sd_prune_history(uint16_t retention_days) {
@@ -567,7 +660,10 @@ void sd_end() {}
 bool sd_is_mounted() { return false; }
 const SdInfo& sd_get_info() { return g_disabled_info; }
 bool sd_load_config() { return false; }
-bool sd_append_history(time_t, uint32_t, float, float, float, float, int, int) { return false; }
+bool sd_append_history(time_t, uint32_t, float, float, float, float, int, int, float, float) {
+  return false;
+}
+uint16_t sd_backfill_history(HistoryRowSink) { return 0; }
 uint16_t sd_prune_history(uint16_t) { return 0; }
 bool sd_log_write(const char*) { return false; }
 bool sd_has_staged_update() { return false; }

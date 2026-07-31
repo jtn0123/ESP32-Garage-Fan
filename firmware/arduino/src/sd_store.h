@@ -53,7 +53,13 @@ bool sd_load_config();
 // `epoch` selects the file name and timestamp column; pass 0 when time is not
 // yet known and rows are routed to /data/nodate.csv instead of being dropped.
 bool sd_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct, float pressHPa,
-                       float battV, int battPct, int rssiDbm);
+                       float battV, int battPct, int rssiDbm, float outTempC, float outRhPct);
+
+// Replay today's (and yesterday's) CSV rows into a caller-supplied sink so the
+// sparkline ring survives reboots. The sink receives inside/outside temp (C)
+// and RH (%); non-finite means the column was absent or empty.
+typedef void (*HistoryRowSink)(float tempC, float rhPct, float outTempC, float outRhPct);
+uint16_t sd_backfill_history(HistoryRowSink sink);
 
 // Delete /data CSVs older than `retention_days`. 0 means keep everything.
 // Returns the number of files removed.

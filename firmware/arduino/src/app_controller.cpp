@@ -442,6 +442,16 @@ void app_setup() {
   run_display_phase();
 #endif
 
+#if FEATURE_SD_STORAGE
+  // Refill the sparkline ring from the CSVs before the boot sample lands, so a
+  // reboot (every OTA deploy) no longer blanks the graphs page for hours.
+  // After the network phase because file selection needs the NTP clock.
+  sd_backfill_history([](float tC, float rh, float otC, float orh) {
+    hist_push(isfinite(tC) ? tC * 9.0f / 5.0f + 32.0f : NAN,
+              isfinite(otC) ? otC * 9.0f / 5.0f + 32.0f : NAN, rh, orh);
+  });
+#endif
+
   // After the network phase, so the row carries an NTP-corrected timestamp and a
   // real RSSI rather than the placeholders the sensor phase starts with.
   record_sample_to_sd();
@@ -482,9 +492,13 @@ static void record_sample_to_sd() {
     return;
 
   BatteryStatus bs = read_battery_status();
-  sd_append_history(time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
-                    get_last_published_inside_rh(), get_last_published_inside_pressureHPa(),
-                    bs.voltage, bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0);
+  OutsideReadings out_now = net_get_outside();
+  sd_append_history(
+      time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
+      get_last_published_inside_rh(), get_last_published_inside_pressureHPa(), bs.voltage,
+      bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0,
+      (out_now.validTemp && isfinite(out_now.temperatureC)) ? out_now.temperatureC : NAN,
+      (out_now.validHum && isfinite(out_now.humidityPct)) ? out_now.humidityPct : NAN);
 #endif
 
   // Feed the 24h sparkline ring (display-ready units: F / %). Outside values
