@@ -67,8 +67,8 @@
 
 // microSD storage: sensor history CSV, rotating log files, config overrides and
 // staged firmware images.
-#ifndef FEATURE_SD_STORAGE
-#define FEATURE_SD_STORAGE 1
+#ifndef FEATURE_STORAGE
+#define FEATURE_STORAGE 1
 #endif
 
 // USB mass-storage: history/logs mount as a read-only flash drive on a host.

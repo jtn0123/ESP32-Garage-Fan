@@ -140,7 +140,7 @@
 // The Wing also carries a 23K SRAM chip on the same bus (CS = D6). Nothing here
 // uses it, but it is the only other device that drives MISO, and GxEPD2 -- unlike
 // Adafruit_EPD -- never touches that pin. Left floating it can answer alongside
-// the card, so sd_begin() parks it high before mounting. See hardware/pinmap.md.
+// the card, so storage_begin() parks it high before mounting. See hardware/pinmap.md.
 #ifndef SRAM_CS_PIN
 #define SRAM_CS_PIN 6
 #endif

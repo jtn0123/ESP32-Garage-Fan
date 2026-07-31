@@ -25,7 +25,7 @@
 #include "mqtt_batcher.h"
 #include "profiling.h"
 #include "ota_manager.h"
-#include "sd_store.h"
+#include "storage.h"
 #include "logging/logger.h"
 #include "history_ring.h"
 #include "usb_msc.h"
@@ -81,8 +81,8 @@ static void maybe_refresh_display();
 // nobody can retrieve after the fact, so a local CSV is worth more there, not
 // less. The always-on loop calls this once per sample interval; the deep-sleep
 // build calls it once per wake, which is the same thing.
-static void record_sample_to_sd();
-#if FEATURE_SD_STORAGE && !ALWAYS_ON
+static void record_sample_to_storage();
+#if FEATURE_STORAGE && !ALWAYS_ON
 static void maybe_prune_history();
 #endif
 
@@ -299,19 +299,19 @@ void app_setup() {
   // display driver is what brings that bus up. Overrides therefore land after
   // the boot screen has already drawn -- the compiled-in room name is what shows
   // until the first post-config refresh.
-#if FEATURE_SD_STORAGE
-  if (sd_begin()) {
-    sd_load_config();
+#if FEATURE_STORAGE
+  if (storage_begin()) {
+    storage_load_config();
 
     // Both log paths onto the card open here, once the card is known good and
     // the card's own logs_enabled setting has been read. Anything logged earlier
     // in boot went to serial only — there was nowhere else for it to go.
-    sd_log_set_mirror(rc_logs_enabled());
+    storage_log_set_mirror(rc_logs_enabled());
     Logger::getInstance().enableSD(rc_logs_enabled());
 
     // Apply a card-staged firmware image before doing any real work: if it
     // succeeds this call reboots and never returns.
-    if (sd_has_staged_update()) {
+    if (storage_has_staged_update()) {
       Serial.println("[2e] Staged firmware image found on SD, applying...");
       ota_apply_from_sd();
       // Only reached when the image was rejected; ota_last_sd_result() says why.
@@ -354,8 +354,8 @@ void app_setup() {
     // Save any cached state to NVS
     nvs_end_cache();
 
-#if FEATURE_SD_STORAGE
-    sd_end();
+#if FEATURE_STORAGE
+    storage_end();
 #endif
 
     Serial.println("Entering emergency deep sleep (1 hour)");
@@ -451,11 +451,11 @@ void app_setup() {
   run_display_phase();
 #endif
 
-#if FEATURE_SD_STORAGE
+#if FEATURE_STORAGE
   // Refill the sparkline ring from the CSVs before the boot sample lands, so a
   // reboot (every OTA deploy) no longer blanks the graphs page for hours.
   // After the network phase because file selection needs the NTP clock.
-  sd_backfill_history([](float tC, float rh, float otC, float orh) {
+  storage_backfill_history([](float tC, float rh, float otC, float orh) {
     hist_push(isfinite(tC) ? tC * 9.0f / 5.0f + 32.0f : NAN,
               isfinite(otC) ? otC * 9.0f / 5.0f + 32.0f : NAN, rh, orh);
   });
@@ -463,8 +463,8 @@ void app_setup() {
 
   // After the network phase, so the row carries an NTP-corrected timestamp and a
   // real RSSI rather than the placeholders the sensor phase starts with.
-  record_sample_to_sd();
-#if FEATURE_SD_STORAGE && !ALWAYS_ON
+  record_sample_to_storage();
+#if FEATURE_STORAGE && !ALWAYS_ON
   maybe_prune_history();
 #endif
 
@@ -495,9 +495,9 @@ void app_setup() {
 
 // Persist one row of sensor history to the card. Silent no-op when the card is
 // absent or history is turned off in config.
-static void record_sample_to_sd() {
-#if FEATURE_SD_STORAGE
-  if (!sd_is_mounted() || !rc_history_enabled())
+static void record_sample_to_storage() {
+#if FEATURE_STORAGE
+  if (!storage_is_mounted() || !rc_history_enabled())
     return;
 
   if (usb_msc_host_active()) {
@@ -507,7 +507,7 @@ static void record_sample_to_sd() {
   }
   BatteryStatus bs = read_battery_status();
   OutsideReadings out_now = net_get_outside();
-  sd_append_history(
+  storage_append_history(
       time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
       get_last_published_inside_rh(), get_last_published_inside_pressureHPa(), bs.voltage,
       bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0,
@@ -532,7 +532,7 @@ static void record_sample_to_sd() {
 #endif
 }
 
-#if FEATURE_SD_STORAGE && !ALWAYS_ON
+#if FEATURE_STORAGE && !ALWAYS_ON
 // The always-on build sweeps expired history on its maintenance timer. The
 // deep-sleep build has no such loop -- it wakes, works and sleeps -- so it sweeps
 // at most once per calendar day instead. Pruning is a full directory scan, and
@@ -543,7 +543,7 @@ static void record_sample_to_sd() {
 RTC_DATA_ATTR static long rtc_last_prune_day = -1;
 
 static void maybe_prune_history() {
-  if (!sd_is_mounted())
+  if (!storage_is_mounted())
     return;
 
   time_t now = time(nullptr);
@@ -557,12 +557,12 @@ static void maybe_prune_history() {
     return;
   rtc_last_prune_day = today;
 
-  uint16_t pruned = sd_prune_history(rc_history_retention_days());
+  uint16_t pruned = storage_prune_history(rc_history_retention_days());
   if (pruned > 0) {
     Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
   }
 }
-#endif  // FEATURE_SD_STORAGE && !ALWAYS_ON
+#endif  // FEATURE_STORAGE && !ALWAYS_ON
 
 #if ALWAYS_ON
 #if USE_DISPLAY
@@ -760,7 +760,7 @@ void app_loop() {
 
     run_sensor_phase();
     run_network_phase();
-    record_sample_to_sd();
+    record_sample_to_storage();
 #if USE_DISPLAY
     maybe_refresh_display();
     // Fresh sample on the glass without waiting for the 15-minute full
@@ -788,8 +788,8 @@ void app_loop() {
       // committed rather than sitting there until a brownout discards it.
       nvs_end_cache();
       nvs_begin_cache();
-#if FEATURE_SD_STORAGE
-      uint16_t pruned = sd_prune_history(rc_history_retention_days());
+#if FEATURE_STORAGE
+      uint16_t pruned = storage_prune_history(rc_history_retention_days());
       if (pruned > 0) {
         Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
       }
@@ -1066,11 +1066,11 @@ void run_sleep_phase() {
   // Store state to NVS
   nvs_end_cache();
 
-#if FEATURE_SD_STORAGE
+#if FEATURE_STORAGE
   // Unmount before the GPIOs go high-Z. Every write already closes its file, so
   // this is not about corruption -- it is about not leaving the card selected and
   // drawing idle current for the whole sleep interval.
-  sd_end();
+  storage_end();
 #endif
 
   Serial.printf("Entering deep sleep for %u seconds\n", wake_interval_sec);

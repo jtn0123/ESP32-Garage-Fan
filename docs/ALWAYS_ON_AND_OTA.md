@@ -38,7 +38,7 @@ a redraw needs both a meaningful change in the displayed values *and*
 | `ALWAYS_ON` | `0` | Stay awake and sample from `loop()` instead of deep sleeping |
 | `SAMPLE_INTERVAL_SEC` | `300` | Sampling cadence. Minimum 60 — the BME280 self-heats if polled harder |
 | `DISPLAY_MIN_REFRESH_INTERVAL_SEC` | `900` | Floor between panel redraws |
-| `FEATURE_SD_STORAGE` | `1` | microSD history, logs, config and staged updates |
+| `FEATURE_STORAGE` | `1` | microSD history, logs, config and staged updates |
 | `FEATURE_OTA` | `1` | Network OTA and apply-from-SD |
 | `SD_CS_PIN` | `5` | Card chip select (D5 on the eInk FeatherWing) |
 | `OTA_PORT` | `3232` | ArduinoOTA / espota listener port |
@@ -119,14 +119,14 @@ MQTT passwords blank if you would rather keep them compiled into the binary.
 
 The card sits on the same hardware SPI bus as the e-ink panel; only the chip
 selects differ (panel D9, card D5). Both drivers use SPI transactions, so they
-coexist, but the card must be mounted *after* the bus exists. `sd_begin()` calls
+coexist, but the card must be mounted *after* the bus exists. `storage_begin()` calls
 `SPI.begin()` itself — which early-returns if the display already started the bus
 — so both the display and headless builds work.
 
 There is a third device on that bus: the Wing's 23K SRAM chip on `SRAM_CS_PIN`
 (D6). Nothing here uses it, but it is the only other part that drives MISO, and
 GxEPD2 — unlike Adafruit_EPD — never touches its chip select. A CS left as a
-floating input is not a deasserted CS, so `sd_begin()` drives D6 high before
+floating input is not a deasserted CS, so `storage_begin()` drives D6 high before
 mounting. Symptoms of skipping this are intermittent: mounts that fail on some
 power-ups and succeed on others, which reads as a failing card.
 

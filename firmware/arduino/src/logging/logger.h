@@ -36,8 +36,8 @@ class Logger {
     // The microSD sink. Kept separate from min_level because the card is a
     // field-diagnosis log, not a trace: mirroring every INFO would cost a
     // multi-millisecond SD write per line for output nobody reads back.
-    bool sd_enabled;
-    LogLevel sd_min_level;
+    bool storage_enabled;
+    LogLevel storage_min_level;
     uint16_t mqtt_rate_limit_ms;
     uint16_t enabled_modules_mask;  // Bitmask of enabled modules (0xFFFF = all enabled)
 
@@ -47,8 +47,8 @@ class Logger {
           buffer_enabled(true),
           nvs_enabled(false),
           mqtt_enabled(false),
-          sd_enabled(false),
-          sd_min_level(LogLevel::WARN),
+          storage_enabled(false),
+          storage_min_level(LogLevel::WARN),
           mqtt_rate_limit_ms(1000),
           enabled_modules_mask(0xFFFF) {}  // All modules enabled by default
   };
@@ -77,7 +77,7 @@ class Logger {
   void enableBuffer(bool enable) { config_.buffer_enabled = enable; }
   void enableNVS(bool enable) { config_.nvs_enabled = enable; }
   void enableMQTT(bool enable) { config_.mqtt_enabled = enable; }
-  void enableSD(bool enable) { config_.sd_enabled = enable; }
+  void enableSD(bool enable) { config_.storage_enabled = enable; }
 
   // Module filtering
   void enableModule(uint8_t module_id);

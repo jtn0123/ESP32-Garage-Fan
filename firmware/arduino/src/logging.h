@@ -27,12 +27,12 @@
 #endif
 #endif
 
-// Mirror of the serial log to the microSD card. Defined in sd_store.cpp, and
-// declared here rather than pulled in via sd_store.h so this header stays free of
+// Mirror of the serial log to the microSD card. Defined in storage.cpp, and
+// declared here rather than pulled in via storage.h so this header stays free of
 // FS.h/SD.h — it is included (directly or through safe_strings.h) by most of the
 // firmware, and the native tests build against it.
 //
-// A no-op until sd_log_set_mirror(true), which app_controller calls only after the
+// A no-op until storage_log_set_mirror(true), which app_controller calls only after the
 // card is mounted and `storage.logs_enabled` has been read. Only WARN and ERROR
 // are mirrored: INFO is where the boot-time chatter lives, and an SD write costs
 // milliseconds where a Serial.printf costs microseconds.

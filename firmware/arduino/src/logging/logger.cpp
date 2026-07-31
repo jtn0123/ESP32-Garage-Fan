@@ -6,7 +6,7 @@
 #include "log_mqtt.h"
 #include "../config.h"
 #include "../safe_strings.h"
-#include "../sd_store.h"
+#include "../storage.h"
 
 static LogBuffer* g_log_buffer = nullptr;
 static LogStorage* g_log_storage = nullptr;
@@ -124,7 +124,7 @@ void Logger::logv(LogLevel level, uint8_t module, const char* format, va_list ar
     outputNVS(entry);
   }
 
-  if (config_.sd_enabled && level >= config_.sd_min_level) {
+  if (config_.storage_enabled && level >= config_.storage_min_level) {
     outputSD(entry);
   }
 
@@ -288,7 +288,7 @@ void Logger::outputBuffer(const LogEntry& entry) {
 void Logger::outputNVS(const LogEntry& entry) { g_log_storage->storeEntry(entry); }
 
 // The LOGM_* path onto the card. LOG_* (logging.h) gets there via log_mirror()
-// instead; both funnel into sd_log_write(), which owns rotation and timestamping.
+// instead; both funnel into storage_log_write(), which owns rotation and timestamping.
 void Logger::outputSD(const LogEntry& entry) {
   const char* module_name =
       (entry.module_id < module_count_) ? module_names_[entry.module_id] : "UNKNOWN";
@@ -296,7 +296,7 @@ void Logger::outputSD(const LogEntry& entry) {
   char line[Logger::MAX_MESSAGE_LENGTH + 32];
   snprintf(line, sizeof(line), "[%s] [%s] %s", levelToString(entry.level), module_name,
            entry.message);
-  sd_log_write(line);
+  storage_log_write(line);
 }
 
 void Logger::outputMQTT(const LogEntry& entry) {

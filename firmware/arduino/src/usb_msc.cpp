@@ -13,7 +13,7 @@
 #include "wear_levelling.h"
 
 #include "logging.h"
-#include "sd_store.h"
+#include "storage.h"
 
 // Global on purpose: the constructor registers the MSC interface with tinyusb,
 // and with ARDUINO_USB_CDC_ON_BOOT=1 the core starts USB inside app_main()
@@ -32,11 +32,11 @@ static bool msc_take_ownership() {
     return true;
   // FFat (and the whole storage layer) must let go first: two wear-levelling
   // instances on one partition corrupt each other's sector mapping.
-  sd_end();
+  storage_end();
   if (wl_mount(g_part, &g_wl) != ESP_OK) {
     g_wl = WL_INVALID_HANDLE;
     LOG_WARN("USB-MSC: wl_mount failed; remounting storage");
-    sd_begin();
+    storage_begin();
     return false;
   }
   g_host_active = true;
@@ -54,7 +54,7 @@ static void msc_release_ownership(const char* why) {
     g_host_active = false;
     LOG_INFO("USB-MSC: released (%s); storage remounting", why);
   }
-  sd_begin();
+  storage_begin();
 }
 
 static int32_t msc_on_read(uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize) {

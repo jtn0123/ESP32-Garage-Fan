@@ -44,9 +44,13 @@ H1+H2 `1adcd97` (README rewrite, `docs/UI_SPEC.md`).
 
 **Skipped by owner decision (2026-07-30, trusted-LAN posture):** E1, E3, R5, R6.
 
-**Open:** A1–A3 · B2–B4 · D2, D3 (history_ring extraction done; sd_store CSV
+**Done 2026-07-31 (cont.):** B3+B4+G2 `1493713` fw 1.17 (y-offset sentinel,
+NeoPixel rail gating, single boot draw). Outside the audit list: graphs-page
+current-reading chips + `frame` op, owner request, `4a75528` fw 1.16.
+
+**Open:** A1–A3 · B2 · D2, D3 (history_ring extraction done; sd_store CSV
 parse/rotation still .cpp-bound) · E2 (optional TLS only) · F1–F3 · G1 (with
-A3), G2 · R4 (icon unification, incl. task #11 filled-blob icon).
+A3) · R4 (icon unification, incl. task #11 filled-blob icon).
 
 Post-execution regrade snapshot (honest read, not re-audited): D C+→**B+**,
 C C+→**B**, H B→**A−**, I B+→**A−**; overall B→**B+**. Section grades below
@@ -110,14 +114,14 @@ handful of remaining wide functions.
 - **Effort:** M
 - **Grade lift:** B → B+ (the file every feature touches stops growing)
 
-#### B3 — OP_TEXT y-offset overload of p1
+#### ~~B3 — OP_TEXT y-offset overload of p1~~ ✓ done 2026-07-31 (`1493713`)
 - **Where:** `firmware/arduino/src/main.cpp` OP_TEXT case; `scripts/gen_ui.py` text emission
 - **What's wrong:** `p1` doubles as "explicit y" and "y-offset within rect" with a `!= 0` sentinel; a spec asking for offset 0 silently gets +1.
 - **Fix:** Emit a has-offset flag bit in `align`'s upper bits or use INT16_MIN sentinel; mirror in sim.
 - **Effort:** S
 - **Grade lift:** B → B (small, but removes a spec-authoring footgun before the UI phase leans on it)
 
-#### B4 — NEOPIXEL_POWER never dropped after boot
+#### ~~B4 — NEOPIXEL_POWER never dropped after boot~~ ✓ done 2026-07-31 (`1493713`)
 - **Where:** `firmware/arduino/src/diagnostic_test.cpp` (pixel owner), `app_controller.cpp` sleep paths
 - **What's wrong:** Subagent finding: GPIO21 stays HIGH forever; the WS2812 idles at ~0.7–1 mA (~3% of the always-on budget). Matters more for deep-sleep builds sharing the code.
 - **Fix:** Drop the power rail in `show_boot_stage(0)` when no twinkle is configured, and re-raise lazily in `pixel_flash()` (needs ~1 ms settle).
@@ -274,7 +278,7 @@ refresh on new content); MQTT batched. Remaining items are polish.
 - **Effort:** (with A3)
 - **Grade lift:** B+ → A− (render path becomes allocation-free)
 
-#### G2 — Boot draws the panel twice
+#### ~~G2 — Boot draws the panel twice~~ ✓ done 2026-07-31 (`1493713`)
 - **Where:** `display_manager.cpp:51-60` (init full-white clear) + `run_display_phase()` first real draw
 - **What's wrong:** Cold boot spends two full refreshes (~6 s combined) where one would do; also the longest chunk of watchdog budget in setup.
 - **Fix:** Skip the init clear when a real draw is guaranteed to follow (flag from app_setup), keeping it for diagnostic builds.

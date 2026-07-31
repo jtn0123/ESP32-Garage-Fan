@@ -1,7 +1,7 @@
 // microSD storage implementation
 // Copyright 2024 Justin
 
-#include "sd_store.h"
+#include "storage.h"
 
 #include <math.h>
 #include <time.h>
@@ -12,9 +12,9 @@
 // definition at the bottom of this file has to exist in both build variants.
 #include "logging.h"
 
-// SD.h/SPI.h stay behind the feature guard so a FEATURE_SD_STORAGE=0 build does
+// SD.h/SPI.h stay behind the feature guard so a FEATURE_STORAGE=0 build does
 // not pull the SD library into the link at all.
-#if FEATURE_SD_STORAGE
+#if FEATURE_STORAGE
 
 #include <FFat.h>
 #include <SD.h>
@@ -40,7 +40,7 @@ constexpr const char* kLogIndexPath = "/logs/index.txt";
 // rather than trying to allocate it.
 constexpr size_t kMaxConfigBytes = 4096;
 
-SdInfo g_info;
+StorageInfo g_info;
 bool g_mounted = false;
 uint8_t g_log_index = 0;
 bool g_log_index_loaded = false;
@@ -182,11 +182,11 @@ bool remove_oldest_history() {
 
 }  // namespace
 
-bool sd_begin() {
+bool storage_begin() {
   if (g_mounted)
     return true;
 
-  g_info = SdInfo();
+  g_info = StorageInfo();
 
   // Park the Wing's SRAM chip select before anything reads the bus. That chip is
   // the only other device on MISO, and neither GxEPD2 nor this firmware ever
@@ -287,7 +287,7 @@ bool sd_begin() {
   return true;
 }
 
-void sd_end() {
+void storage_end() {
   if (!g_mounted)
     return;
   if (g_backend == Backend::kSdCard) {
@@ -301,11 +301,11 @@ void sd_end() {
   g_info.mounted = false;
 }
 
-bool sd_is_mounted() { return g_mounted; }
+bool storage_is_mounted() { return g_mounted; }
 
-const SdInfo& sd_get_info() { return g_info; }
+const StorageInfo& storage_get_info() { return g_info; }
 
-bool sd_load_config() {
+bool storage_load_config() {
   if (!g_mounted)
     return false;
 
@@ -354,7 +354,7 @@ bool sd_load_config() {
   return rc_has_overrides();
 }
 
-bool sd_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct, float pressHPa,
+bool storage_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct, float pressHPa,
                        float battV, int battPct, int rssiDbm, float outTempC, float outRhPct) {
   if (!g_mounted)
     return false;
@@ -495,7 +495,7 @@ static uint16_t backfill_one_file(const char* path, HistoryRowSink sink) {
   return rows;
 }
 
-uint16_t sd_backfill_history(HistoryRowSink sink) {
+uint16_t storage_backfill_history(HistoryRowSink sink) {
   if (!g_mounted || !sink)
     return 0;
   time_t now = time(nullptr);
@@ -516,7 +516,7 @@ uint16_t sd_backfill_history(HistoryRowSink sink) {
   return rows;
 }
 
-uint16_t sd_prune_history(uint16_t retention_days) {
+uint16_t storage_prune_history(uint16_t retention_days) {
   if (!g_mounted || retention_days == 0)
     return 0;
 
@@ -578,7 +578,7 @@ uint16_t sd_prune_history(uint16_t retention_days) {
   return removed;
 }
 
-bool sd_log_write(const char* line) {
+bool storage_log_write(const char* line) {
   if (!g_mounted || !line)
     return false;
 
@@ -640,9 +640,9 @@ bool sd_log_write(const char* line) {
   return true;
 }
 
-bool sd_has_staged_update() { return g_mounted && g_fs->exists(SD_UPDATE_PATH); }
+bool storage_has_staged_update() { return g_mounted && g_fs->exists(SD_UPDATE_PATH); }
 
-File sd_open_staged_update(size_t* size_out) {
+File storage_open_staged_update(size_t* size_out) {
   if (size_out)
     *size_out = 0;
   if (!g_mounted)
@@ -654,7 +654,7 @@ File sd_open_staged_update(size_t* size_out) {
   return f;
 }
 
-void sd_finish_staged_update(bool success) {
+void storage_finish_staged_update(bool success) {
   if (!g_mounted)
     return;
 
@@ -668,52 +668,52 @@ void sd_finish_staged_update(bool success) {
   }
 }
 
-#else  // !FEATURE_SD_STORAGE
+#else  // !FEATURE_STORAGE
 
-static SdInfo g_disabled_info;
+static StorageInfo g_disabled_info;
 
-bool sd_begin() { return false; }
-void sd_end() {}
-bool sd_is_mounted() { return false; }
-const SdInfo& sd_get_info() { return g_disabled_info; }
-bool sd_load_config() { return false; }
-bool sd_append_history(time_t, uint32_t, float, float, float, float, int, int, float, float) {
+bool storage_begin() { return false; }
+void storage_end() {}
+bool storage_is_mounted() { return false; }
+const StorageInfo& storage_get_info() { return g_disabled_info; }
+bool storage_load_config() { return false; }
+bool storage_append_history(time_t, uint32_t, float, float, float, float, int, int, float, float) {
   return false;
 }
-uint16_t sd_backfill_history(HistoryRowSink) { return 0; }
-uint16_t sd_prune_history(uint16_t) { return 0; }
-bool sd_log_write(const char*) { return false; }
-bool sd_has_staged_update() { return false; }
-File sd_open_staged_update(size_t* size_out) {
+uint16_t storage_backfill_history(HistoryRowSink) { return 0; }
+uint16_t storage_prune_history(uint16_t) { return 0; }
+bool storage_log_write(const char*) { return false; }
+bool storage_has_staged_update() { return false; }
+File storage_open_staged_update(size_t* size_out) {
   if (size_out)
     *size_out = 0;
   return File();
 }
-void sd_finish_staged_update(bool) {}
+void storage_finish_staged_update(bool) {}
 
-#endif  // FEATURE_SD_STORAGE
+#endif  // FEATURE_STORAGE
 
 // --- serial log mirror -------------------------------------------------------
 // Deliberately outside the feature guard: logging.h declares log_mirror() for
 // every translation unit that logs, so exactly one definition must exist whether
-// or not the SD library is compiled in. With FEATURE_SD_STORAGE=0 the mirror can
-// never be enabled and sd_log_write() is a stub, so this costs one branch.
+// or not the SD library is compiled in. With FEATURE_STORAGE=0 the mirror can
+// never be enabled and storage_log_write() is a stub, so this costs one branch.
 
 namespace {
 bool g_mirror_enabled = false;
-// log_mirror() is reached from inside sd_store's own LOG_WARN/LOG_ERROR calls
-// (sd_begin and sd_prune_history both log). Those do not recurse today, but a
+// log_mirror() is reached from inside storage's own LOG_WARN/LOG_ERROR calls
+// (storage_begin and storage_prune_history both log). Those do not recurse today, but a
 // logging call added to the write path later would loop until the stack ran out,
 // which is a bad way to find out.
 bool g_mirror_active = false;
 }  // namespace
 
-void sd_log_set_mirror(bool enabled) { g_mirror_enabled = enabled; }
+void storage_log_set_mirror(bool enabled) { g_mirror_enabled = enabled; }
 
-bool sd_log_mirror_enabled() { return g_mirror_enabled; }
+bool storage_log_mirror_enabled() { return g_mirror_enabled; }
 
 void log_mirror(const char* level, const char* fmt, ...) {
-  if (!g_mirror_enabled || g_mirror_active || !sd_is_mounted())
+  if (!g_mirror_enabled || g_mirror_active || !storage_is_mounted())
     return;
 
   g_mirror_active = true;
@@ -729,7 +729,7 @@ void log_mirror(const char* level, const char* fmt, ...) {
     va_end(args);
   }
 
-  sd_log_write(line);
+  storage_log_write(line);
 
   g_mirror_active = false;
 }
