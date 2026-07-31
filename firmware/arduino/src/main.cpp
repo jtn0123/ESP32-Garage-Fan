@@ -276,6 +276,9 @@ void draw_from_spec_full_impl(uint8_t variantId) {
   DualGFX gfx(&display, canvas);
   DualGFXScope gfx_scope(&gfx);  // Set global context for helper functions
   if (canvas) {
+    // Fresh frame: the page loop clears the panel buffer, but nothing cleared
+    // the mirror, so stale pixels from earlier draws ghosted into screenshots.
+    canvas->fillScreen(1);  // 1 = white in the capture convention
     DisplayCapture::getInstance().setHasContent();
   }
 

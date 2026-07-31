@@ -174,10 +174,15 @@ class DualGFX {
   Adafruit_GFX* primary_;
   Adafruit_GFX* secondary_;
 
-  // Map GxEPD2 colors to GFXcanvas1 colors
-  // For GFXcanvas1: 0 = background (white), 1 = foreground (black)
-  // GxEPD_WHITE = 0xFFFF -> 0, GxEPD_BLACK = 0x0000 -> 1
-  static uint16_t mapColor(uint16_t color) { return (color == 0x0000) ? 1 : 0; }
+  // Map GxEPD2 colors to the capture canvas convention: 0 = ink (black),
+  // 1 = background (white). This MUST agree with everyone else touching the
+  // canvas — DisplayCapture's constructor fills it with 1s as "white", and the
+  // DUAL_* macros in display_renderer map black to 0. This mapper used to be
+  // inverted (black -> 1), so every stroke drawn through DualGFX wrote 1-on-1
+  // and vanished: captures showed only the elements drawn by the DUAL_* /
+  // draw_icon paths, which is why remote screenshots were missing the frame,
+  // header, labels and all small text.
+  static uint16_t mapColor(uint16_t color) { return (color == 0x0000) ? 0 : 1; }
 };
 
 // Global drawing context for screenshot capture

@@ -190,7 +190,11 @@ extern "C" void display_capture_handle(const char* payload, size_t length) {
     // Publish base64 data to /debug/screenshot/data
     snprintf(topic, sizeof(topic), "espsensor/%s/debug/screenshot/data", client_id);
 
-    const size_t CHUNK_SIZE = 4096;
+    // Must fit inside MQTT_MAX_PACKET_SIZE (1024) alongside the topic and the
+    // ~10-byte MQTT header; the old 4096 exceeded the client buffer, so every
+    // publish failed and the screenshot feature had never actually delivered a
+    // frame. 768 leaves comfortable headroom -> a full frame is 7 chunks.
+    const size_t CHUNK_SIZE = 768;
     size_t offset = 0;
     int chunk_num = 0;
 
