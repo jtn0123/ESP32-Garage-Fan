@@ -82,6 +82,17 @@ void lc_quickstart_if_cold_boot(esp_reset_reason_t reason) {
 void lc_sleep_between_wakes() { /* no-op */ }
 #endif
 
+// Average draw for the days-remaining estimate. Always-on is a measured-ish
+// constant; the deep-sleep build duty-cycles between sleep and active current.
+static float average_current_ma() {
+#if ALWAYS_ON
+  return ALWAYS_ON_AVG_CURRENT_MA;
+#else
+  return SLEEP_CURRENT_MA +
+         (ACTIVE_CURRENT_MA * ACTIVE_SECONDS) / static_cast<float>(WAKE_INTERVAL_SEC);
+#endif
+}
+
 BatteryStatus read_battery_status() {
   BatteryStatus b;
 
@@ -108,9 +119,12 @@ BatteryStatus read_battery_status() {
     float pct = g_maxfg.cellPercent();
     b.percent = constrain(static_cast<int>(pct), 0, 100);
 
-    // Simple day estimate: 3000mAh / 50mA average = 60 hours = 2.5 days
     if (b.percent >= 0) {
-      b.estimatedDays = (b.percent * 2.5) / 100;
+      // Was hardcoded (percent * 2.5)/100 — a fiction for any pack but the
+      // 3000 mAh / 50 mA one in the old comment. Use the real capacity and the
+      // build's actual duty cycle.
+      b.estimatedDays =
+          estimate_battery_days(b.percent, BATTERY_CAPACITY_MAH, average_current_ma());
     }
   }
 #endif
@@ -144,7 +158,8 @@ BatteryStatus read_battery_status() {
     b.percent = constrain(static_cast<int>(pct), 0, 100);
 
     if (b.percent >= 0) {
-      b.estimatedDays = (b.percent * 2.5) / 100;
+      b.estimatedDays =
+          estimate_battery_days(b.percent, BATTERY_CAPACITY_MAH, average_current_ma());
     }
   }
 #endif

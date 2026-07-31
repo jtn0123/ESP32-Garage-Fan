@@ -219,6 +219,11 @@ def main():
         f.write("#pragma once\n\n")
         f.write(f"#define ROOM_NAME {c_string(room_name)}\n")
         f.write(f"#define FW_VERSION {c_string(fw_version)}\n")
+        # POSIX TZ string for the on-device clock; config.h supplies the
+        # default (US Pacific) when device.yaml doesn't set one.
+        timezone = str(data.get("timezone", "") or "")
+        if timezone:
+            f.write(f"#define TIME_TZ {c_string(timezone)}\n")
         f.write(f"#define WAKE_INTERVAL_SEC {wake_interval}\n")
         # Guarded so a -DSAMPLE_INTERVAL_SEC build flag still wins, matching how
         # the other tunables in config.h behave.

@@ -277,10 +277,10 @@ void wifi_sync_time_ntp() {
 
   Serial.println("[Time] Syncing via NTP...");
 
-  // Configure timezone (EST/EDT - adjust for your location)
-  // Format: "STD+offset" or "STD+offset DST"
-  // EST5EDT = Eastern Standard Time, 5 hours behind UTC, with DST
-  configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov", "time.google.com");
+  // Timezone comes from TIME_TZ (config.h default, overridable via device.yaml
+  // `timezone:`). This was hardcoded to EST5EDT, which put the header clock
+  // three hours ahead on the Pacific-time device it actually ships on.
+  configTzTime(TIME_TZ, "pool.ntp.org", "time.nist.gov", "time.google.com");
 
   // Wait for time sync (max 5 seconds to not delay boot too much)
   uint32_t start = millis();

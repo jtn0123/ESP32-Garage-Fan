@@ -182,6 +182,22 @@
 #define BATTERY_APA 0x36
 #endif
 
+// POSIX TZ string for the header clock and every timestamp (history CSV, logs).
+// Overridable via `timezone:` in config/device.yaml. Default is US Pacific —
+// where the deployed unit lives; the previous hardcoded EST5EDT rendered the
+// header clock three hours ahead.
+#ifndef TIME_TZ
+#define TIME_TZ "PST8PDT,M3.2.0,M11.1.0"
+#endif
+
+// Average current draw of the always-on build after the heat mitigations
+// (80 MHz, modem sleep, 11 dBm TX), used for the footer's battery-days
+// estimate. Refine from the observed discharge slope rather than trusting it
+// to two digits.
+#ifndef ALWAYS_ON_AVG_CURRENT_MA
+#define ALWAYS_ON_AVG_CURRENT_MA 35.0f
+#endif
+
 // Network OTA (ArduinoOTA / espota) listener port.
 #ifndef OTA_PORT
 #define OTA_PORT 3232
