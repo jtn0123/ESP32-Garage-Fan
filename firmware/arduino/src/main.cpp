@@ -198,6 +198,25 @@ static String spec_format_field(const String& key) {
     net_time_hhmm(buf, sizeof(buf));
     return String(buf);
   }
+  if (key == "inside_temp_f") {
+    InsideReadings ir = read_inside_sensors();
+    if (!isfinite(ir.temperatureC))
+      return String("--");
+    snprintf(buf, sizeof(buf), "%.0f", ir.temperatureC * 9.0f / 5.0f + 32.0f);
+    return String(buf);
+  }
+  if (key == "outside_temp_f") {
+    OutsideReadings o = net_get_outside();
+    if (o.validTemp && isfinite(o.temperatureC)) {
+      snprintf(buf, sizeof(buf), "%.0f", o.temperatureC * 9.0f / 5.0f + 32.0f);
+      return String(buf);
+    }
+    if (isfinite(get_last_outside_f())) {
+      snprintf(buf, sizeof(buf), "%.0f", get_last_outside_f());
+      return String(buf);
+    }
+    return String("--");
+  }
   if (key.startsWith("hist_")) {
     // Chart min/max labels; shared scale per chart (in+out group together).
     float mn = 0, mx = 0;
@@ -306,9 +325,9 @@ void draw_from_spec_full_impl(uint8_t variantId) {
 
   int comp_count = 0;
   const ComponentOps* comps = get_variant_ops(variantId, &comp_count);
-  gfx.drawRect(0, 0, EINK_WIDTH, EINK_HEIGHT, GxEPD_BLACK);
-  gfx.drawLine(1, 18, EINK_WIDTH - 2, 18, GxEPD_BLACK);
-  gfx.drawLine(125, 18, 125, EINK_HEIGHT - 2, GxEPD_BLACK);
+  // Chrome (border, dividers) comes from each variant's spec component; the
+  // hardcoded frame that used to be drawn here duplicated it on the data page
+  // and drew stray lines through the graphs page, which has no divider.
   for (int ci = 0; ci < comp_count; ++ci) {
     const ComponentOps& co = comps[ci];
     for (int i = 0; i < co.count; ++i) {
@@ -326,6 +345,10 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           if (!r || !op.s0)
             break;
           HistoryRing& h = hist_ring();
+          const int* rr = rect_ptr_by_id(op.rect);
+          // Frame first so a freshly-booted (near-empty) ring still shows the
+          // chart boxes instead of a blank page.
+          gfx.drawRect(rr[0] - 1, rr[1] - 1, rr[2] + 2, rr[3] + 2, GxEPD_BLACK);
           if (h.count < 2)
             break;
           bool temp_group = (strncmp(op.s0, "hist_temp", 9) == 0);
@@ -346,8 +369,6 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           if (!ok)
             break;
           const int16_t x0 = r[0], y0 = r[1], w = r[2], hgt = r[3];
-          // Plot frame (matches the sim's 1px outset box).
-          gfx.drawRect(x0 - 1, y0 - 1, w + 2, hgt + 2, GxEPD_BLACK);
           int16_t px = 0, py = 0;
           bool have_prev = false;
           for (uint16_t i = 0; i < h.count; i++) {
