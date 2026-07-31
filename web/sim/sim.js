@@ -2075,6 +2075,53 @@
       // Export layout metrics for tests
       window.__layoutMetrics = { labels: {}, weather: {}, statusLeft: {} };
       window.__tempMetrics = { inside: {}, outside: {} };
+      // Shared {placeholder} expander for text-bearing ops, mirroring the
+      // firmware's spec_expand_template/spec_format_field pair. One expander,
+      // not per-op copies - the textCenteredIn mini-expander drifted once
+      // (no format specs, no DEFAULTS fallback, decimal temps).
+      const expandTemplate = (raw) => String(raw || '').replace(/\{([^}]+)\}/g, (_, k) => {
+        if (k === 'fw_version'){
+          if (data.fw_version !== undefined && data.fw_version !== null && String(data.fw_version) !== '') return String(data.fw_version);
+          if (typeof window !== 'undefined' && typeof window.UI_FW_VERSION === 'string') return window.UI_FW_VERSION;
+        }
+        if (k === 'weather_short') return shortConditionLabel(data.weather || '');
+        const base = k.replace(/[:].*$/, '').replace(/->.*$/, '');
+        let val = (data[base] !== undefined && data[base] !== null)
+          ? data[base]
+          : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[base] : undefined);
+        if (val === undefined || val === null) {
+          const alias = base.replace(/_f$/, '');
+          val = (data[alias] !== undefined && data[alias] !== null)
+            ? data[alias]
+            : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[alias] : undefined);
+        }
+        if (val === undefined || val === null) {
+          if (validationEnabled) missingDataFields.add(base);
+          return '';
+        }
+        const conv = k.match(/->([a-z]+)/);
+        if (conv){
+          const to = conv[1]; const num = parseFloat(String(val));
+          if (isFinite(num) && to === 'mph') val = (num * 2.237);
+        }
+        const fmt = k.match(/:(.*)$/);
+        if (fmt){
+          const m = fmt[1].match(/\.(\d)f/);
+          if (m){
+            const d = parseInt(m[1]);
+            if (!isNaN(d) && d >= 0 && d <= 20) {
+              const num = parseFloat(String(val));
+              if (isFinite(num)) val = num.toFixed(d);
+            }
+          }
+        } else if (base === 'inside_temp_f' || base === 'outside_temp_f') {
+          // Firmware spec_format_field renders these with %.0f - integer
+          // degrees on the glass, so decimal feeds must not widen sim text.
+          const num = parseFloat(String(val));
+          if (isFinite(num)) val = String(Math.round(num));
+        }
+        return String(val);
+      });
       for (const cname of list){
         const ops = (spec.components || {})[cname] || [];
         for (const op of ops){
@@ -2120,6 +2167,17 @@
               ctx.fillRect(r[0], r[1], r[2], r[3]);
               break;
             }
+            case 'frame': {
+              // 1px outline (value chips). Four fillRects, not strokeRect,
+              // so the 1-bit canvas stays free of antialiased grays.
+              const r = rects[op.rect]; if (!r) break;
+              ctx.fillStyle = '#000';
+              ctx.fillRect(r[0], r[1], r[2], 1);
+              ctx.fillRect(r[0], r[1] + r[3] - 1, r[2], 1);
+              ctx.fillRect(r[0], r[1], 1, r[3]);
+              ctx.fillRect(r[0] + r[2] - 1, r[1], 1, r[3]);
+              break;
+            }
             case 'line': {
               const fx = (op.from && op.from[0]) || 0;
               const fy = (op.from && op.from[1]) || 0;
@@ -2134,51 +2192,7 @@
               const r = op.rect ? rects[op.rect] : null;
               const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';
-              let s = String(op.text || '');
-              s = s.replace(/\{([^}]+)\}/g, (_,k)=>{
-                // Basic formatter: support fw_version injection and simple passthrough.
-                // Prefer the data feed's fw_version (what a real device reports);
-                // the git stamp baked into ui_generated.js is only a fallback.
-                if (k === 'fw_version'){
-                  if (data.fw_version !== undefined && data.fw_version !== null && String(data.fw_version) !== '') return String(data.fw_version);
-                  if (typeof window !== 'undefined' && typeof window.UI_FW_VERSION === 'string') return window.UI_FW_VERSION;
-                }
-                if (k === 'weather_short') return shortConditionLabel(data.weather || '');
-                const base = k.replace(/[:].*$/, '').replace(/->.*$/, '');
-                // Prefer provided data; fall back to DEFAULTS when missing
-                let val = (data[base] !== undefined && data[base] !== null)
-                  ? data[base]
-                  : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[base] : undefined);
-                if (val === undefined || val === null) {
-                  // Secondary fallback: allow "_f" alias (e.g., inside_temp_f)
-                  const alias = base.replace(/_f$/, '');
-                  val = (data[alias] !== undefined && data[alias] !== null)
-                    ? data[alias]
-                    : ((typeof window !== 'undefined' && window.DEFAULTS) ? window.DEFAULTS[alias] : undefined);
-                }
-                if (val === undefined || val === null) {
-                  if (validationEnabled) missingDataFields.add(base);
-                  return '';
-                }
-                // conversions
-                const conv = k.match(/->([a-z]+)/);
-                if (conv){
-                  const to = conv[1]; const num = parseFloat(String(val));
-                  if (isFinite(num) && to === 'mph') val = (num * 2.237);
-                }
-                const fmt = k.match(/:(.*)$/);
-                if (fmt){
-                  const m = fmt[1].match(/\.(\d)f/);
-                  if (m){ 
-                    const d = parseInt(m[1]); 
-                    if (!isNaN(d) && d >= 0 && d <= 20) {
-                      const num = parseFloat(String(val)); 
-                      if (isFinite(num)) val = num.toFixed(d); 
-                    }
-                  }
-                }
-                return String(val);
-              });
+              let s = expandTemplate(op.text);
               if (r){
                 // Pad clipping box slightly to avoid cutting off glyph ascenders/descenders
                 const __pad_top = 1, __pad_bottom = 1, __pad_left = 0, __pad_right = 0;
@@ -2251,39 +2265,8 @@
               }
               break;
             }
-            case 'timeRight': {
-              const r = rects[op.rect]; if (!r) break;
-              const fpx = ((fonts[op.font||'time']||{}).px) || pxTime;
-              // Resolve op.source template like {time_hhmm}; robust fallbacks to legacy data.time
-              let s = '';
-              try{
-                const src = String(op.source||'').replace(/[{}]/g,'');
-                if (src) {
-                  if (data[src] !== undefined && data[src] !== null && String(data[src]) !== '') {
-                    s = String(data[src]);
-                  } else if (data.time_hhmm !== undefined && data.time_hhmm !== null && String(data.time_hhmm) !== '') {
-                    s = String(data.time_hhmm);
-                  } else {
-                    s = String(data.time||'');
-                  }
-                } else {
-                  s = String(data.time_hhmm || data.time || '');
-                }
-              }catch(e){ s = String((data.time_hhmm||data.time||'')); }
-              // Ensure measurement uses the same font we'll render with
-              ctx.font = `${fpx}px ${FONT_STACK}`; ctx.textBaseline='top';
-              const tw = ctx.measureText(s).width;
-              const tx = r[0] + r[2] - 2 - tw;
-              const ty = r[1] + 1;
-              text(tx, ty, s, fpx, 'normal', op.rect);
-              // Stabilize test sampling by ensuring a solid pixel within the center of the time box
-              // Tests compute center using measured width and sample at y+2 relative to returned y
-              // Draw a 1px dot at that location to avoid font/antialias variability across environments
-              const cx = tx + Math.max(1, Math.floor(tw / 2));
-              ctx.fillStyle = '#000';
-              ctx.fillRect(cx, ty + 2, 1, 1);
-              break;
-            }
+            // 'timeRight' removed - no longer in ui_spec.json (v2's header uses
+            // textCenteredIn); firmware dropped OP_TIMERIGHT the same day.
             case 'labelCentered': {
               const r = rects[op.aboveRect]; if (!r) break;
               const fpx = ((fonts[op.font||'label']||{}).px) || pxLabel;
@@ -2329,10 +2312,7 @@
               const fpx = ((fonts[op.font||'small']||{}).px) || pxSmall;
               const weight = ((fonts[op.font||'small']||{}).weight) || 'normal';
               const raw = String(op.text||'');
-              const s = raw.replace(/\{([^{}]+)\}/g, (_,k)=>{
-                if (k === 'weather_short') return shortConditionLabel(data.weather || '');
-                return String(data[k]||'');
-              });
+              const s = expandTemplate(raw);
               ctx.font = `${weight} ${fpx}px ${FONT_STACK}`; ctx.textBaseline='top';
               const tw = ctx.measureText(s).width;
               // Center text horizontally in rect (matches firmware behavior)

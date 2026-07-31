@@ -40,12 +40,12 @@ Diff any visual change against it.
 |----|--------|-------|
 | `line` | `from:[x,y] to:[x,y]` | horizontal/vertical only on device |
 | `fill` | `rect`, `color?: "white"` | solid fill; basis of inverted bands |
+| `frame` | `rect` | 1px outline box (e.g. the v3g current-reading chips) |
 | `text` | `rect, font, align, text, truncate?, color?: "inverse", when?` | `{placeholders}` resolved live |
 | `textCenteredIn` | `rect, yOffset, font, text, color?, when?` | horizontally centered |
 | `tempGroupCentered` | `rect, value` | big digits + °F; size-3 on rects ≥32 px tall |
 | `iconIn` | `rect, iconFromWeather` | icon only — the label is always its own text op |
 | `batteryGlyph` | `rect, percent` | 13×7 glyph, vertically centered |
-| `timeRight` | `rect, source` | right-aligned time (legacy header) |
 | `sparkline` | `rect, series, style?: "dashed"` | 24 h history polyline; series pairs sharing a rect share min/max |
 
 - `when: "has(<field>)"` skips the op when the field has no live value.

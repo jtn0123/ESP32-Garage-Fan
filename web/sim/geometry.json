@@ -1,6 +1,6 @@
 {
   "layout_version": 1,
-  "layout_crc": "0x915AE2BC",
+  "layout_crc": "0xBAF5FBB9",
   "canvas": {
     "w": 250,
     "h": 122
@@ -203,11 +203,17 @@
       120,
       11
     ],
-    "GRAPH_TEMP_NOW": [
-      126,
-      17,
-      118,
-      11
+    "GRAPH_TEMP_IN_CHIP": [
+      158,
+      16,
+      39,
+      12
+    ],
+    "GRAPH_TEMP_OUT_CHIP": [
+      199,
+      16,
+      45,
+      12
     ],
     "GRAPH_TEMP_PLOT": [
       5,
@@ -217,7 +223,7 @@
     ],
     "GRAPH_TEMP_MAX": [
       217,
-      27,
+      28,
       30,
       9
     ],
@@ -233,11 +239,17 @@
       120,
       11
     ],
-    "GRAPH_RH_NOW": [
-      126,
-      66,
-      118,
-      11
+    "GRAPH_RH_IN_CHIP": [
+      158,
+      65,
+      39,
+      12
+    ],
+    "GRAPH_RH_OUT_CHIP": [
+      199,
+      65,
+      45,
+      12
     ],
     "GRAPH_RH_PLOT": [
       5,
@@ -247,7 +259,7 @@
     ],
     "GRAPH_RH_MAX": [
       217,
-      76,
+      77,
       30,
       9
     ],

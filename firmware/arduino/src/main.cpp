@@ -309,7 +309,6 @@ void draw_from_spec_full_impl(uint8_t variantId) {
   using ui::OP_TEMPGROUPCENTERED;
   using ui::OP_TEXT;
   using ui::OP_TEXTCENTEREDIN;
-  using ui::OP_TIMERIGHT;
   using ui::UiOpHeader;
 
   // Set up dual drawing to both display and screenshot canvas
@@ -399,6 +398,14 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           gfx.fillRect(r[0], r[1], r[2], r[3], op.p0 ? GxEPD_WHITE : GxEPD_BLACK);
           break;
         }
+        case ui::OP_FRAME: {
+          // 1px outline of the op's rect (value chips, legend boxes).
+          const int* r = rect_ptr_by_id(op.rect);
+          if (!r)
+            break;
+          gfx.drawRect(r[0], r[1], r[2], r[3], GxEPD_BLACK);
+          break;
+        }
         case ui::OP_LINE: {
           int16_t x0 = op.p0, y0 = op.p1, x1 = op.p2, y1 = op.p3;
           // Ensure correct endpoint order for iteration
@@ -443,22 +450,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           gfx.print(out.c_str());
           break;
         }
-        case OP_TIMERIGHT: {
-          const int* r = rect_ptr_by_id(op.rect);
-          if (!r)
-            break;
-          char hhmm[8];
-          net_time_hhmm(hhmm, sizeof(hhmm));
-          int16_t tw = text_width_default_font(hhmm, 1);
-          int16_t rx = static_cast<int16_t>(r[0] + r[2] - 2 - tw);
-          int16_t by = static_cast<int16_t>(r[1] + r[3] - 2);
-          gfx.setTextColor(GxEPD_BLACK);
-          gfx.setTextSize(1);
-          gfx.setCursor(rx, by);
-          gfx.print(hhmm);
-          break;
-        }
-        // OP_LABELCENTERED removed - no longer in ui_spec.json
+        // OP_TIMERIGHT / OP_LABELCENTERED removed - no longer in ui_spec.json
         case OP_TEMPGROUPCENTERED: {
           const int* r = rect_ptr_by_id(op.rect);
           if (!r)

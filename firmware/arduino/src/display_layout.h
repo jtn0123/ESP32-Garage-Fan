@@ -5,8 +5,8 @@
 
 // Layout identity for simulator ↔ firmware parity checks
 #define LAYOUT_VERSION 1
-#define LAYOUT_CRC 0x915AE2BCu
-#define LAYOUT_MD5 "49742df2f825287385839784fc74fa0c"
+#define LAYOUT_CRC 0xBAF5FBB9u
+#define LAYOUT_MD5 "62a38302b1311d1e6b32e13857f3fe84"
 
 // Display dimensions
 #define DISPLAY_WIDTH 250
@@ -45,14 +45,16 @@ static constexpr int RECT_HEADER_BAND_V3[4] = {   0,   0, 250, 14};
 static constexpr int RECT_INSIDE_TAB_V3[4] = {   6,  16,  50, 12};
 static constexpr int RECT_OUTSIDE_TAB_V3[4] = { 129,  16,  58, 12};
 static constexpr int RECT_GRAPH_TEMP_TITLE[4] = {   6,  17, 120, 11};
-static constexpr int RECT_GRAPH_TEMP_NOW[4] = { 126,  17, 118, 11};
+static constexpr int RECT_GRAPH_TEMP_IN_CHIP[4] = { 158,  16,  39, 12};
+static constexpr int RECT_GRAPH_TEMP_OUT_CHIP[4] = { 199,  16,  45, 12};
 static constexpr int RECT_GRAPH_TEMP_PLOT[4] = {   5,  29, 210, 32};
-static constexpr int RECT_GRAPH_TEMP_MAX[4] = { 217,  27,  30,  9};
+static constexpr int RECT_GRAPH_TEMP_MAX[4] = { 217,  28,  30,  9};
 static constexpr int RECT_GRAPH_TEMP_MIN[4] = { 217,  53,  30,  9};
 static constexpr int RECT_GRAPH_RH_TITLE[4] = {   6,  66, 120, 11};
-static constexpr int RECT_GRAPH_RH_NOW[4] = { 126,  66, 118, 11};
+static constexpr int RECT_GRAPH_RH_IN_CHIP[4] = { 158,  65,  39, 12};
+static constexpr int RECT_GRAPH_RH_OUT_CHIP[4] = { 199,  65,  45, 12};
 static constexpr int RECT_GRAPH_RH_PLOT[4] = {   5,  78, 210, 30};
-static constexpr int RECT_GRAPH_RH_MAX[4] = { 217,  76,  30,  9};
+static constexpr int RECT_GRAPH_RH_MAX[4] = { 217,  77,  30,  9};
 static constexpr int RECT_GRAPH_RH_MIN[4] = { 217, 100,  30,  9};
 static constexpr int RECT_GRAPH_AXIS[4] = {   5, 110, 240, 10};
 
@@ -163,30 +165,36 @@ static_assert(16 + 12 <= DISPLAY_HEIGHT, "OUTSIDE_TAB_V3 height");
 static_assert(RECT_GRAPH_TEMP_TITLE[0] >= 0 && RECT_GRAPH_TEMP_TITLE[1] >= 0, "GRAPH_TEMP_TITLE origin");
 static_assert(6 + 120 <= DISPLAY_WIDTH,  "GRAPH_TEMP_TITLE width");
 static_assert(17 + 11 <= DISPLAY_HEIGHT, "GRAPH_TEMP_TITLE height");
-static_assert(RECT_GRAPH_TEMP_NOW[0] >= 0 && RECT_GRAPH_TEMP_NOW[1] >= 0, "GRAPH_TEMP_NOW origin");
-static_assert(126 + 118 <= DISPLAY_WIDTH,  "GRAPH_TEMP_NOW width");
-static_assert(17 + 11 <= DISPLAY_HEIGHT, "GRAPH_TEMP_NOW height");
+static_assert(RECT_GRAPH_TEMP_IN_CHIP[0] >= 0 && RECT_GRAPH_TEMP_IN_CHIP[1] >= 0, "GRAPH_TEMP_IN_CHIP origin");
+static_assert(158 + 39 <= DISPLAY_WIDTH,  "GRAPH_TEMP_IN_CHIP width");
+static_assert(16 + 12 <= DISPLAY_HEIGHT, "GRAPH_TEMP_IN_CHIP height");
+static_assert(RECT_GRAPH_TEMP_OUT_CHIP[0] >= 0 && RECT_GRAPH_TEMP_OUT_CHIP[1] >= 0, "GRAPH_TEMP_OUT_CHIP origin");
+static_assert(199 + 45 <= DISPLAY_WIDTH,  "GRAPH_TEMP_OUT_CHIP width");
+static_assert(16 + 12 <= DISPLAY_HEIGHT, "GRAPH_TEMP_OUT_CHIP height");
 static_assert(RECT_GRAPH_TEMP_PLOT[0] >= 0 && RECT_GRAPH_TEMP_PLOT[1] >= 0, "GRAPH_TEMP_PLOT origin");
 static_assert(5 + 210 <= DISPLAY_WIDTH,  "GRAPH_TEMP_PLOT width");
 static_assert(29 + 32 <= DISPLAY_HEIGHT, "GRAPH_TEMP_PLOT height");
 static_assert(RECT_GRAPH_TEMP_MAX[0] >= 0 && RECT_GRAPH_TEMP_MAX[1] >= 0, "GRAPH_TEMP_MAX origin");
 static_assert(217 + 30 <= DISPLAY_WIDTH,  "GRAPH_TEMP_MAX width");
-static_assert(27 + 9 <= DISPLAY_HEIGHT, "GRAPH_TEMP_MAX height");
+static_assert(28 + 9 <= DISPLAY_HEIGHT, "GRAPH_TEMP_MAX height");
 static_assert(RECT_GRAPH_TEMP_MIN[0] >= 0 && RECT_GRAPH_TEMP_MIN[1] >= 0, "GRAPH_TEMP_MIN origin");
 static_assert(217 + 30 <= DISPLAY_WIDTH,  "GRAPH_TEMP_MIN width");
 static_assert(53 + 9 <= DISPLAY_HEIGHT, "GRAPH_TEMP_MIN height");
 static_assert(RECT_GRAPH_RH_TITLE[0] >= 0 && RECT_GRAPH_RH_TITLE[1] >= 0, "GRAPH_RH_TITLE origin");
 static_assert(6 + 120 <= DISPLAY_WIDTH,  "GRAPH_RH_TITLE width");
 static_assert(66 + 11 <= DISPLAY_HEIGHT, "GRAPH_RH_TITLE height");
-static_assert(RECT_GRAPH_RH_NOW[0] >= 0 && RECT_GRAPH_RH_NOW[1] >= 0, "GRAPH_RH_NOW origin");
-static_assert(126 + 118 <= DISPLAY_WIDTH,  "GRAPH_RH_NOW width");
-static_assert(66 + 11 <= DISPLAY_HEIGHT, "GRAPH_RH_NOW height");
+static_assert(RECT_GRAPH_RH_IN_CHIP[0] >= 0 && RECT_GRAPH_RH_IN_CHIP[1] >= 0, "GRAPH_RH_IN_CHIP origin");
+static_assert(158 + 39 <= DISPLAY_WIDTH,  "GRAPH_RH_IN_CHIP width");
+static_assert(65 + 12 <= DISPLAY_HEIGHT, "GRAPH_RH_IN_CHIP height");
+static_assert(RECT_GRAPH_RH_OUT_CHIP[0] >= 0 && RECT_GRAPH_RH_OUT_CHIP[1] >= 0, "GRAPH_RH_OUT_CHIP origin");
+static_assert(199 + 45 <= DISPLAY_WIDTH,  "GRAPH_RH_OUT_CHIP width");
+static_assert(65 + 12 <= DISPLAY_HEIGHT, "GRAPH_RH_OUT_CHIP height");
 static_assert(RECT_GRAPH_RH_PLOT[0] >= 0 && RECT_GRAPH_RH_PLOT[1] >= 0, "GRAPH_RH_PLOT origin");
 static_assert(5 + 210 <= DISPLAY_WIDTH,  "GRAPH_RH_PLOT width");
 static_assert(78 + 30 <= DISPLAY_HEIGHT, "GRAPH_RH_PLOT height");
 static_assert(RECT_GRAPH_RH_MAX[0] >= 0 && RECT_GRAPH_RH_MAX[1] >= 0, "GRAPH_RH_MAX origin");
 static_assert(217 + 30 <= DISPLAY_WIDTH,  "GRAPH_RH_MAX width");
-static_assert(76 + 9 <= DISPLAY_HEIGHT, "GRAPH_RH_MAX height");
+static_assert(77 + 9 <= DISPLAY_HEIGHT, "GRAPH_RH_MAX height");
 static_assert(RECT_GRAPH_RH_MIN[0] >= 0 && RECT_GRAPH_RH_MIN[1] >= 0, "GRAPH_RH_MIN origin");
 static_assert(217 + 30 <= DISPLAY_WIDTH,  "GRAPH_RH_MIN width");
 static_assert(100 + 9 <= DISPLAY_HEIGHT, "GRAPH_RH_MIN height");

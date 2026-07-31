@@ -10,14 +10,16 @@ const int kRectTable[RECT__COUNT][4] = {
     {6, 104, 120, 14},  // RECT_FOOTER_IP
     {174, 90, 72, 30},  // RECT_FOOTER_WEATHER
     {5, 110, 240, 10},  // RECT_GRAPH_AXIS
-    {217, 76, 30, 9},  // RECT_GRAPH_RH_MAX
+    {158, 65, 39, 12},  // RECT_GRAPH_RH_IN_CHIP
+    {217, 77, 30, 9},  // RECT_GRAPH_RH_MAX
     {217, 100, 30, 9},  // RECT_GRAPH_RH_MIN
-    {126, 66, 118, 11},  // RECT_GRAPH_RH_NOW
+    {199, 65, 45, 12},  // RECT_GRAPH_RH_OUT_CHIP
     {5, 78, 210, 30},  // RECT_GRAPH_RH_PLOT
     {6, 66, 120, 11},  // RECT_GRAPH_RH_TITLE
-    {217, 27, 30, 9},  // RECT_GRAPH_TEMP_MAX
+    {158, 16, 39, 12},  // RECT_GRAPH_TEMP_IN_CHIP
+    {217, 28, 30, 9},  // RECT_GRAPH_TEMP_MAX
     {217, 53, 30, 9},  // RECT_GRAPH_TEMP_MIN
-    {126, 17, 118, 11},  // RECT_GRAPH_TEMP_NOW
+    {199, 16, 45, 12},  // RECT_GRAPH_TEMP_OUT_CHIP
     {5, 29, 210, 32},  // RECT_GRAPH_TEMP_PLOT
     {6, 17, 120, 11},  // RECT_GRAPH_TEMP_TITLE
     {0, 0, 250, 14},  // RECT_HEADER_BAND_V3
@@ -62,34 +64,27 @@ const int kOps_chrome_count = sizeof(kOps_chrome)/sizeof(kOps_chrome[0]);
 
 const UiOpHeader kOps_header_centered[] = {
     { OP_LINE, 255, 0, 0, 1, 14, 249, 14, NULL, NULL },
-    { OP_TEXT, 15, 1, 0, 0, 0, 0, 0, "{room_name}", NULL },
-    { OP_TEXTCENTEREDIN, 17, 3, 2, 1, 0, 0, 0, "{time_hhmm}", NULL },
-    { OP_TEXT, 19, 3, 1, 0, 0, 0, 0, "v{fw_version}", NULL },
+    { OP_TEXT, 17, 1, 0, 0, 0, 0, 0, "{room_name}", NULL },
+    { OP_TEXTCENTEREDIN, 19, 3, 2, 1, 0, 0, 0, "{time_hhmm}", NULL },
+    { OP_TEXT, 21, 3, 1, 0, 0, 0, 0, "v{fw_version}", NULL },
 };
 const int kOps_header_centered_count = sizeof(kOps_header_centered)/sizeof(kOps_header_centered[0]);
 
-const UiOpHeader kOps_header[] = {
-    { OP_LINE, 255, 0, 0, 1, 14, 249, 14, NULL, NULL },
-    { OP_TEXT, 15, 1, 0, 0, 0, 0, 0, "{room_name}", NULL },
-    { OP_TIMERIGHT, 19, 3, 1, 0, 0, 0, 0, "time_hhmm", NULL },
-};
-const int kOps_header_count = sizeof(kOps_header)/sizeof(kOps_header[0]);
-
 const UiOpHeader kOps_inside[] = {
-    { OP_TEXT, 22, 1, 2, 0, 0, 0, 0, "INSIDE", NULL },
-    { OP_TEMPGROUPCENTERED, 28, 0, 2, 0, 0, 0, 0, "inside_temp_f", NULL },
-    { OP_TEXT, 21, 2, 0, 0, 0, 0, 0, "{inside_hum_pct}% RH", NULL },
-    { OP_TEXT, 24, 2, 0, 0, 0, 0, 0, "{pressure_hpa:.1f} hPa", "pressure_hpa" },
+    { OP_TEXT, 24, 1, 2, 0, 0, 0, 0, "INSIDE", NULL },
+    { OP_TEMPGROUPCENTERED, 30, 0, 2, 0, 0, 0, 0, "inside_temp_f", NULL },
+    { OP_TEXT, 23, 2, 0, 0, 0, 0, 0, "{inside_hum_pct}% RH", NULL },
+    { OP_TEXT, 26, 2, 0, 0, 0, 0, 0, "{pressure_hpa:.1f} hPa", "pressure_hpa" },
 };
 const int kOps_inside_count = sizeof(kOps_inside)/sizeof(kOps_inside[0]);
 
 const UiOpHeader kOps_outside[] = {
-    { OP_TEXT, 30, 1, 2, 0, 0, 0, 0, "OUTSIDE", NULL },
-    { OP_TEMPGROUPCENTERED, 37, 0, 2, 0, 0, 0, 0, "outside_temp_f", NULL },
-    { OP_ICONIN, 41, 0, 0, 0, 0, 0, 0, "weather", NULL },
-    { OP_TEXT, 34, 2, 0, 0, 0, 0, 0, "{outside_pressure_hpa:.0f} hPa", "outside_pressure_hpa" },
-    { OP_TEXT, 33, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", "outside_hum_pct" },
-    { OP_TEXT, 39, 2, 0, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", "wind_mps" },
+    { OP_TEXT, 32, 1, 2, 0, 0, 0, 0, "OUTSIDE", NULL },
+    { OP_TEMPGROUPCENTERED, 39, 0, 2, 0, 0, 0, 0, "outside_temp_f", NULL },
+    { OP_ICONIN, 43, 0, 0, 0, 0, 0, 0, "weather", NULL },
+    { OP_TEXT, 36, 2, 0, 0, 0, 0, 0, "{outside_pressure_hpa:.0f} hPa", "outside_pressure_hpa" },
+    { OP_TEXT, 35, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", "outside_hum_pct" },
+    { OP_TEXT, 41, 2, 0, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", "wind_mps" },
 };
 const int kOps_outside_count = sizeof(kOps_outside)/sizeof(kOps_outside[0]);
 
@@ -112,40 +107,32 @@ const UiOpHeader kOps_chrome_v3[] = {
 const int kOps_chrome_v3_count = sizeof(kOps_chrome_v3)/sizeof(kOps_chrome_v3[0]);
 
 const UiOpHeader kOps_header_v3[] = {
-    { OP_FILL, 14, 0, 0, 0, 0, 0, 0, NULL, NULL },
-    { OP_TEXT, 16, 1, 0, 0, 0, 0, 1, "{room_name}", NULL },
-    { OP_TEXTCENTEREDIN, 18, 3, 2, 1, 0, 0, 1, "{date_mmmdd} {time_hhmm}", NULL },
-    { OP_TEXT, 20, 3, 1, 0, 0, 0, 1, "v{fw_version}", NULL },
+    { OP_FILL, 16, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXT, 18, 1, 0, 0, 0, 0, 1, "{room_name}", NULL },
+    { OP_TEXTCENTEREDIN, 20, 3, 2, 1, 0, 0, 1, "{date_mmmdd} {time_hhmm}", NULL },
+    { OP_TEXT, 22, 3, 1, 0, 0, 0, 1, "v{fw_version}", NULL },
 };
 const int kOps_header_v3_count = sizeof(kOps_header_v3)/sizeof(kOps_header_v3[0]);
 
 const UiOpHeader kOps_inside_v3[] = {
-    { OP_FILL, 27, 0, 0, 0, 0, 0, 0, NULL, NULL },
-    { OP_TEXT, 23, 2, 0, 0, 0, 0, 1, "INSIDE", NULL },
-    { OP_TEMPGROUPCENTERED, 29, 0, 2, 0, 0, 0, 0, "inside_temp_f", NULL },
-    { OP_TEXT, 26, 2, 0, 0, 0, 0, 0, "{inside_hum_pct}% RH", NULL },
-    { OP_TEXT, 25, 2, 1, 0, 0, 0, 0, "{pressure_hpa:.1f} hPa", "pressure_hpa" },
+    { OP_FILL, 29, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXT, 25, 2, 0, 0, 0, 0, 1, "INSIDE", NULL },
+    { OP_TEMPGROUPCENTERED, 31, 0, 2, 0, 0, 0, 0, "inside_temp_f", NULL },
+    { OP_TEXT, 28, 2, 0, 0, 0, 0, 0, "{inside_hum_pct}% RH", NULL },
+    { OP_TEXT, 27, 2, 1, 0, 0, 0, 0, "{pressure_hpa:.1f} hPa", "pressure_hpa" },
 };
 const int kOps_inside_v3_count = sizeof(kOps_inside_v3)/sizeof(kOps_inside_v3[0]);
 
 const UiOpHeader kOps_outside_v3[] = {
-    { OP_FILL, 32, 0, 0, 0, 0, 0, 0, NULL, NULL },
-    { OP_TEXT, 31, 2, 0, 0, 0, 0, 1, "OUTSIDE", NULL },
-    { OP_TEMPGROUPCENTERED, 38, 0, 2, 0, 0, 0, 0, "outside_temp_f", NULL },
-    { OP_ICONIN, 41, 0, 0, 0, 0, 0, 0, "weather", NULL },
-    { OP_TEXT, 36, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", "outside_hum_pct" },
-    { OP_TEXT, 40, 2, 1, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", "wind_mps" },
-    { OP_TEXT, 35, 2, 0, 0, 0, 0, 0, "{outside_pressure_hpa:.0f} hPa", "outside_pressure_hpa" },
+    { OP_FILL, 34, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXT, 33, 2, 0, 0, 0, 0, 1, "OUTSIDE", NULL },
+    { OP_TEMPGROUPCENTERED, 40, 0, 2, 0, 0, 0, 0, "outside_temp_f", NULL },
+    { OP_ICONIN, 43, 0, 0, 0, 0, 0, 0, "weather", NULL },
+    { OP_TEXT, 38, 2, 0, 0, 0, 0, 0, "{outside_hum_pct}% RH", "outside_hum_pct" },
+    { OP_TEXT, 42, 2, 1, 0, 0, 0, 0, "{wind_mps->mph:.1f} mph", "wind_mps" },
+    { OP_TEXT, 37, 2, 0, 0, 0, 0, 0, "{outside_pressure_hpa:.0f} hPa", "outside_pressure_hpa" },
 };
 const int kOps_outside_v3_count = sizeof(kOps_outside_v3)/sizeof(kOps_outside_v3[0]);
-
-const UiOpHeader kOps_footer_v3[] = {
-    { OP_BATTERYGLYPH, 255, 0, 0, 0, 0, 13, 7, "battery_percent", NULL },
-    { OP_TEXT, 255, 2, 0, 0, 0, 0, 0, "{battery_percent}%  ~{days}d", NULL },
-    { OP_ICONIN, 255, 0, 0, 0, 0, 0, 0, "weather", NULL },
-    { OP_TEXTCENTEREDIN, 255, 2, 2, 12, 0, 0, 0, "{weather_short}", NULL },
-};
-const int kOps_footer_v3_count = sizeof(kOps_footer_v3)/sizeof(kOps_footer_v3[0]);
 
 const UiOpHeader kOps_chrome_v3g[] = {
     { OP_LINE, 255, 0, 0, 0, 0, 249, 0, NULL, NULL },
@@ -156,18 +143,24 @@ const UiOpHeader kOps_chrome_v3g[] = {
 const int kOps_chrome_v3g_count = sizeof(kOps_chrome_v3g)/sizeof(kOps_chrome_v3g[0]);
 
 const UiOpHeader kOps_graphs_v3g[] = {
-    { OP_TEXT, 13, 1, 0, 0, 0, 0, 0, "TEMP F", NULL },
-    { OP_TEXT, 11, 2, 1, 0, 0, 0, 0, "in {inside_temp_f} out {outside_temp_f}", NULL },
-    { OP_SPARKLINE, 12, 0, 0, 0, 0, 0, 0, "hist_temp_in", NULL },
-    { OP_SPARKLINE, 12, 0, 0, 1, 0, 0, 0, "hist_temp_out", NULL },
-    { OP_TEXT, 9, 2, 0, 0, 0, 0, 0, "{hist_temp_max}", NULL },
-    { OP_TEXT, 10, 2, 0, 0, 0, 0, 0, "{hist_temp_min}", NULL },
-    { OP_TEXT, 8, 1, 0, 0, 0, 0, 0, "HUMIDITY %", NULL },
-    { OP_TEXT, 6, 2, 1, 0, 0, 0, 0, "in {inside_hum_pct} out {outside_hum_pct}", NULL },
-    { OP_SPARKLINE, 7, 0, 0, 0, 0, 0, 0, "hist_rh_in", NULL },
-    { OP_SPARKLINE, 7, 0, 0, 1, 0, 0, 0, "hist_rh_out", NULL },
-    { OP_TEXT, 4, 2, 0, 0, 0, 0, 0, "{hist_rh_max}", NULL },
-    { OP_TEXT, 5, 2, 0, 0, 0, 0, 0, "{hist_rh_min}", NULL },
+    { OP_TEXT, 15, 1, 0, 0, 0, 0, 0, "TEMP F", NULL },
+    { OP_FILL, 10, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXTCENTEREDIN, 10, 2, 2, 3, 0, 0, 1, "IN {inside_temp_f}", NULL },
+    { OP_FRAME, 13, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXTCENTEREDIN, 13, 2, 2, 3, 0, 0, 0, "OUT {outside_temp_f}", NULL },
+    { OP_SPARKLINE, 14, 0, 0, 0, 0, 0, 0, "hist_temp_in", NULL },
+    { OP_SPARKLINE, 14, 0, 0, 1, 0, 0, 0, "hist_temp_out", NULL },
+    { OP_TEXT, 11, 2, 0, 0, 0, 0, 0, "{hist_temp_max}", NULL },
+    { OP_TEXT, 12, 2, 0, 0, 0, 0, 0, "{hist_temp_min}", NULL },
+    { OP_TEXT, 9, 1, 0, 0, 0, 0, 0, "HUMIDITY %", NULL },
+    { OP_FILL, 4, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXTCENTEREDIN, 4, 2, 2, 3, 0, 0, 1, "IN {inside_hum_pct}", NULL },
+    { OP_FRAME, 7, 0, 0, 0, 0, 0, 0, NULL, NULL },
+    { OP_TEXTCENTEREDIN, 7, 2, 2, 3, 0, 0, 0, "OUT {outside_hum_pct}", NULL },
+    { OP_SPARKLINE, 8, 0, 0, 0, 0, 0, 0, "hist_rh_in", NULL },
+    { OP_SPARKLINE, 8, 0, 0, 1, 0, 0, 0, "hist_rh_out", NULL },
+    { OP_TEXT, 5, 2, 0, 0, 0, 0, 0, "{hist_rh_max}", NULL },
+    { OP_TEXT, 6, 2, 0, 0, 0, 0, 0, "{hist_rh_min}", NULL },
     { OP_TEXT, 3, 2, 0, 0, 0, 0, 0, "24h ago", NULL },
     { OP_TEXT, 3, 2, 1, 0, 0, 0, 0, "now", NULL },
 };

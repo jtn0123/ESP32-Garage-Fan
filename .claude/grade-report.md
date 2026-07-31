@@ -28,6 +28,32 @@ per item.
 
 ---
 
+## Execution status — updated 2026-07-31
+
+Executed items are struck through in place with commit refs. Verification bar:
+firmware items = OTA deploy + on-glass capture; python/tooling = full suite runs.
+
+**Done:** B1(=R2) `4169d27` fw 1.13 · R3 `f7238fc` fw 1.14 (owner's USB plug-in
+check still pending) · R1 `0bcc057` fw 1.15 (partial verified via glass capture)
+· C1+C2+C3 `c1125ba` · D1 `f8f9168`/`184f32d`/`7954cde` — **726 passed, 0
+failed** (root cause: import-time `load_dotenv()` leaking prod broker creds
+into the test process; plus mosquitto stdout-pipe deadlock, ms-resolution
+client-id collisions, missing pytest-asyncio) · D4+I1+I2 `bbdde7a` (CI now
+gates on 142 native tests; `scripts/test-native.sh`, `scripts/deploy.sh`) ·
+H1+H2 `1adcd97` (README rewrite, `docs/UI_SPEC.md`).
+
+**Skipped by owner decision (2026-07-30, trusted-LAN posture):** E1, E3, R5, R6.
+
+**Open:** A1–A3 · B2–B4 · D2, D3 (history_ring extraction done; sd_store CSV
+parse/rotation still .cpp-bound) · E2 (optional TLS only) · F1–F3 · G1 (with
+A3), G2 · R4 (icon unification, incl. task #11 filled-blob icon).
+
+Post-execution regrade snapshot (honest read, not re-audited): D C+→**B+**,
+C C+→**B**, H B→**A−**, I B+→**A−**; overall B→**B+**. Section grades below
+are as originally audited.
+
+---
+
 ## A — Architecture & Design — B+
 
 The ui_spec.json → gen_ui.py → firmware + web-sim pipeline is genuinely good
@@ -70,7 +96,7 @@ every long-blocking boundary, millis-rollover-safe timers throughout (audited
 clean by subagent). Docked for the render path's Arduino String usage and the
 handful of remaining wide functions.
 
-#### B1 — CSV backfill for the history ring (also roadmap #5)
+#### ~~B1 — CSV backfill for the history ring (also roadmap #5)~~ ✓ done 2026-07-30 (`4169d27`, fw 1.13)
 - **Where:** `firmware/arduino/src/history_ring.h`, `sd_store.cpp` (reader to add), `app_controller.cpp` boot path
 - **What's wrong:** The sparkline ring is RAM-only; every OTA deploy or reboot blanks the graphs page for hours. The data already exists in `/data/YYYY-MM-DD.csv` (inside temp/RH; outside not yet recorded).
 - **Fix:** `storage_backfill_ring()`: read today's (+ yesterday's tail) CSV rows into `hist_push`, called after `sd_begin()` in setup. Extend the CSV schema with outside temp/RH columns so future backfills restore both series.
@@ -107,21 +133,21 @@ bridge, debug panel) and earned its keep this session as the design surface.
 But it's a monolith (A2) with rect-name string special-casing that produced two
 real bugs today, plus stale affordances.
 
-#### C1 — Kill remaining rect-name special cases in the spec renderer
+#### ~~C1 — Kill remaining rect-name special cases in the spec renderer~~ ✓ done 2026-07-31 (`c1125ba`)
 - **Where:** `web/sim/sim.js` drawFromSpec: iconIn "legacy" branch, FOOTER_BATTERY/FOOTER_IP metric exports, INSIDE_TEMP_INNER/BADGE lookups
 - **What's wrong:** Behavior keyed on rect *names* rather than op semantics; v3 broke twice on exactly this (double "Cloudy", missing temp metrics). More variants will re-trip it.
 - **Fix:** Move per-op behavior onto op fields (e.g. `metricsKey`, `iconOnly`) emitted by gen_ui.py; delete the name-prefix checks and the dead legacy icon+label path.
 - **Effort:** M
 - **Grade lift:** C+ → B (the next variant costs zero sim surgery)
 
-#### C2 — Sim variant switcher UI
+#### ~~C2 — Sim variant switcher UI~~ ✓ done 2026-07-31 (`c1125ba`)
 - **Where:** `web/sim/index.html` controls row; `sim.js` QS handling
 - **What's wrong:** Variants are only reachable via `?variant=` URL param or console; the owner iterates on v3/v3g designs but the page has no picker.
 - **Fix:** Add a variant `<select>` populated from `UI_SPEC.variants`, wired to redraw; persist in QS.
 - **Effort:** S
 - **Grade lift:** C+ → B− (the design loop the owner actually uses gets a first-class control)
 
-#### C3 — Dead/duplicate sim entry points
+#### ~~C3 — Dead/duplicate sim entry points~~ ✓ done 2026-07-31 (`c1125ba`)
 - **Where:** `web/sim/sim-simple.js`, `geometry_test_dividers.json`, portions of `debug-panel.js`
 - **What's wrong:** Alternate renderer and test fixtures with no references from index.html or tests (sampled); they invite the same drift the firmware just recovered from.
 - **Fix:** Verify with grep, then delete or move under `web/sim/dev/` with a README line.
@@ -140,7 +166,7 @@ newest firmware surfaces (FFat backend, sparkline renderer, op executor) are
 hardware-verified only. A fifth of the python suite failing on a clean run caps
 this at C+ regardless of the native health.
 
-#### D1 — Triage the 22 pre-existing python failures [both]
+#### ~~D1 — Triage the 22 pre-existing python failures [both]~~ ✓ done 2026-07-31 (`f8f9168`, `184f32d`, `7954cde` — 726 passed / 0 failed)
 - **Where:** `tests/test_device_manager_async.py` (18), `tests/test_ha_automation_alignment.py`, `tests/test_mqtt_birth.py`, `tests/test_power_hypothesis.py`, `tests/test_snapshot.py`
 - **What's wrong:** Most fail on `Subscribe failed rc=4` — they require a live/mock broker that isn't provisioned; the suite can't distinguish regression from environment. This is the fog that hid real bugs before.
 - **Fix:** Mark broker-dependent tests with `@pytest.mark.broker` + skip-unless-broker fixture (spin up `mosquitto` in CI where available); fix or re-baseline the hypothesis + snapshot tests individually.
@@ -161,7 +187,7 @@ this at C+ regardless of the native health.
 - **Effort:** M
 - **Grade lift:** C+ → B− (retention bugs become impossible to ship silently)
 
-#### D4 — CI: run the native test envs [BE]
+#### ~~D4 — CI: run the native test envs [BE]~~ ✓ done 2026-07-30 (`bbdde7a`)
 - **Where:** `.github/workflows/ci.yml` (runs `pio run` builds; sampled — native `pio test` envs not in the matrix)
 - **What's wrong:** 137 native tests exist but CI doesn't execute them; they pass because we run them by hand.
 - **Fix:** Add a CI job iterating the `native_*` envs (`pio test -e <env>`), fail-fast.
@@ -179,7 +205,7 @@ flag (`config.h` OTA_REQUIRE_PASSWORD block). Secrets live in gitignored `.env`
 MQTT commands are rate-limited; a reboot command exists on an unauthenticated
 broker path. Graded on surface, not intent.
 
-#### E1 — MQTT control surface is LAN-open
+#### E1 — MQTT control surface is LAN-open — *skipped, owner decision 2026-07-30 (trusted LAN)*
 - **Where:** `firmware/arduino/src/mqtt_client.cpp` cmd handlers (reboot, screenshot, page, sleep_interval, debug)
 - **What's wrong:** Anyone who can publish to the broker can reboot the device or pull screenshots. Broker creds gate this today; broker ACLs don't distinguish publishers.
 - **Fix:** Per-device broker ACL (mosquitto acl_file: sensor user may publish only under its own base; a separate admin user for cmd/#), or an HMAC nonce on destructive commands.
@@ -193,7 +219,7 @@ broker path. Graded on surface, not intent.
 - **Effort:** M
 - **Grade lift:** B− → B (option exists for less-trusted deployments)
 
-#### E3 — Screenshot/log topics leak interior data unauthenticated readers
+#### E3 — Screenshot/log topics leak interior data unauthenticated readers — *skipped, owner decision 2026-07-30 (folds into E1)*
 - **Where:** broker retained topics `espsensor/<id>/#`
 - **What's wrong:** Retained telemetry (including framebuffer captures) persists for any broker client; same trust-inheritance issue as E1.
 - **Fix:** Covered by E1's ACL work; additionally mark screenshot chunks non-retained (they already are) and expire `debug/#` retained values on boot.
@@ -265,14 +291,14 @@ the SRAM/BUSY findings; the on-card README matches firmware behavior. Gaps: the
 root README still centers the deep-sleep story while the flagship build is
 always-on two-page v3, and the UI spec pipeline has no authoring guide.
 
-#### H1 — README refresh for the current product
+#### ~~H1 — README refresh for the current product~~ ✓ done 2026-07-31 (`1adcd97`)
 - **Where:** `README.md`
 - **What's wrong:** Describes the pre-v3 world; no mention of the two-page UI, BOOT button, remote screenshot channel, cmd/* MQTT API, or the sim-first design loop. A new contributor would rebuild stale mental models.
 - **Fix:** Rewrite the feature section around the always-on build; add the MQTT command table and the sim workflow (`launch.json` sim server, ?variant=).
 - **Effort:** S
 - **Grade lift:** B → B+ (front door matches the house)
 
-#### H2 — UI spec authoring guide
+#### ~~H2 — UI spec authoring guide~~ ✓ done 2026-07-31 (`1adcd97`)
 - **Where:** new `docs/UI_SPEC.md`
 - **What's wrong:** The op vocabulary (fill/inverse, sparkline, tempGroup, guards, variants) lives only in generator source and this session's commits.
 - **Fix:** One page: op reference table, rect/variant rules, "add a variant" walkthrough, parity-testing loop.
@@ -289,14 +315,14 @@ closing the verify loop without touching the device, commit-time secret
 scanning, clang-format/cpplint/ruff/black in CI, per-module native envs,
 launch.json for the sim. Docked for the missing aggregate runners.
 
-#### I1 — `native_all` aggregate test env / make target
+#### ~~I1 — `native_all` aggregate test env / make target~~ ✓ done 2026-07-30 (`bbdde7a`, `scripts/test-native.sh`)
 - **Where:** `firmware/arduino/platformio.ini`, root `Makefile` (absent)
 - **What's wrong:** Running the native suites means 10 separate `pio test -e` invocations (repo memory even notes the absence); friction is why CI never gained them (D4).
 - **Fix:** A `scripts/test-native.sh` looping envs (or pio's `-e` multi-flag), called by CI and a `make test` target.
 - **Effort:** S
 - **Grade lift:** B+ → A− (one command = whole native suite)
 
-#### I2 — Deploy script encapsulating the espota dance
+#### ~~I2 — Deploy script encapsulating the espota dance~~ ✓ done 2026-07-30 (`bbdde7a`, `scripts/deploy.sh`)
 - **Where:** `scripts/` (new `deploy.sh`)
 - **What's wrong:** OTA deploys currently require knowing the espota.py path inside the platform package; the ini comment documents a `--project-option` invocation that pio no longer accepts (bit us today).
 - **Fix:** `scripts/deploy.sh [ip]`: build always_on, locate espota, upload, tail availability via mosquitto_sub if present. Fix the stale ini comment.
@@ -312,12 +338,12 @@ effort and rationale. Execute IDs work here too (e.g. `R1`).
 
 | ID | Feature | Value | Effort | Verdict |
 |----|---------|-------|--------|---------|
-| R1 | Partial e-ink refresh (SSD1680 + SmartRefresh) | **A** | L | Do next |
-| R2 | CSV backfill of history ring (=B1) | **A−** | M | Do soon |
-| R3 | USB mass-storage: history as a flash drive | **B+** | M | High wow |
-| R4 | Outline icon set unification | **B** | M | With R1 |
-| R5 | STEMMA QT plug-in sensor (CO₂ etc.) | **B−** | S+$ | If curious |
-| R6 | Capacitive touch on header pads | **C** | M | Skip for now |
+| R1 | Partial e-ink refresh (SSD1680 + SmartRefresh) | **A** | L | ✓ done fw 1.15 `0bcc057` |
+| R2 | CSV backfill of history ring (=B1) | **A−** | M | ✓ done fw 1.13 `4169d27` |
+| R3 | USB mass-storage: history as a flash drive | **B+** | M | ✓ done fw 1.14 `f7238fc` (owner plug-in check pending) |
+| R4 | Outline icon set unification | **B** | M | Open — next with icon task #11 |
+| R5 | STEMMA QT plug-in sensor (CO₂ etc.) | **B−** | S+$ | Skipped (owner) |
+| R6 | Capacitive touch on header pads | **C** | M | Skipped (owner) |
 
 #### R1 — Partial e-ink refresh — Value A, Effort L
 **Why:** It changes what the product *is*. Today every update costs a ~1 s

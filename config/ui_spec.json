@@ -215,11 +215,17 @@
       120,
       11
     ],
-    "GRAPH_TEMP_NOW": [
-      126,
-      17,
-      118,
-      11
+    "GRAPH_TEMP_IN_CHIP": [
+      158,
+      16,
+      39,
+      12
+    ],
+    "GRAPH_TEMP_OUT_CHIP": [
+      199,
+      16,
+      45,
+      12
     ],
     "GRAPH_TEMP_PLOT": [
       5,
@@ -245,11 +251,17 @@
       120,
       11
     ],
-    "GRAPH_RH_NOW": [
-      126,
-      66,
-      118,
-      11
+    "GRAPH_RH_IN_CHIP": [
+      158,
+      65,
+      39,
+      12
+    ],
+    "GRAPH_RH_OUT_CHIP": [
+      199,
+      65,
+      45,
+      12
     ],
     "GRAPH_RH_PLOT": [
       5,
@@ -799,11 +811,27 @@
         "text": "TEMP F"
       },
       {
-        "op": "text",
-        "rect": "GRAPH_TEMP_NOW",
+        "op": "fill",
+        "rect": "GRAPH_TEMP_IN_CHIP"
+      },
+      {
+        "op": "textCenteredIn",
+        "rect": "GRAPH_TEMP_IN_CHIP",
+        "yOffset": 3,
         "font": "small",
-        "align": "right",
-        "text": "in {inside_temp_f} out {outside_temp_f}"
+        "text": "IN {inside_temp_f}",
+        "color": "inverse"
+      },
+      {
+        "op": "frame",
+        "rect": "GRAPH_TEMP_OUT_CHIP"
+      },
+      {
+        "op": "textCenteredIn",
+        "rect": "GRAPH_TEMP_OUT_CHIP",
+        "yOffset": 3,
+        "font": "small",
+        "text": "OUT {outside_temp_f}"
       },
       {
         "op": "sparkline",
@@ -839,11 +867,27 @@
         "text": "HUMIDITY %"
       },
       {
-        "op": "text",
-        "rect": "GRAPH_RH_NOW",
+        "op": "fill",
+        "rect": "GRAPH_RH_IN_CHIP"
+      },
+      {
+        "op": "textCenteredIn",
+        "rect": "GRAPH_RH_IN_CHIP",
+        "yOffset": 3,
         "font": "small",
-        "align": "right",
-        "text": "in {inside_hum_pct} out {outside_hum_pct}"
+        "text": "IN {inside_hum_pct}",
+        "color": "inverse"
+      },
+      {
+        "op": "frame",
+        "rect": "GRAPH_RH_OUT_CHIP"
+      },
+      {
+        "op": "textCenteredIn",
+        "rect": "GRAPH_RH_OUT_CHIP",
+        "yOffset": 3,
+        "font": "small",
+        "text": "OUT {outside_hum_pct}"
       },
       {
         "op": "sparkline",

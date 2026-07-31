@@ -10,14 +10,16 @@ enum RectId {
     RECT_FOOTER_IP,
     RECT_FOOTER_WEATHER,
     RECT_GRAPH_AXIS,
+    RECT_GRAPH_RH_IN_CHIP,
     RECT_GRAPH_RH_MAX,
     RECT_GRAPH_RH_MIN,
-    RECT_GRAPH_RH_NOW,
+    RECT_GRAPH_RH_OUT_CHIP,
     RECT_GRAPH_RH_PLOT,
     RECT_GRAPH_RH_TITLE,
+    RECT_GRAPH_TEMP_IN_CHIP,
     RECT_GRAPH_TEMP_MAX,
     RECT_GRAPH_TEMP_MIN,
-    RECT_GRAPH_TEMP_NOW,
+    RECT_GRAPH_TEMP_OUT_CHIP,
     RECT_GRAPH_TEMP_PLOT,
     RECT_GRAPH_TEMP_TITLE,
     RECT_HEADER_BAND_V3,
@@ -66,13 +68,13 @@ enum Align { ALIGN_LEFT=0, ALIGN_RIGHT=1, ALIGN_CENTER=2 };
 enum UiOpKind {
     OP_BATTERYGLYPH,
     OP_FILL,
+    OP_FRAME,
     OP_ICONIN,
     OP_LINE,
     OP_SPARKLINE,
     OP_TEMPGROUPCENTERED,
     OP_TEXT,
     OP_TEXTCENTEREDIN,
-    OP_TIMERIGHT,
 };
 
 // s0: op payload (text template, field name, ...).
@@ -111,7 +113,6 @@ static constexpr const char* kVariant_v3g_components[] = {
 
 static constexpr int kComponent_chrome_opcount = 6;
 static constexpr int kComponent_header_centered_opcount = 4;
-static constexpr int kComponent_header_opcount = 3;
 static constexpr int kComponent_inside_opcount = 4;
 static constexpr int kComponent_outside_opcount = 6;
 static constexpr int kComponent_footer_split_opcount = 4;
@@ -119,10 +120,9 @@ static constexpr int kComponent_chrome_v3_opcount = 6;
 static constexpr int kComponent_header_v3_opcount = 4;
 static constexpr int kComponent_inside_v3_opcount = 5;
 static constexpr int kComponent_outside_v3_opcount = 7;
-static constexpr int kComponent_footer_v3_opcount = 4;
 static constexpr int kComponent_chrome_v3g_opcount = 4;
-static constexpr int kComponent_graphs_v3g_opcount = 14;
-static constexpr int kTotalOpCount = 71;
+static constexpr int kComponent_graphs_v3g_opcount = 20;
+static constexpr int kTotalOpCount = 70;
 
 struct ComponentOps { const UiOpHeader* ops; int count; const char* name; };
 extern const ComponentOps kVariant_v2_ops[];

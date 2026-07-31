@@ -618,6 +618,10 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 # Solid fill of the op's rect. p0 = 1 means white (rarely
                 # needed); default black. The rect id carries the geometry.
                 p0 = 1 if str(op.get("color", "black")) == "white" else 0
+            elif kind == "frame":
+                # 1px black outline of the op's rect (value chips, legend
+                # boxes). No parameters beyond the rect id.
+                pass
             elif kind == "text":
                 # Pass template through; device interprets placeholders like {ip}, {fw_version}
                 txt = str(op.get("text", ""))
