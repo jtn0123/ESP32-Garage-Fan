@@ -57,8 +57,9 @@ bool storage_load_config();
 // Append one sample to today's CSV, creating the file with a header when new.
 // `epoch` selects the file name and timestamp column; pass 0 when time is not
 // yet known and rows are routed to /data/nodate.csv instead of being dropped.
-bool storage_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct, float pressHPa,
-                       float battV, int battPct, int rssiDbm, float outTempC, float outRhPct);
+bool storage_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct,
+                            float pressHPa, float battV, int battPct, int rssiDbm, float outTempC,
+                            float outRhPct);
 
 // Replay today's (and yesterday's) CSV rows into a caller-supplied sink so the
 // sparkline ring survives reboots. The sink receives inside/outside temp (C)

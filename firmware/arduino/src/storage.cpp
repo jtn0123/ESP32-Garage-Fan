@@ -355,8 +355,9 @@ bool storage_load_config() {
   return rc_has_overrides();
 }
 
-bool storage_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct, float pressHPa,
-                       float battV, int battPct, int rssiDbm, float outTempC, float outRhPct) {
+bool storage_append_history(time_t epoch, uint32_t uptime_s, float tempC, float rhPct,
+                            float pressHPa, float battV, int battPct, int rssiDbm, float outTempC,
+                            float outRhPct) {
   if (!g_mounted)
     return false;
 

@@ -335,7 +335,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
               continue;
             }
             const int16_t cx = static_cast<int16_t>(
-                x0 + (w - 1) - (int32_t)(h.count - 1 - i) * (w - 1) / (HIST_CAP - 1));
+                x0 + (w - 1) - static_cast<int32_t>(h.count - 1 - i) * (w - 1) / (HIST_CAP - 1));
             const int16_t cy =
                 static_cast<int16_t>(y0 + (hgt - 1) - (v - mn) / (mx - mn) * (hgt - 1));
             if (have_prev && (!op.p0 || (i % 4) < 2)) {
@@ -439,8 +439,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           }
           // Use direct draw (no displayWindow call) during full refresh
           // p3: digit color code (red accent on tri-color, black on mono)
-          draw_temp_number_and_units_direct(r[0], r[1], r[2], r[3], temp_buf,
-                                            map_op_color(op.p3));
+          draw_temp_number_and_units_direct(r[0], r[1], r[2], r[3], temp_buf, map_op_color(op.p3));
           break;
         }
         case OP_ICONIN: {

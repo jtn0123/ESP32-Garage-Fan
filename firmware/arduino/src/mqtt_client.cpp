@@ -67,8 +67,9 @@ static void mqtt_tls_configure() {
       f.close();
   }
   g_wifi_client.setInsecure();
-  Serial.println("[MQTT] TLS without CA (encrypted, broker unauthenticated) - "
-                 "drop /config/mqtt_ca.pem onto storage to pin the broker");
+  Serial.println(
+      "[MQTT] TLS without CA (encrypted, broker unauthenticated) - "
+      "drop /config/mqtt_ca.pem onto storage to pin the broker");
 }
 #endif
 static OutsideReadings g_outside;

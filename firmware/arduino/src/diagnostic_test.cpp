@@ -83,7 +83,7 @@ void pixel_flash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms) {
 }
 
 void pixel_tick() {
-  if (g_pixel_off_ms && g_status_pixel && (int32_t)(millis() - g_pixel_off_ms) >= 0) {
+  if (g_pixel_off_ms && g_status_pixel && static_cast<int32_t>(millis() - g_pixel_off_ms) >= 0) {
     g_pixel_off_ms = 0;
     g_status_pixel->setPixelColor(0, 0, 0, 0);
     g_status_pixel->show();

@@ -205,8 +205,8 @@ void draw_status_line(const BatteryStatus& bs, const char* ip_cstr) {
 }
 
 // Draw weather icon based on condition string
-void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h,
-                                 const char* condition, uint16_t color) {
+void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h, const char* condition,
+                                 uint16_t color) {
   if (!condition)
     return;
 
