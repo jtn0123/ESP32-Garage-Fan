@@ -268,6 +268,37 @@ static uint8_t variant_id_for_page(uint8_t page) {
   return ui::kDefaultVariantId;  // no graphs variant in this spec build
 }
 
+// Flash-free partial update of the live-data area (header stamp + both panes).
+// The trick: run the FULL spec draw inside a partial window - GxEPD2 clips all
+// drawing to the window, so ops outside it cost CPU but touch no pixels, and
+// everything inside (band segment, white stamp, temps, meta rows) renders with
+// zero special-casing. The mirror canvas receives the complete frame, so
+// remote screenshots stay exact. SSD1680 fast-partial takes ~300 ms with no
+// black flash and spends no full-refresh cycle.
+void display_partial_update_live() {
+#if USE_UI_SPEC
+  if (display_current_page() != 0)
+    return;  // graphs page changes shape too much; it waits for its full draw
+
+  // Ghost hygiene: differential updates accumulate faint residue, so after
+  // FULL_REFRESH_EVERY partials do a proper full instead. In practice the
+  // 15-minute page alternation resets the counter long before this trips -
+  // it is a safety net for a future where alternation is disabled.
+  if (get_partial_counter() >= FULL_REFRESH_EVERY) {
+    full_refresh();
+    return;
+  }
+
+  display.setPartialWindow(0, 0, EINK_WIDTH, 84);
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+    draw_from_spec_full_impl(variant_id_for_page(0));
+  } while (display.nextPage());
+  increment_partial_counter();
+#endif
+}
+
 // Full display refresh
 void full_refresh() {
   PROFILE_SCOPE("full_refresh");

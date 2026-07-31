@@ -34,6 +34,9 @@ typedef void (*DrawFnFwd)();
 
 // Core rendering functions
 void full_refresh();
+// Flash-free partial update of the live page's data area; no-op on the
+// graphs page. Falls back to a full refresh for periodic ghost cleanup.
+void display_partial_update_live();
 // Two-page UI: 0 = live data, 1 = 24h graphs.
 uint8_t display_current_page();
 void display_toggle_page();

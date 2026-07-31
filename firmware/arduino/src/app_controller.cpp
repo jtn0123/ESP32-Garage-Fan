@@ -761,6 +761,12 @@ void app_loop() {
     record_sample_to_sd();
 #if USE_DISPLAY
     maybe_refresh_display();
+    // Fresh sample on the glass without waiting for the 15-minute full
+    // refresh: a flash-free partial covers the header stamp and both panes.
+    // Skipped when maybe_refresh_display() just did a full this same pass.
+    if (g_last_display_ms != now) {
+      display_partial_update_live();
+    }
 #endif
 
     // Periodic maintenance. An always-on node never reaches run_sleep_phase(),
