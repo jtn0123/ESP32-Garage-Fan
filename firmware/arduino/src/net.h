@@ -8,6 +8,7 @@
 // and its orphaned backends were removed. Only the functions with real call
 // sites remain.
 
+#include <esp_mac.h>
 #include <cstdio>
 #include "wifi_manager.h"
 #include "mqtt_client.h"
@@ -31,9 +32,13 @@ inline void net_begin() {
     return;
   s_begun = true;
 
-  // Generate client ID
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
+  // Generate client ID from the efuse factory MAC. esp_read_mac() needs no
+  // WiFi state: on core 3.x, WiFi.macAddress() only works after the STA
+  // interface starts, and calling it here left the id empty - every topic
+  // (LWT, discovery, cmd/#, screenshots) landed under espsensor/unknown/ on
+  // the first 3.x boot.
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   snprintf(g_client_id, sizeof(g_client_id), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2],
            mac[3], mac[4], mac[5]);
 

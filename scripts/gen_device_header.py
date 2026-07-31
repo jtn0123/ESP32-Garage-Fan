@@ -38,16 +38,26 @@ def _load_dotenv_once() -> None:
     tests then skipped their local fixture broker and dialed production,
     failing with auth errors that only reproduced in full-suite runs.
     """
-    try:
-        from dotenv import load_dotenv
-
-        env_path = ROOT / ".env"
-        if env_path.exists():
-            load_dotenv(env_path)
-            print(f"Loaded environment variables from {env_path}")
-    except ImportError:
-        # dotenv not installed, will use environment variables only
-        pass
+    # Parsed directly instead of importing python-dotenv: the build runs under
+    # PlatformIO's bundled Python, and a PIO core upgrade shipped an env
+    # without that package - the ImportError was silently swallowed and the
+    # firmware baked EMPTY WiFi credentials (found the hard way on the core
+    # 3.x bench flash). Matching dotenv semantics: existing environment
+    # variables win over .env values.
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    loaded = 0
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if k and k not in os.environ:
+            os.environ[k] = v
+            loaded += 1
+    print(f"Loaded {loaded} environment variables from {env_path}")
 
 
 def parse_duration(s: str) -> int:
