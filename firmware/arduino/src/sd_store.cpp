@@ -582,6 +582,18 @@ bool sd_log_write(const char* line) {
   if (!g_mounted || !line)
     return false;
 
+  // Same storage-full guard as history appends: on the internal partition,
+  // reclaim space before writing rather than failing mid-append.
+  if (g_backend == Backend::kInternal) {
+    int guard = 4;
+    while (FFat.freeBytes() < kInternalFreeFloorBytes && guard-- > 0) {
+      if (!remove_oldest_history())
+        break;
+    }
+    if (FFat.freeBytes() < kInternalFreeFloorBytes / 2)
+      return false;  // absolute floor: drop the log line, never wedge the FS
+  }
+
   load_log_index();
 
   char path[32];
@@ -591,7 +603,12 @@ bool sd_log_write(const char* line) {
   if (!f)
     return false;
 
-  if (f.size() >= SD_LOG_MAX_BYTES) {
+  // The compile-time rotation size is tuned for a multi-GB card; on the 920 KB
+  // internal partition that budget (5 x 256 KB) exceeds the whole filesystem
+  // and would wedge it. Scale the per-file cap to the backend.
+  const size_t log_max =
+      (g_backend == Backend::kInternal) ? (24 * 1024) : static_cast<size_t>(SD_LOG_MAX_BYTES);
+  if (f.size() >= log_max) {
     f.close();
     g_log_index = (g_log_index + 1) % SD_LOG_FILE_COUNT;
     log_path_for(g_log_index, path, sizeof(path));
