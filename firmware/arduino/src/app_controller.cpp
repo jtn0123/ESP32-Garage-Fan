@@ -206,9 +206,19 @@ void app_setup() {
   delay(500);  // Longer delay for serial stability
 
   // Initialize hardware watchdog early (30 second timeout)
-  // This catches hangs in setup - will reboot if setup takes too long
-  esp_task_wdt_init(30, true);  // 30 sec timeout, panic (reboot) on timeout
-  esp_task_wdt_add(NULL);       // Add current task to watchdog
+  // This catches hangs in setup - will reboot if setup takes too long.
+  // IDF 5 (core 3.x): the TWDT is usually armed by the system at boot, so
+  // reconfigure it; fall back to init for configs where it is not.
+  {
+    esp_task_wdt_config_t wdt_cfg = {};
+    wdt_cfg.timeout_ms = 30000;
+    wdt_cfg.idle_core_mask = 0;
+    wdt_cfg.trigger_panic = true;  // panic (reboot) on timeout
+    if (esp_task_wdt_reconfigure(&wdt_cfg) != ESP_OK) {
+      esp_task_wdt_init(&wdt_cfg);
+    }
+  }
+  esp_task_wdt_add(NULL);  // Add current task to watchdog
 
   // Bring up the structured logger before anything logs through it. This call
   // was missing entirely, which left every sink dead: no ring buffer for crash

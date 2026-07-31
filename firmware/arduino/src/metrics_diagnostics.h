@@ -16,7 +16,7 @@ struct ErrorStats {
 };
 
 // Error statistics management
-extern RTC_DATA_ATTR ErrorStats g_error_stats;
+extern ErrorStats g_error_stats;  // RTC_DATA_ATTR on the definition only
 void increment_error_stat(const char* stat_name);
 void reset_error_stats();
 void publish_error_stats();

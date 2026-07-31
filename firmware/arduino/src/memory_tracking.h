@@ -63,7 +63,7 @@ class MemoryTracker {
   MemoryTracker& operator=(const MemoryTracker&) = delete;
 
   // RTC memory storage (persists across deep sleep)
-  RTC_DATA_ATTR static MemoryStats stats_;
+  static MemoryStats stats_;  // RTC_DATA_ATTR on the definition only
 
   bool initialized_ = false;
 

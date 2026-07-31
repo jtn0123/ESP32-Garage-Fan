@@ -28,7 +28,9 @@ struct OutsideReadings {
 
 class Preferences;
 class PubSubClient;
-class WiFiClient;
+// No WiFiClient forward declaration: core 3.x makes it a typedef of
+// NetworkClient, so `class WiFiClient;` is a compile error. The only
+// consumer (mqtt_client.cpp) includes the real headers.
 
 // Display-specific forward declarations
 #if USE_DISPLAY
