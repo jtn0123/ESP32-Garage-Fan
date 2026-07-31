@@ -208,6 +208,72 @@
       16,
       58,
       12
+    ],
+    "GRAPH_TEMP_TITLE": [
+      6,
+      17,
+      120,
+      11
+    ],
+    "GRAPH_TEMP_NOW": [
+      126,
+      17,
+      118,
+      11
+    ],
+    "GRAPH_TEMP_PLOT": [
+      5,
+      29,
+      210,
+      32
+    ],
+    "GRAPH_TEMP_MAX": [
+      217,
+      27,
+      30,
+      9
+    ],
+    "GRAPH_TEMP_MIN": [
+      217,
+      53,
+      30,
+      9
+    ],
+    "GRAPH_RH_TITLE": [
+      6,
+      66,
+      120,
+      11
+    ],
+    "GRAPH_RH_NOW": [
+      126,
+      66,
+      118,
+      11
+    ],
+    "GRAPH_RH_PLOT": [
+      5,
+      78,
+      210,
+      30
+    ],
+    "GRAPH_RH_MAX": [
+      217,
+      76,
+      30,
+      9
+    ],
+    "GRAPH_RH_MIN": [
+      217,
+      100,
+      30,
+      9
+    ],
+    "GRAPH_AXIS": [
+      5,
+      110,
+      240,
+      10
     ]
   },
   "iconMap": [
@@ -572,17 +638,6 @@
       {
         "op": "line",
         "from": [
-          1,
-          14
-        ],
-        "to": [
-          249,
-          14
-        ]
-      },
-      {
-        "op": "line",
-        "from": [
           125,
           14
         ],
@@ -741,6 +796,148 @@
         "font": "small",
         "text": "{weather_short}"
       }
+    ],
+    "chrome_v3g": [
+      {
+        "op": "line",
+        "from": [
+          0,
+          0
+        ],
+        "to": [
+          249,
+          0
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          0,
+          121
+        ],
+        "to": [
+          249,
+          121
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          0,
+          0
+        ],
+        "to": [
+          0,
+          121
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          249,
+          0
+        ],
+        "to": [
+          249,
+          121
+        ]
+      }
+    ],
+    "graphs_v3g": [
+      {
+        "op": "text",
+        "rect": "GRAPH_TEMP_TITLE",
+        "font": "label",
+        "align": "left",
+        "text": "TEMP F"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_TEMP_NOW",
+        "font": "small",
+        "align": "right",
+        "text": "in {inside_temp_f} out {outside_temp_f}"
+      },
+      {
+        "op": "sparkline",
+        "rect": "GRAPH_TEMP_PLOT",
+        "series": "hist_temp_in",
+        "style": "solid"
+      },
+      {
+        "op": "sparkline",
+        "rect": "GRAPH_TEMP_PLOT",
+        "series": "hist_temp_out",
+        "style": "dashed"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_TEMP_MAX",
+        "font": "small",
+        "align": "left",
+        "text": "{hist_temp_max}"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_TEMP_MIN",
+        "font": "small",
+        "align": "left",
+        "text": "{hist_temp_min}"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_RH_TITLE",
+        "font": "label",
+        "align": "left",
+        "text": "HUMIDITY %"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_RH_NOW",
+        "font": "small",
+        "align": "right",
+        "text": "in {inside_hum_pct} out {outside_hum_pct}"
+      },
+      {
+        "op": "sparkline",
+        "rect": "GRAPH_RH_PLOT",
+        "series": "hist_rh_in",
+        "style": "solid"
+      },
+      {
+        "op": "sparkline",
+        "rect": "GRAPH_RH_PLOT",
+        "series": "hist_rh_out",
+        "style": "dashed"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_RH_MAX",
+        "font": "small",
+        "align": "left",
+        "text": "{hist_rh_max}"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_RH_MIN",
+        "font": "small",
+        "align": "left",
+        "text": "{hist_rh_min}"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_AXIS",
+        "font": "small",
+        "align": "left",
+        "text": "24h ago"
+      },
+      {
+        "op": "text",
+        "rect": "GRAPH_AXIS",
+        "font": "small",
+        "align": "right",
+        "text": "now"
+      }
     ]
   },
   "variants": {
@@ -757,6 +954,11 @@
       "inside_v3",
       "outside_v3",
       "footer_split"
+    ],
+    "v3g": [
+      "chrome_v3g",
+      "header_v3",
+      "graphs_v3g"
     ]
   },
   "defaultVariant": "v3",

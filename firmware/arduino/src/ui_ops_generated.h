@@ -9,6 +9,17 @@ enum RectId {
     RECT_FOOTER_BATTERY,
     RECT_FOOTER_IP,
     RECT_FOOTER_WEATHER,
+    RECT_GRAPH_AXIS,
+    RECT_GRAPH_RH_MAX,
+    RECT_GRAPH_RH_MIN,
+    RECT_GRAPH_RH_NOW,
+    RECT_GRAPH_RH_PLOT,
+    RECT_GRAPH_RH_TITLE,
+    RECT_GRAPH_TEMP_MAX,
+    RECT_GRAPH_TEMP_MIN,
+    RECT_GRAPH_TEMP_NOW,
+    RECT_GRAPH_TEMP_PLOT,
+    RECT_GRAPH_TEMP_TITLE,
     RECT_HEADER_BAND_V3,
     RECT_HEADER_NAME,
     RECT_HEADER_NAME_V3,
@@ -57,6 +68,7 @@ enum UiOpKind {
     OP_FILL,
     OP_ICONIN,
     OP_LINE,
+    OP_SPARKLINE,
     OP_TEMPGROUPCENTERED,
     OP_TEXT,
     OP_TEXTCENTEREDIN,
@@ -72,6 +84,7 @@ struct UiOpHeader { uint8_t kind; uint8_t rect; uint8_t font; uint8_t align; int
 static constexpr const char* kVariantNames[] = {
     "v2",
     "v3",
+    "v3g",
 };
 
 static constexpr uint8_t kDefaultVariantId = 1;
@@ -90,6 +103,11 @@ static constexpr const char* kVariant_v3_components[] = {
     "outside_v3",
     "footer_split",
 };
+static constexpr const char* kVariant_v3g_components[] = {
+    "chrome_v3g",
+    "header_v3",
+    "graphs_v3g",
+};
 
 static constexpr int kComponent_chrome_opcount = 6;
 static constexpr int kComponent_header_centered_opcount = 4;
@@ -97,18 +115,22 @@ static constexpr int kComponent_header_opcount = 3;
 static constexpr int kComponent_inside_opcount = 4;
 static constexpr int kComponent_outside_opcount = 6;
 static constexpr int kComponent_footer_split_opcount = 4;
-static constexpr int kComponent_chrome_v3_opcount = 7;
+static constexpr int kComponent_chrome_v3_opcount = 6;
 static constexpr int kComponent_header_v3_opcount = 4;
 static constexpr int kComponent_inside_v3_opcount = 5;
 static constexpr int kComponent_outside_v3_opcount = 7;
 static constexpr int kComponent_footer_v3_opcount = 4;
-static constexpr int kTotalOpCount = 54;
+static constexpr int kComponent_chrome_v3g_opcount = 4;
+static constexpr int kComponent_graphs_v3g_opcount = 14;
+static constexpr int kTotalOpCount = 71;
 
 struct ComponentOps { const UiOpHeader* ops; int count; const char* name; };
 extern const ComponentOps kVariant_v2_ops[];
 extern const int kVariant_v2_ops_count;
 extern const ComponentOps kVariant_v3_ops[];
 extern const int kVariant_v3_ops_count;
+extern const ComponentOps kVariant_v3g_ops[];
+extern const int kVariant_v3g_ops_count;
 extern const ComponentOps* get_variant_ops(uint8_t variantId, int* outCount);
 
 } // namespace ui

@@ -153,6 +153,13 @@ void mqtt_begin() {
       return;
     }
 
+    // Flip the display page (same as pressing BOOT). Payload ignored.
+    if (topic_ends_with(topic, "/cmd/page")) {
+      extern void request_page_flip();
+      request_page_flip();
+      return;
+    }
+
     // Handle status request command
     if (topic_ends_with(topic, "/cmd/status")) {
       extern void publish_device_status();

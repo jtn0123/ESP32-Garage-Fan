@@ -654,6 +654,10 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 s0 = _cxx_string_literal(str(op.get("text", "")))
                 align = 2
                 p3 = 1 if str(op.get("color", "")) == "inverse" else 0
+            elif kind == "sparkline":
+                # s0 = history series key; p0 = 1 for dashed stroke.
+                s0 = _cxx_string_literal(str(op.get("series", "")).strip())
+                p0 = 1 if str(op.get("style", "")) == "dashed" else 0
             elif kind == "iconIn":
                 src = str(op.get("iconFromWeather", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)

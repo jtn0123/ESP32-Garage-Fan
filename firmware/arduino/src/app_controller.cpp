@@ -17,6 +17,9 @@
 #include "state_manager.h"
 #include "metrics_diagnostics.h"
 #include "display_manager.h"
+#if USE_DISPLAY
+#include "display_renderer.h"
+#endif
 #include "crash_handler.h"
 #include "memory_tracking.h"
 #include "mqtt_batcher.h"
@@ -24,11 +27,18 @@
 #include "ota_manager.h"
 #include "sd_store.h"
 #include "logging/logger.h"
+#include "history_ring.h"
 
 // Diagnostic test functions (from diagnostic_test.cpp)
 extern void diagnostic_test_init();
 extern void diagnostic_test_loop();
 extern void show_boot_stage(int stage);
+extern void pixel_flash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms);
+extern void pixel_tick();
+
+// Set from the MQTT cmd/page handler; consumed in app_loop.
+static volatile bool g_page_flip_request = false;
+void request_page_flip() { g_page_flip_request = true; }
 
 // Track wake time for phase management
 static uint32_t g_wake_time_ms = 0;
@@ -178,6 +188,11 @@ void app_setup() {
   g_wake_time_ms = millis();
 
 #if ALWAYS_ON
+  // BOOT (GPIO0) doubles as the page-flip button at runtime. Strapping pin:
+  // only sampled at reset, so a runtime press is safe; INPUT_PULLUP matches its
+  // active-low wiring.
+  pinMode(0, INPUT_PULLUP);
+
   // 80 MHz, not the 240 MHz default. The deep-sleep build races to finish and
   // sleep, but an always-on node runs forever and every milliwatt becomes heat
   // that the BME280 — millimetres away — reads as room temperature. WiFi, SPI
@@ -471,6 +486,22 @@ static void record_sample_to_sd() {
                     get_last_published_inside_rh(), get_last_published_inside_pressureHPa(),
                     bs.voltage, bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0);
 #endif
+
+  // Feed the 24h sparkline ring (display-ready units: F / %). Outside values
+  // only when currently valid; NaN renders as a gap.
+  {
+    const float tin = get_last_published_inside_tempC();
+    OutsideReadings o = net_get_outside();
+    hist_push(
+        isfinite(tin) ? tin * 9.0f / 5.0f + 32.0f : NAN,
+        (o.validTemp && isfinite(o.temperatureC)) ? o.temperatureC * 9.0f / 5.0f + 32.0f : NAN,
+        get_last_published_inside_rh(),
+        (o.validHum && isfinite(o.humidityPct)) ? o.humidityPct : NAN);
+  }
+#if USE_STATUS_PIXEL
+  // Quiet cyan blip: a sample was just taken. Dim and brief on purpose.
+  pixel_flash(0, 18, 18, 120);
+#endif
 }
 
 #if FEATURE_SD_STORAGE && !ALWAYS_ON
@@ -546,19 +577,23 @@ static void maybe_refresh_display() {
       changed = true;
   }
 
-  if (!changed) {
-    Serial.println("Display: no significant change, skipping refresh");
-    return;
-  }
-
   const uint32_t now = millis();
   const uint32_t floor_ms = DISPLAY_MIN_REFRESH_INTERVAL_SEC * 1000UL;
-  if (g_display_drawn_once && (now - g_last_display_ms) < floor_ms) {
-    Serial.printf("Display: change pending, holding off (%lu s of %d s floor elapsed)\n",
-                  (now - g_last_display_ms) / 1000UL, DISPLAY_MIN_REFRESH_INTERVAL_SEC);
+  const bool floor_elapsed = !g_display_drawn_once || (now - g_last_display_ms) >= floor_ms;
+
+  if (!floor_elapsed) {
+    if (changed) {
+      Serial.printf("Display: change pending, holding off (%lu s of %d s floor elapsed)\n",
+                    (now - g_last_display_ms) / 1000UL, DISPLAY_MIN_REFRESH_INTERVAL_SEC);
+    }
     return;
   }
 
+  // At each floor interval the display alternates between the live page and the
+  // 24h graphs page, so every refresh cycle is spent showing something new --
+  // this replaces the old "skip when unchanged" rule, whose purpose (not
+  // burning refreshes on identical frames) the alternation now serves.
+  display_toggle_page();
   run_display_phase();
 
   g_last_display_ms = now;
@@ -589,6 +624,40 @@ void app_loop() {
   }
 
   const uint32_t now = millis();
+
+#if USE_STATUS_PIXEL
+  pixel_tick();
+#endif
+
+#if USE_DISPLAY
+  // BOOT (GPIO0) press = flip page immediately. Debounced edge; the 250 ms
+  // guard also caps how fast a held button can burn e-ink refresh cycles.
+  {
+    static bool s_prev_high = true;
+    static uint32_t s_edge_ms = 0;
+    const bool level = digitalRead(0);
+    if (s_prev_high && !level && (now - s_edge_ms) > 250) {
+      s_edge_ms = now;
+      g_page_flip_request = true;
+    }
+    s_prev_high = level;
+  }
+  if (g_page_flip_request) {
+    g_page_flip_request = false;
+    display_toggle_page();
+#if USE_STATUS_PIXEL
+    // Feedback: blue flash = live page, magenta = graphs page.
+    if (display_current_page() == 0)
+      pixel_flash(0, 0, 60, 250);
+    else
+      pixel_flash(60, 0, 60, 250);
+#endif
+    Serial.printf("[UI] page flip -> %u\n", display_current_page());
+    run_display_phase();
+    g_last_display_ms = now;
+    g_display_drawn_once = true;
+  }
+#endif
 
   if (now - g_last_link_check_ms >= LINK_CHECK_INTERVAL_MS) {
     g_last_link_check_ms = now;

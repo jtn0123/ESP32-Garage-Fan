@@ -34,6 +34,9 @@ typedef void (*DrawFnFwd)();
 
 // Core rendering functions
 void full_refresh();
+// Two-page UI: 0 = live data, 1 = 24h graphs.
+uint8_t display_current_page();
+void display_toggle_page();
 void smoke_full_window_test();
 
 #if USE_UI_SPEC

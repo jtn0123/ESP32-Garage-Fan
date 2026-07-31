@@ -2084,6 +2084,35 @@
           // firmware (firmware/arduino/src/main.cpp).
           if (op.when && !specFieldHas(op.when, data)) continue;
           switch(op.op){
+            case 'sparkline': {
+              // 24h history polyline. Series pairs sharing a rect share a scale
+              // (group = hist_temp_* or hist_rh_*) so in/out are comparable.
+              const r = rects[op.rect]; if (!r) break;
+              const arr = data[op.series]; if (!Array.isArray(arr) || arr.length < 2) break;
+              const groupKeys = String(op.series).startsWith('hist_temp')
+                ? ['hist_temp_in','hist_temp_out'] : ['hist_rh_in','hist_rh_out'];
+              let mn=Infinity, mx=-Infinity;
+              for (const gk of groupKeys){
+                const a = data[gk]; if (!Array.isArray(a)) continue;
+                for (const v of a){ if (isFinite(v)) { if (v<mn) mn=v; if (v>mx) mx=v; } }
+              }
+              if (!isFinite(mn) || mx===mn) { mx = mn+1; }
+              const cap = 288;  // 24h of 5-min samples; 'now' anchors right
+              ctx.strokeStyle='#000'; ctx.lineWidth=1;
+              ctx.setLineDash(op.style==='dashed' ? [2,2] : []);
+              ctx.beginPath();
+              let started=false;
+              for (let i=0;i<arr.length;i++){
+                const v=arr[i]; if (!isFinite(v)) { started=false; continue; }
+                const px = r[0] + (r[2]-1) - (arr.length-1-i)*(r[2]-1)/(cap-1);
+                const py = r[1] + (r[3]-1) - (v-mn)/(mx-mn)*(r[3]-1);
+                if (!started){ ctx.moveTo(px,py); started=true; } else ctx.lineTo(px,py);
+              }
+              ctx.stroke(); ctx.setLineDash([]);
+              // Plot frame
+              ctx.strokeRect(r[0]-1, r[1]-1, r[2]+2, r[3]+2);
+              break;
+            }
             case 'fill': {
               // Solid rect fill (inverted regions). Matches firmware OP_FILL.
               const r = rects[op.rect]; if (!r) break;
@@ -2525,8 +2554,22 @@
     window.drawFromSpec = drawFromSpec;
   }
 
+  const __demoHist = (()=>{
+    const N=288, ti=[], to=[], ri=[], ro=[];
+    for (let i=0;i<N;i++){
+      const t=i/N*2*Math.PI;
+      ti.push(73+1.6*Math.sin(t-2)+0.6*Math.sin(9*t));
+      to.push(72+14*Math.sin(t-2.4));
+      ri.push(36+5*Math.sin(t+0.6));
+      ro.push(60-22*Math.sin(t-2.4));
+    }
+    return {ti,to,ri,ro};
+  })();
   const DEFAULTS = {
     room_name: 'Office',
+    hist_temp_in: __demoHist.ti, hist_temp_out: __demoHist.to,
+    hist_rh_in: __demoHist.ri, hist_rh_out: __demoHist.ro,
+    hist_temp_min: 58, hist_temp_max: 86, hist_rh_min: 31, hist_rh_max: 82,
     time_hhmm: '10:32',
     date_mmmdd: 'Jul 30',
     inside_temp_f: 72.5,

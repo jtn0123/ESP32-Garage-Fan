@@ -49,10 +49,36 @@ void show_boot_stage(int stage) {
   }
   g_status_pixel->show();
 }
+// --- runtime pixel effects ---------------------------------------------------
+// Non-blocking blips: set a color with a deadline, pixel_tick() (called from
+// app_loop) douses it. Used for sample ticks and BOOT-button feedback.
+static uint32_t g_pixel_off_ms = 0;
+
+void pixel_flash(uint8_t r, uint8_t g, uint8_t b, uint16_t ms) {
+  if (!g_status_pixel) {
+    show_boot_stage(0);  // lazily initialises the pixel, leaves it off
+  }
+  if (!g_status_pixel)
+    return;
+  g_status_pixel->setPixelColor(0, r, g, b);
+  g_status_pixel->show();
+  g_pixel_off_ms = millis() + ms;
+}
+
+void pixel_tick() {
+  if (g_pixel_off_ms && g_status_pixel && (int32_t)(millis() - g_pixel_off_ms) >= 0) {
+    g_pixel_off_ms = 0;
+    g_status_pixel->setPixelColor(0, 0, 0, 0);
+    g_status_pixel->show();
+  }
+}
+
 #else
 void show_boot_stage(int stage) {
   // No neopixel available
 }
+void pixel_flash(uint8_t, uint8_t, uint8_t, uint16_t) {}
+void pixel_tick() {}
 #endif
 
 void diagnostic_test_init() {
