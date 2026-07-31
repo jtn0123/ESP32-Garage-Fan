@@ -83,17 +83,8 @@ static inline void draw_in_region(const int rect[4], DrawFnFwd drawFn);
 // Alternative: DEPG0213BN (also SSD1680 family). Select via
 // -DEINK_PANEL_DEPG0213BN=1
 #if USE_DISPLAY
-#ifndef EINK_PANEL_DEPG0213BN
-#define EINK_PANEL_DEPG0213BN 0
-#endif
-#if EINK_PANEL_DEPG0213BN
-GxEPD2_BW<GxEPD2_213_DEPG0213BN, GxEPD2_213_DEPG0213BN::HEIGHT> display(
-    GxEPD2_213_DEPG0213BN(EINK_CS, EINK_DC, EINK_RST, EINK_BUSY));
-#else
-// Prefer the explicit GDEY0213B74 class name for clarity on SSD1680 FeatherWing
-GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display(
-    GxEPD2_213_GDEY0213B74(EINK_CS, EINK_DC, EINK_RST, EINK_BUSY));
-#endif
+#include "display_hw.h"
+DisplayType display(DisplayPanel(EINK_CS, EINK_DC, EINK_RST, EINK_BUSY));
 
 // Now that display exists, provide the implementation using it
 #if USE_UI_SPEC
@@ -357,12 +348,12 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           break;
         }
         case OP_FILL: {
-          // Solid fill of the op's rect; p0=1 selects white. Basis of the
-          // inverted header band and section tabs.
+          // Solid fill of the op's rect; p0: 0 black, 1 white, 2 red accent.
+          // Basis of the inverted header band and section tabs.
           const int* r = rect_ptr_by_id(op.rect);
           if (!r)
             break;
-          gfx.fillRect(r[0], r[1], r[2], r[3], op.p0 ? GxEPD_WHITE : GxEPD_BLACK);
+          gfx.fillRect(r[0], r[1], r[2], r[3], map_op_color(op.p0));
           break;
         }
         case ui::OP_FRAME: {
@@ -370,7 +361,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           const int* r = rect_ptr_by_id(op.rect);
           if (!r)
             break;
-          gfx.drawRect(r[0], r[1], r[2], r[3], GxEPD_BLACK);
+          gfx.drawRect(r[0], r[1], r[2], r[3], map_op_color(op.p0));
           break;
         }
         case ui::OP_LINE: {
@@ -399,8 +390,8 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           int16_t ty = (op.p1 == ui::kNoYOffset) ? 0 : op.p1;
           char out[96];
           spec_expand_template_into(op.s0, &spec_format_field_into, out, sizeof(out));
-          // p3=1: inverse (white) text, drawn over an OP_FILL band.
-          gfx.setTextColor(op.p3 ? GxEPD_WHITE : GxEPD_BLACK);
+          // p3: 0 black, 1 inverse (white, over an OP_FILL band), 2 red accent.
+          gfx.setTextColor(map_op_color(op.p3));
           gfx.setTextSize(1);
           // Handle rect-based positioning for all alignments (LEFT, RIGHT, CENTER)
           if (r && tx == 0) {
@@ -466,7 +457,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
             break;
           char out[96];
           spec_expand_template_into(op.s0, &spec_format_field_into, out, sizeof(out));
-          gfx.setTextColor(op.p3 ? GxEPD_WHITE : GxEPD_BLACK);
+          gfx.setTextColor(map_op_color(op.p3));
           gfx.setTextSize(1);
           int16_t tw = text_width_default_font(out, 1);
           int16_t tx = r[0] + (r[2] - tw) / 2;

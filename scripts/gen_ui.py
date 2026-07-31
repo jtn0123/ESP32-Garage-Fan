@@ -619,13 +619,13 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 p0, p1 = int(frm[0]), int(frm[1])
                 p2, p3 = int(to[0]), int(to[1])
             elif kind == "fill":
-                # Solid fill of the op's rect. p0 = 1 means white (rarely
-                # needed); default black. The rect id carries the geometry.
-                p0 = 1 if str(op.get("color", "black")) == "white" else 0
+                # Solid fill of the op's rect. p0: 0 black (default), 1 white,
+                # 2 red - the tri-color wing's accent, black on mono panels.
+                p0 = {"black": 0, "white": 1, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "frame":
-                # 1px black outline of the op's rect (value chips, legend
-                # boxes). No parameters beyond the rect id.
-                pass
+                # 1px outline of the op's rect (value chips, legend boxes).
+                # p0 carries the same color code as fill (red = accent).
+                p0 = {"black": 0, "white": 1, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "text":
                 # Pass template through; device interprets placeholders like {ip}, {fw_version}
                 txt = str(op.get("text", ""))
@@ -637,8 +637,9 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p1 = int(op.get("y", -32768))
                 except Exception:
                     p0, p1 = 0, -32768
-                # p3 = 1 draws the text inverse (white), for use over a fill.
-                p3 = 1 if str(op.get("color", "")) == "inverse" else 0
+                # p3: 1 draws inverse (white) over a fill; 2 draws the red
+                # accent (black on mono panels).
+                p3 = {"inverse": 1, "red": 2}.get(str(op.get("color", "")), 0)
             elif kind == "timeRight":
                 src = str(op.get("source", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
@@ -663,7 +664,7 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p0 = 0
                 s0 = _cxx_string_literal(str(op.get("text", "")))
                 align = 2
-                p3 = 1 if str(op.get("color", "")) == "inverse" else 0
+                p3 = {"inverse": 1, "red": 2}.get(str(op.get("color", "")), 0)
             elif kind == "sparkline":
                 # s0 = history series key; p0 = 1 for dashed stroke.
                 s0 = _cxx_string_literal(str(op.get("series", "")).strip())

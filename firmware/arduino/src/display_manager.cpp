@@ -19,13 +19,9 @@
 #define EINK_PANEL_DEPG0213BN 0
 #endif
 
-// Display object - will be moved here from main.cpp later
-// For now, we'll access it via extern from main.cpp
-#if EINK_PANEL_DEPG0213BN
-extern GxEPD2_BW<GxEPD2_213_DEPG0213BN, GxEPD2_213_DEPG0213BN::HEIGHT> display;
-#else
-extern GxEPD2_BW<GxEPD2_213_GDEY0213B74, GxEPD2_213_GDEY0213B74::HEIGHT> display;
-#endif
+// Display object lives in main.cpp; the panel/driver pair is selected in
+// display_hw.h so every consumer agrees on the type.
+#include "display_hw.h"
 
 // Constants needed for display operations
 #define HEADER_NAME_Y_ADJ -8

@@ -31,6 +31,20 @@ a redraw needs both a meaningful change in the displayed values *and*
 `DISPLAY_MIN_REFRESH_INTERVAL_SEC` (default 900) to have elapsed. Sampling every
 5 minutes therefore does not mean redrawing every 5 minutes.
 
+## Panel variants
+
+The 2.13" eInk FeatherWing family shares one pinout, so the wings are
+hardware-interchangeable; the driver is a build-time choice (`display_hw.h`):
+
+- **Mono SSD1680** (Adafruit 4195) — the default; flash-free ~300 ms partial
+  refresh every sample.
+- **Tri-color red/black/white** (Adafruit 4814, SSD1680/Z98c) — build the
+  `feather_esp32s2_always_on_3c` env (`DEPLOY_ENV=feather_esp32s2_always_on_3c
+  scripts/deploy.sh`). Know the physics: **every refresh on this panel is a
+  ~15 s full flash and there is no partial mode**, so the firmware skips the
+  per-sample partial update and repaints on the full-refresh cadence only.
+  Spec ops may declare `color: "red"`; mono panels render the same ops black.
+
 ## Build flags
 
 | Flag | Default | Meaning |

@@ -182,7 +182,12 @@ class DualGFX {
   // and vanished: captures showed only the elements drawn by the DUAL_* /
   // draw_icon paths, which is why remote screenshots were missing the frame,
   // header, labels and all small text.
-  static uint16_t mapColor(uint16_t color) { return (color == 0x0000) ? 0 : 1; }
+  // Black AND red (0xF800, the tri-color accent) count as ink in the 1-bit
+  // capture; everything else is white. Without the red case, screenshots of
+  // the tri-color panel would show blank holes where red content renders.
+  static uint16_t mapColor(uint16_t color) {
+    return (color == 0x0000 || color == 0xF800) ? 0 : 1;
+  }
 };
 
 // Global drawing context for screenshot capture

@@ -2165,8 +2165,9 @@
             }
             case 'fill': {
               // Solid rect fill (inverted regions). Matches firmware OP_FILL.
+              // 'red' is the tri-color wing's accent; mono panels draw black.
               const r = rects[op.rect]; if (!r) break;
-              ctx.fillStyle = (op.color === 'white') ? '#fff' : '#000';
+              ctx.fillStyle = (op.color === 'white') ? '#fff' : (op.color === 'red') ? '#cc0000' : '#000';
               ctx.fillRect(r[0], r[1], r[2], r[3]);
               break;
             }
@@ -2174,7 +2175,7 @@
               // 1px outline (value chips). Four fillRects, not strokeRect,
               // so the 1-bit canvas stays free of antialiased grays.
               const r = rects[op.rect]; if (!r) break;
-              ctx.fillStyle = '#000';
+              ctx.fillStyle = (op.color === 'red') ? '#cc0000' : '#000';
               ctx.fillRect(r[0], r[1], r[2], 1);
               ctx.fillRect(r[0], r[1] + r[3] - 1, r[2], 1);
               ctx.fillRect(r[0], r[1], 1, r[3]);
@@ -2226,7 +2227,7 @@
                 // Add 1px padding from top for better appearance
                 const y = (op.y !== undefined) ? (r[1] + op.y) : (r[1] + 1);
                 // Use our text function for tracking
-                text(x, y, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : null);
+                text(x, y, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red') ? '#cc0000' : null);
                 // Export footer metrics for layout tests, keyed by rect
                 if (op.rect === 'FOOTER_BATTERY'){
                   const textW = ctx.measureText(s).width;
@@ -2321,7 +2322,7 @@
               // Center text horizontally in rect (matches firmware behavior)
               const x = r[0] + Math.max(0, Math.floor((r[2]-tw)/2));
               const yTop = (op.yOffset? (r[1]+op.yOffset) : r[1]);
-              text(x, yTop, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : null);
+              text(x, yTop, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red') ? '#cc0000' : null);
               if (raw.includes('IP ')){
                 window.__layoutMetrics.statusLeft.ip = { x, w: tw };
               }

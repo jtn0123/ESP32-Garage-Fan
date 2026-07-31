@@ -50,6 +50,8 @@ Diff any visual change against it.
 
 - `when: "has(<field>)"` skips the op when the field has no live value.
 - `color: "inverse"` draws white — use over a `fill`.
+- `color: "red"` (fill/frame/text/textCenteredIn) draws the tri-color wing's
+  accent; mono panels render it black, so red is safe to author everywhere.
 - Template fields resolve in `spec_format_field()` (firmware,
   `main.cpp`) and the sim's expander. **Adding a new `{field}` means adding it
   in both places** — a missing firmware key renders `--` on the glass while the
