@@ -97,8 +97,12 @@ BOARD_GAP = 11.0            # [DER] 8.5mm socket + 2.54mm male spacer; the
 # straight into the wing frame.
 BME280_FROM_USB = 24.77     # [CAD] mid-board — vent here
 USB_FROM_USB = 0.0          # [CAD] protrudes 1.14mm past the PCB edge
-USB_W = 9.5                 # [CAD] 8.94mm receptacle + clearance
-USB_H = 4.5                 # [EST] ~3.2mm receptacle + boot relief
+# The receptacle is 8.94 x ~3.2mm, but the opening has to swallow a CABLE
+# OVERMOLD, which on a typical USB-C lead is ~11-12 x 6-7mm. Sizing the hole
+# to the receptacle means the plug will not seat.
+USB_W = 12.5                # [DER] cable overmold clearance
+USB_H = 7.5                 # [DER]
+USB_BODY_H = 3.2            # [EST] receptacle height above the PCB
 BOOT_FROM_USB = 20.96       # [CAD] centre of the BOOT tactile switch
 BOOT_FROM_ROW_EDGE = 5.21   # [CAD] from the 16-pin-row long edge
 BOOT_D = 4.0                # poke-hole: the switch faces UP into the board
@@ -124,6 +128,19 @@ TAPER_D = 6.0               # flare depth from front footprint out to the pod
 CORNER_R = 4.0
 VENT_W = 2.5
 VENT_N = 7
+
+# --- assembly ------------------------------------------------------------
+# The wing very nearly fills the front shell, so there is no room for screw
+# bosses in the shell's corners. Instead the bosses live ON the wing's own
+# mounting-hole pattern: a slim post locates the wing, and the boss behind
+# it receives an M2.5 self-tapper driven in from the battery pocket. The
+# pattern sits clear of both the active area and the Feather's outline.
+POST_D = 2.3                # slip fit through the wing's 2.5mm holes
+BOSS_D = 6.0
+BOSS_PILOT_D = 2.1          # M2.5 self-tapping into printed plastic
+SCREW_CLEAR_D = 2.8
+SCREW_HEAD_D = 5.4
+SCREW_HEAD_DEPTH = 2.4
 
 # --- derived --------------------------------------------------------------
 WING_POCKET_D = WING_GLASS_T + WING_PCB_T          # what the pocket captures
@@ -154,23 +171,56 @@ def _rounded_rect(length: float, width: float, radius: float):
 
 
 def _ports(body, half_l: float, half_w: float):
-    """Cut USB-C, microSD and the BOOT poke-hole into the -X wall."""
-    # USB-C, centred across the short axis
-    body -= Pos(-half_l - 1, 0, FEATHER_Z) * Box(
-        WALL + 5, USB_W, USB_H, align=(Align.MIN, Align.CENTER, Align.MIN)
+    """Cut USB-C, microSD and the BOOT poke-hole into the -X wall.
+
+    Z matters here and got it wrong once: the Feather stacks UNDER the wing
+    with its component side facing the display, so everything mounted on it
+    (USB-C, buttons, BME280) lives between FEATHER_Z and the display, i.e.
+    toward -Z. Cutting +Z from FEATHER_Z opens holes into the empty space
+    behind the board instead.
+    """
+    # USB-C: sits on the Feather's top face, so it occupies -Z from there.
+    # Opening is sized for the cable overmold, not the receptacle.
+    body -= Pos(-half_l - 1, 0, FEATHER_Z - USB_BODY_H - (USB_H - USB_BODY_H) / 2) * Box(
+        WALL + 6, USB_W, USB_H, align=(Align.MIN, Align.CENTER, Align.MIN)
     )
-    # microSD, same wall, at the wing's underside
+    # microSD ejects from the wing's underside toward this same wall
     body -= Pos(-half_l - 1, 0, FACE + WING_POCKET_D) * Box(
         WALL + 5 + SD_CLEAR, SD_SLOT_W, SD_SLOT_H,
         align=(Align.MIN, Align.CENTER, Align.MIN),
     )
-    # BOOT poke-hole, aimed at the switch centre inside the board gap
+    # BOOT poke-hole, aimed into the board gap at the switch centre
     boot_y = FEATHER_ROW_EDGE_Y + BOOT_FROM_ROW_EDGE
     body -= (
-        Pos(-half_l - 1, boot_y, FEATHER_Z + 1.5)
+        Pos(-half_l - 1, boot_y, FEATHER_Z - 1.6)
         * Rot(0, 90, 0)
-        * Cylinder(BOOT_D / 2, WALL + 5, align=BOT)
+        * Cylinder(BOOT_D / 2, WALL + 6, align=BOT)
     )
+    return body
+
+
+def _boss_xy():
+    """The wing's mounting-hole pattern — also the case's screw pattern."""
+    return [
+        (sx * WING_HOLE_PITCH_X / 2, sy * WING_HOLE_PITCH_Y / 2)
+        for sx in (-1, 1)
+        for sy in (-1, 1)
+    ]
+
+
+def _add_bosses(body, depth: float):
+    """Locating posts through the wing + screw bosses behind it."""
+    for x, y in _boss_xy():
+        # boss body, behind the wing
+        body += Pos(x, y, FACE + WING_POCKET_D) * Cylinder(
+            BOSS_D / 2, depth - FACE - WING_POCKET_D, align=BOT
+        )
+        # slim post through the wing's own mounting hole
+        body += Pos(x, y, FACE) * Cylinder(POST_D / 2, WING_POCKET_D, align=BOT)
+        # pilot hole for the self-tapper, from the back
+        body -= Pos(x, y, FACE + WING_POCKET_D) * Cylinder(
+            BOSS_PILOT_D / 2, depth - FACE - WING_POCKET_D + 1, align=BOT
+        )
     return body
 
 
@@ -205,6 +255,7 @@ def front_shell():
         DISP_L + 2 * DISP_BLEED, DISP_W + 2 * DISP_BLEED, FACE + 1, align=BOT
     )
 
+    body = _add_bosses(body, FRONT_D)
     body = _ports(body, FRONT_L / 2, FRONT_W / 2)
     body = _vents(body, FRONT_W / 2)
     return body
@@ -235,6 +286,17 @@ def rear_pod():
     body -= Pos(POD_L / 2 - 12, 0, TAPER_D + POD_STANDOFF - 6) * Box(
         14, 9, 7, align=BOT
     )
+    # Screw holes onto the front shell's bosses, driven from inside the
+    # battery pocket (fit the cells last). Counterbored so the heads sit
+    # below the pocket floor and the holder still seats flat.
+    floor_z = POD_D - BH_H
+    for x, y in _boss_xy():
+        body -= Pos(x, y, -1) * Cylinder(
+            SCREW_CLEAR_D / 2, floor_z + 2, align=BOT
+        )
+        body -= Pos(x, y, floor_z - SCREW_HEAD_DEPTH) * Cylinder(
+            SCREW_HEAD_D / 2, SCREW_HEAD_DEPTH + 1, align=BOT
+        )
     return body
 
 
