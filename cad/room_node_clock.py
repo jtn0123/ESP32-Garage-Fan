@@ -4,10 +4,13 @@ Alternative to the battery-behind layout in room_node_case.py. Here the
 2x18650 holder lies flat in a base and the display head stands on it,
 leaning back ~12 degrees. The point is proportion: the head only has to
 be as big as the wing, the base absorbs the holder's extra 17mm of
-length, and the battery mass ends up at the bottom where it makes the
-thing stable instead of tippy.
+length, and the cells end up at the bottom where they make the thing
+stable instead of tippy.
 
     venv/bin/python cad/room_node_clock.py
+
+All dimensions and the port/vent cutting live in room_node_case.py — this
+file is layout only, so the two variants can never drift apart.
 """
 
 from pathlib import Path
@@ -16,8 +19,6 @@ from build123d import (
     Align,
     Axis,
     Box,
-    Cylinder,
-    Plane,
     Pos,
     Rot,
     export_step,
@@ -25,35 +26,31 @@ from build123d import (
     fillet,
 )
 
-from room_node_case import (  # noqa: E402  (shared dimension block)
+from room_node_case import (  # noqa: E402  (shared dimensions + helpers)
     BH_H,
     BH_L,
     BH_W,
-    BOOT_D,
     CAVITY_D,
     CORNER_R,
+    DISP_BLEED,
     DISP_L,
     DISP_OFF_X,
     DISP_OFF_Y,
     DISP_W,
     FACE,
-    FEATHER_Z,
     TOL,
-    USB_H,
-    USB_W,
-    VENT_N,
-    VENT_W,
     WALL,
     WING_L,
-    WING_STACK_T,
+    WING_POCKET_D,
     WING_W,
+    _ports,
+    _vents,
 )
 
 TILT = 12.0            # degrees the head leans back
-BASE_LIP = 3.0         # base extends this far beyond the head footprint
 
 HEAD_L = WING_L + 2 * (WALL + TOL)
-HEAD_W = WING_W + 2 * (WALL + TOL)   # becomes the head's HEIGHT when stood up
+HEAD_W = WING_W + 2 * (WALL + TOL)   # becomes the head's HEIGHT stood up
 HEAD_D = FACE + CAVITY_D
 
 BASE_L = BH_L + 2 * (WALL + TOL)
@@ -65,7 +62,7 @@ OUT = Path(__file__).parent / "out"
 
 
 def head():
-    """Display head: same internals as the case variant, stood upright."""
+    """Display head — same internals as the case variant, stood upright."""
     body = Box(HEAD_L, HEAD_W, HEAD_D, align=BOT)
     body = fillet(body.edges().filter_by(Axis.Z), CORNER_R)
 
@@ -73,34 +70,22 @@ def head():
         HEAD_L - 2 * WALL, HEAD_W - 2 * WALL, CAVITY_D + 1, align=BOT
     )
     body -= Pos(0, 0, FACE) * Box(
-        WING_L + 2 * TOL, WING_W + 2 * TOL, WING_STACK_T, align=BOT
+        WING_L + 2 * TOL, WING_W + 2 * TOL, WING_POCKET_D, align=BOT
     )
     body -= Pos(DISP_OFF_X, DISP_OFF_Y, -0.5) * Box(
-        DISP_L, DISP_W, FACE + 1, align=BOT
+        DISP_L + 2 * DISP_BLEED, DISP_W + 2 * DISP_BLEED, FACE + 1, align=BOT
     )
-    body -= Pos(-HEAD_L / 2 - 1, 0, FEATHER_Z) * Box(
-        WALL + 4, USB_W, USB_H, align=(Align.MIN, Align.CENTER, Align.MIN)
-    )
-    body -= (
-        Pos(-HEAD_L / 2 - 1, 13, FEATHER_Z + 2)
-        * Rot(0, 90, 0)
-        * Cylinder(BOOT_D / 2, WALL + 4, align=BOT)
-    )
-    for sy in (-1, 1):
-        for i in range(VENT_N):
-            x = (i - (VENT_N - 1) / 2) * (VENT_W * 2.6)
-            body -= Pos(x, sy * (HEAD_W / 2), FEATHER_Z - 4) * Box(
-                VENT_W, WALL + 4, 9, align=(Align.CENTER, Align.CENTER, Align.MIN)
-            )
+    body = _ports(body, HEAD_L / 2, HEAD_W / 2)
+    body = _vents(body, HEAD_W / 2)
     return body
 
 
 def base():
-    """Battery base: holder pocket, wire route up to the head."""
+    """Battery base: holder pocket, wire route up into the head."""
     body = Box(BASE_L, BASE_W, BASE_H, align=BOT)
     body = fillet(body.edges().filter_by(Axis.Z), CORNER_R)
 
-    # Holder pocket, loaded from the bottom
+    # Holder pocket, loaded from underneath
     body -= Pos(0, 0, -0.5) * Box(
         BH_L + 2 * TOL, BH_W + 2 * TOL, BH_H + 0.5, align=BOT
     )
@@ -122,9 +107,9 @@ def main() -> None:
     export_stl(b, str(OUT / "clock_base.stl"))
 
     # Stand the head up so the display faces -Y, leaning back by TILT, then
-    # seat it on the base from its own bounding box rather than guessing:
-    # rotation moves the origin somewhere unhelpful and hand-computed offsets
-    # left it floating above the base like a carry handle.
+    # seat it from its own bounding box: rotation puts the origin somewhere
+    # unhelpful, and hand-computed offsets left it floating above the base
+    # like a carry handle.
     stood = Rot(-90 - TILT, 0, 0) * h
     bb = stood.bounding_box()
     stood = Pos(

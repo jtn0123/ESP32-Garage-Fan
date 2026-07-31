@@ -9,16 +9,17 @@ Outputs to cad/out/: front_shell + rear_pod as .step and .stl, plus
 assembly.step with both parts positioned (for looking at, not printing).
 
 FORM
-The awkward fact of this build is that the battery holder (78mm) is much
-wider than the display wing (61.3mm). Sizing one box to the holder buries
-the little 48.6x23.7mm panel in a huge dead bezel. So the case is two
-different footprints: the front shell hugs the wing, and the rear pod
-tapers back and outward to the holder's footprint. The taper reads as
-deliberate (camera body / monitor stand) instead of as a brick, and it
-puts the mass low and behind.
+The battery holder (77.7mm) is much wider than the display wing (61mm),
+so a single-footprint box strands the little 48.6x23.7mm panel in a huge
+dead bezel. Instead the front shell hugs the wing and the rear pod lofts
+outward to the holder's footprint, so the silhouette steps rather than
+reading as one brick. room_node_clock.py is the alternative layout.
 
-Coordinates: X = long axis, Y = short axis, Z = depth into the case with
-the front (display) face at Z=0 and +Z going back.
+FRAME
+Looking AT the display: +X right, +Y up, +Z back into the case. The front
+(display) face is Z=0. The USB-C end of the Feather is at -X, and the
+microSD slot is on that same end — see MICROSD below, it is the single
+most annoying layout constraint in this build.
 """
 
 from pathlib import Path
@@ -28,11 +29,9 @@ from build123d import (
     Axis,
     Box,
     Cylinder,
-    Location,
     Plane,
     Pos,
     Rectangle,
-    RigidJoint,
     Rot,
     export_step,
     export_stl,
@@ -41,45 +40,94 @@ from build123d import (
 )
 
 # ============================================================================
-# DIMENSIONS (mm). Every number is a knob — edit and re-run.
+# DIMENSIONS (mm)
+#
+# [CAD]  = read out of Adafruit's published Eagle .brd files
+# [DS]   = component datasheet
+# [PUB]  = Adafruit product page
+# [EST]  = estimated, verify on hardware before committing to a print
 # ============================================================================
 
-# --- Adafruit 2.13" eInk FeatherWing 4195 (tri-color 4814 is identical) ----
-WING_L = 61.3
-WING_W = 40.2
-WING_STACK_T = 6.7          # PCB + eInk glass
+# --- Adafruit 2.13" eInk FeatherWing 4195 / 4814 (mechanically identical) --
+# The PCB is a "dog-bone": a 31.37mm waist with 2.54mm corner ears carrying
+# the mounting holes. The pocket below uses the bounding box, so the four
+# ears locate the board and the waist simply has air around it.
+WING_L = 60.97              # [CAD] bounding box, long axis
+WING_W = 40.51              # [CAD] bounding box across the mounting ears
+WING_WAIST_W = 31.37        # [CAD] main body width
+WING_GLASS_T = 1.05         # [DS]  eInk glass
+WING_PCB_T = 1.6            # [EST] Adafruit standard
+WING_BACK_T = 1.9           # [EST] microSD socket standing off the back
+WING_STACK_T = 6.7          # [PUB] overall; does not decompose cleanly, see
+#                                   research note — measure before trusting
 
-DISP_L = 48.6               # visible 250x122 active area
-DISP_W = 23.7
-DISP_OFF_X = 0.0            # active-area center vs PCB center (+X right)
-DISP_OFF_Y = 3.0            # (+Y toward top edge, away from header rows)
+# Visible 250x122 active area. [CAD]+[DS]: begins 3.71mm from the USB-C end,
+# ends 8.71mm short of the far end, and is centred across the short axis.
+DISP_L = 48.55
+DISP_W = 23.70
+DISP_FROM_USB_END = 3.71
+DISP_OFF_X = -(WING_L / 2) + DISP_FROM_USB_END + DISP_L / 2   # = -2.5
+DISP_OFF_Y = 0.0            # centred (8.35 vs 8.47mm to the two long edges)
+DISP_BLEED = 1.0            # extra window all round: the glass is adhered,
+#                             not registered to the mounting holes
+
+# Wing mounting holes [CAD]: 2.54mm in from each bounding-box corner
+WING_HOLE_D = 2.5
+WING_HOLE_PITCH_X = 55.88
+WING_HOLE_PITCH_Y = 35.43
+
+# microSD on the wing's underside [CAD]. The slot faces the USB-C end and
+# needs ~3.5mm of clear air beyond the PCB edge to insert/eject a card —
+# which puts card access and USB-C access on the SAME wall.
+SD_SLOT_W = 14.0            # card 11mm + clearance
+SD_SLOT_H = 3.0
+SD_CLEAR = 4.0
 
 # --- Adafruit ESP32-S2 Feather 5303 ---------------------------------------
-FEATHER_PCB_T = 1.6
-BOARD_GAP = 11.0            # wing underside to Feather topside (headers)
-FEATHER_UNDER = 2.5         # JST + solder tails below the Feather
+FEATHER_L = 50.80           # [CAD]
+FEATHER_W = 22.86           # [CAD]
+FEATHER_PCB_T = 1.6         # [EST]
+FEATHER_UNDER = 2.5         # [EST] header pin tails; nothing else is on the
+#                                   bottom side [CAD]
+BOARD_GAP = 11.0            # [DER] 8.5mm socket + 2.54mm male spacer; the
+#                                   1.9mm microSD hangs into this gap fine
 
-USB_W = 10.0                # USB-C opening (connector ~9mm + clearance)
-USB_H = 5.0
-BOOT_D = 4.5                # BOOT button access hole
+# Component positions, measured from the Feather's USB-C end [CAD].
+# The Feather sits flush with the wing at the USB-C end, so these convert
+# straight into the wing frame.
+BME280_FROM_USB = 24.77     # [CAD] mid-board — vent here
+USB_FROM_USB = 0.0          # [CAD] protrudes 1.14mm past the PCB edge
+USB_W = 9.5                 # [CAD] 8.94mm receptacle + clearance
+USB_H = 4.5                 # [EST] ~3.2mm receptacle + boot relief
+BOOT_FROM_USB = 20.96       # [CAD] centre of the BOOT tactile switch
+BOOT_FROM_ROW_EDGE = 5.21   # [CAD] from the 16-pin-row long edge
+BOOT_D = 4.0                # poke-hole: the switch faces UP into the board
+#                             gap and is covered by the wing, so it can only
+#                             be reached with a thin tool through the wall
 
 # --- BH-18650-PC4 dual-18650 holder ---------------------------------------
-BH_L = 78.0
-BH_W = 41.5
-BH_H = 21.5
+# [DS] MPD BK-18650-PC4 drawing; the Amazon clone shares the mould.
+BH_L = 77.70
+BH_W = 40.21
+BH_H = 21.54
+BH_HOLE_PITCH_X = 55.62
+BH_HOLE_PITCH_Y = 19.30
+BH_HOLE_D = 3.2             # [EST] clone's own hole; drawing gives the
+#                                   recommended PCB clearance hole
 
 # --- print / fit ----------------------------------------------------------
 TOL = 0.25                  # XY clearance on pockets (0.4mm nozzle)
 WALL = 2.4                  # shell walls
 FACE = 2.0                  # front/back flat faces
 POD_STANDOFF = 5.0          # air gap between electronics and cells
-TAPER_D = 6.0               # depth of the flare from front footprint to pod
+TAPER_D = 6.0               # flare depth from front footprint out to the pod
 CORNER_R = 4.0
-VENT_W = 2.5                # vent slot width
-VENT_N = 7                  # slots per side
+VENT_W = 2.5
+VENT_N = 7
 
 # --- derived --------------------------------------------------------------
-CAVITY_D = WING_STACK_T + BOARD_GAP + FEATHER_PCB_T + FEATHER_UNDER
+WING_POCKET_D = WING_GLASS_T + WING_PCB_T          # what the pocket captures
+CAVITY_D = WING_POCKET_D + BOARD_GAP + FEATHER_PCB_T + FEATHER_UNDER
 FRONT_L = WING_L + 2 * (WALL + TOL)
 FRONT_W = WING_W + 2 * (WALL + TOL)
 FRONT_D = FACE + CAVITY_D
@@ -88,7 +136,13 @@ POD_W = BH_W + 2 * (WALL + TOL)
 POD_BODY_D = FACE + POD_STANDOFF + BH_H
 POD_D = TAPER_D + POD_BODY_D
 
-FEATHER_Z = FACE + WING_STACK_T + BOARD_GAP   # Feather PCB top, for ports
+# Z of the Feather's PCB top face, used to place every port
+FEATHER_Z = FACE + WING_POCKET_D + BOARD_GAP
+# X of the wing's USB-C end edge, and the conversion for Feather features
+USB_END_X = -WING_L / 2
+# Y of the Feather's 16-pin-row long edge in the wing frame: the Feather is
+# centred across the wing's short axis
+FEATHER_ROW_EDGE_Y = -FEATHER_W / 2
 
 BOT = (Align.CENTER, Align.CENTER, Align.MIN)
 OUT = Path(__file__).parent / "out"
@@ -97,6 +151,39 @@ OUT = Path(__file__).parent / "out"
 def _rounded_rect(length: float, width: float, radius: float):
     """Rounded rectangle sketch, for lofting the taper."""
     return fillet(Rectangle(length, width).vertices(), radius)
+
+
+def _ports(body, half_l: float, half_w: float):
+    """Cut USB-C, microSD and the BOOT poke-hole into the -X wall."""
+    # USB-C, centred across the short axis
+    body -= Pos(-half_l - 1, 0, FEATHER_Z) * Box(
+        WALL + 5, USB_W, USB_H, align=(Align.MIN, Align.CENTER, Align.MIN)
+    )
+    # microSD, same wall, at the wing's underside
+    body -= Pos(-half_l - 1, 0, FACE + WING_POCKET_D) * Box(
+        WALL + 5 + SD_CLEAR, SD_SLOT_W, SD_SLOT_H,
+        align=(Align.MIN, Align.CENTER, Align.MIN),
+    )
+    # BOOT poke-hole, aimed at the switch centre inside the board gap
+    boot_y = FEATHER_ROW_EDGE_Y + BOOT_FROM_ROW_EDGE
+    body -= (
+        Pos(-half_l - 1, boot_y, FEATHER_Z + 1.5)
+        * Rot(0, 90, 0)
+        * Cylinder(BOOT_D / 2, WALL + 5, align=BOT)
+    )
+    return body
+
+
+def _vents(body, half_w: float):
+    """Slots on both long walls, centred on the BME280."""
+    bme_x = USB_END_X + BME280_FROM_USB
+    for sy in (-1, 1):
+        for i in range(VENT_N):
+            x = bme_x + (i - (VENT_N - 1) / 2) * (VENT_W * 2.6)
+            body -= Pos(x, sy * half_w, FEATHER_Z - 4) * Box(
+                VENT_W, WALL + 4, 9, align=(Align.CENTER, Align.CENTER, Align.MIN)
+            )
+    return body
 
 
 def front_shell():
@@ -108,43 +195,23 @@ def front_shell():
     body -= Pos(0, 0, FACE) * Box(
         FRONT_L - 2 * WALL, FRONT_W - 2 * WALL, CAVITY_D + 1, align=BOT
     )
-
-    # Wing pocket: the wing drops in glass-first against the front face
+    # Wing pocket: the wing drops in glass-first against the front face.
+    # Bounding box, so the four corner ears locate it.
     body -= Pos(0, 0, FACE) * Box(
-        WING_L + 2 * TOL, WING_W + 2 * TOL, WING_STACK_T, align=BOT
+        WING_L + 2 * TOL, WING_W + 2 * TOL, WING_POCKET_D, align=BOT
     )
-
-    # Display window through the front face
+    # Display window
     body -= Pos(DISP_OFF_X, DISP_OFF_Y, -0.5) * Box(
-        DISP_L, DISP_W, FACE + 1, align=BOT
+        DISP_L + 2 * DISP_BLEED, DISP_W + 2 * DISP_BLEED, FACE + 1, align=BOT
     )
 
-    # USB-C on the -X wall at the Feather's board level
-    body -= Pos(-FRONT_L / 2 - 1, 0, FEATHER_Z) * Box(
-        WALL + 4, USB_W, USB_H, align=(Align.MIN, Align.CENTER, Align.MIN)
-    )
-
-    # BOOT button access, same wall, offset in Y
-    body -= (
-        Pos(-FRONT_L / 2 - 1, 13, FEATHER_Z + 2)
-        * Rot(0, 90, 0)
-        * Cylinder(BOOT_D / 2, WALL + 4, align=BOT)
-    )
-
-    # Side vents for the BME280, both long walls at board level
-    for sy in (-1, 1):
-        for i in range(VENT_N):
-            x = (i - (VENT_N - 1) / 2) * (VENT_W * 2.6)
-            body -= Pos(x, sy * (FRONT_W / 2), FEATHER_Z - 4) * Box(
-                VENT_W, WALL + 4, 9, align=(Align.CENTER, Align.CENTER, Align.MIN)
-            )
-
+    body = _ports(body, FRONT_L / 2, FRONT_W / 2)
+    body = _vents(body, FRONT_W / 2)
     return body
 
 
 def rear_pod():
     """Battery pod: flares from the front footprint out to the holder's."""
-    # Taper section: front footprint -> pod footprint
     taper = loft(
         [
             Plane.XY * _rounded_rect(FRONT_L, FRONT_W, CORNER_R),
@@ -158,14 +225,16 @@ def rear_pod():
     body -= Pos(0, 0, POD_D - BH_H) * Box(
         BH_L + 2 * TOL, BH_W + 2 * TOL, BH_H + 1, align=BOT
     )
-
     # Air-gap windows through the standoff shelf (thermal break + weight)
     for i in range(3):
         x = (i - 1) * (POD_L * 0.26)
         body -= Pos(x, 0, -0.5) * Box(
             POD_L * 0.17, POD_W - 2 * WALL - 8, TAPER_D + POD_STANDOFF, align=BOT
         )
-
+    # Wire pass-through from the cells to the electronics bay
+    body -= Pos(POD_L / 2 - 12, 0, TAPER_D + POD_STANDOFF - 6) * Box(
+        14, 9, 7, align=BOT
+    )
     return body
 
 
@@ -185,9 +254,11 @@ def main() -> None:
 
     print(f"front face {FRONT_L:.1f} x {FRONT_W:.1f} mm  ({FRONT_D:.1f} deep)")
     print(f"rear pod   {POD_L:.1f} x {POD_W:.1f} mm  ({POD_D:.1f} deep)")
-    print(f"total depth {FRONT_D + POD_D:.1f} mm")
-    bez_x = (FRONT_L - DISP_L) / 2
-    print(f"bezel      {bez_x:.1f} mm sides")
+    print(f"total      {FRONT_D + POD_D:.1f} mm deep")
+    print(f"window     {DISP_L + 2 * DISP_BLEED:.1f} x {DISP_W + 2 * DISP_BLEED:.1f}"
+          f" at x={DISP_OFF_X:+.1f}")
+    print(f"bezel      {(FRONT_L - DISP_L) / 2 - DISP_BLEED:.1f} / "
+          f"{(FRONT_W - DISP_W) / 2 - DISP_BLEED:.1f} mm")
 
 
 if __name__ == "__main__":
