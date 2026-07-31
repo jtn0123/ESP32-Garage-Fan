@@ -5,6 +5,10 @@ import time
 
 import pytest
 
+# Requires a live MQTT broker (127.0.0.1:1883 by default; MQTT_HOST/MQTT_PORT
+# override). CI runs these in the mqtt-itest job; locally: `mosquitto -p 1883 -d`.
+pytestmark = pytest.mark.integration
+
 from scripts.test_mqtt_integration import (
     MqttTestClient,
     SensorSpec,

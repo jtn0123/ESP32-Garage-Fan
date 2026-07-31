@@ -358,6 +358,12 @@ jobs:
       - name: Simulate HA birth
         run: mosquitto_pub -h 127.0.0.1 -t homeassistant/status -m online
 
+      # The integration-marked pytest files (mqtt_birth, ha_automation
+      # alignment) need this broker; running them here keeps them a gate
+      # instead of a local-only skip.
+      - name: Run integration-marked pytests
+        run: python -m pytest tests -m integration -q
+
       - name: Run MQTT integration script
         env:
           MQTT_HOST: 127.0.0.1

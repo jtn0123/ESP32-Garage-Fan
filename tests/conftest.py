@@ -59,3 +59,32 @@ def mosquitto_broker():
                 proc.kill()
             except Exception:
                 pass
+
+
+def _default_broker_reachable() -> bool:
+    import socket
+
+    host = os.environ.get("MQTT_HOST", "127.0.0.1")
+    port = int(os.environ.get("MQTT_PORT", "1883"))
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip integration-marked tests when no broker is reachable.
+
+    These are not abandoned: the mqtt-itest CI job provisions mosquitto and
+    runs `pytest -m integration`, so they gate every PR there. Locally,
+    `mosquitto -p 1883 -d` (brew install mosquitto) makes them run.
+    """
+    if _default_broker_reachable():
+        return
+    skip = pytest.mark.skip(
+        reason="needs an MQTT broker (start one: `mosquitto -p 1883 -d`); CI covers this in mqtt-itest"
+    )
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip)
