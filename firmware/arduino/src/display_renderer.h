@@ -51,7 +51,9 @@ const int* rect_ptr_by_id(uint8_t rid);
 // Component drawing functions
 void draw_header_time(const char* time_str);
 void draw_status_line(const BatteryStatus& bs, const char* ip_cstr);
-void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h, const char* condition);
+// color: GxEPD ink for the glyph (default black; red = tri-color accent).
+void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h, const char* condition,
+                                 uint16_t color = 0x0000);
 void draw_weather_icon_region_at_from_outside(int16_t x, int16_t y, int16_t w, int16_t h,
                                               const OutsideReadings& outh);
 
@@ -66,7 +68,9 @@ void draw_in_region(const int rect[4], DrawFnFwd drawFn);
 
 // Text drawing helpers
 void draw_temp_number_and_units(const int r[4], const char* t);
-void draw_temp_number_and_units_direct(int16_t x, int16_t y, int16_t w, int16_t h, const char* t);
+// color: GxEPD ink for digits + units (default black; red = tri-color accent).
+void draw_temp_number_and_units_direct(int16_t x, int16_t y, int16_t w, int16_t h, const char* t,
+                                       uint16_t color = 0x0000);
 void draw_right_aligned_text_in_rect(const int rect[4], const char* text, int16_t text_width);
 
 // Value drawing functions

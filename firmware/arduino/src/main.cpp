@@ -339,7 +339,8 @@ void draw_from_spec_full_impl(uint8_t variantId) {
             const int16_t cy =
                 static_cast<int16_t>(y0 + (hgt - 1) - (v - mn) / (mx - mn) * (hgt - 1));
             if (have_prev && (!op.p0 || (i % 4) < 2)) {
-              gfx.drawLine(px, py, cx, cy, GxEPD_BLACK);
+              // p1: line color code (red accent on tri-color, black on mono)
+              gfx.drawLine(px, py, cx, cy, map_op_color(op.p1));
             }
             px = cx;
             py = cy;
@@ -437,7 +438,9 @@ void draw_from_spec_full_impl(uint8_t variantId) {
             }
           }
           // Use direct draw (no displayWindow call) during full refresh
-          draw_temp_number_and_units_direct(r[0], r[1], r[2], r[3], temp_buf);
+          // p3: digit color code (red accent on tri-color, black on mono)
+          draw_temp_number_and_units_direct(r[0], r[1], r[2], r[3], temp_buf,
+                                            map_op_color(op.p3));
           break;
         }
         case OP_ICONIN: {
@@ -446,7 +449,8 @@ void draw_from_spec_full_impl(uint8_t variantId) {
             break;
           OutsideReadings o = net_get_outside();
           if (o.validWeather && o.weather[0]) {
-            draw_weather_icon_region_at(r[0], r[1], r[2], r[3], o.weather);
+            // p3: icon ink color code (red accent on tri-color, black on mono)
+            draw_weather_icon_region_at(r[0], r[1], r[2], r[3], o.weather, map_op_color(op.p3));
           }
           break;
         }

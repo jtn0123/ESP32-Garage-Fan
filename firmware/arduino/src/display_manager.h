@@ -36,7 +36,6 @@ void draw_values(const char* in_temp_f, const char* in_rh, const char* out_temp_
                  const char* in_pressure_str, const char* out_pressure_str);
 
 // Weather icon functions
-void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h, const char* weather);
 void draw_weather_icon_region_at_from_outside(int16_t x, int16_t y, int16_t w, int16_t h,
                                               const OutsideReadings& o);
 

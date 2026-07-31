@@ -111,7 +111,7 @@ static constexpr const char* kVariant_v3_components[] = {
 };
 static constexpr const char* kVariant_v3g_components[] = {
     "chrome_v3g",
-    "header_v3",
+    "header_v3g",
     "graphs_v3g",
 };
 
@@ -126,7 +126,8 @@ static constexpr int kComponent_inside_v3_opcount = 5;
 static constexpr int kComponent_outside_v3_opcount = 7;
 static constexpr int kComponent_chrome_v3g_opcount = 4;
 static constexpr int kComponent_graphs_v3g_opcount = 20;
-static constexpr int kTotalOpCount = 70;
+static constexpr int kComponent_header_v3g_opcount = 4;
+static constexpr int kTotalOpCount = 74;
 
 struct ComponentOps { const UiOpHeader* ops; int count; const char* name; };
 extern const ComponentOps kVariant_v2_ops[];

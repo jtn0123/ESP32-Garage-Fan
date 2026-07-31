@@ -72,12 +72,15 @@ def test_canvas_is_binary_after_draw():
             page.goto(f"http://127.0.0.1:{port}/sim/index.html", wait_until="load")
             page.wait_for_timeout(300)
 
-            # Sample a small grid across the canvas to ensure only 0 or 255 per channel
+            # Sample a small grid: every pixel must be one of the panel's three
+            # inks - white, black, or the tri-color red (204,0,0). Anything
+            # else means antialiased grays leaked through the quantizer.
             grid = [(x, y) for x in range(0, 250, 25) for y in range(0, 122, 12)]
             for x, y in grid:
                 r, g, b, a = page.evaluate(_CANVAS_RGBA_JS, [x, y])
-                assert r in (0, 255) and g in (0, 255) and b in (0, 255)
-                assert r == g == b
+                assert (r, g, b) in ((0, 0, 0), (255, 255, 255), (204, 0, 0)), (
+                    f"non-ink pixel {(r, g, b)} at {(x, y)}"
+                )
             browser.close()
     finally:
         server.terminate()
@@ -213,10 +216,11 @@ def test_header_time_right_aligned_and_name_truncated():
                     break
             assert any_glyph
             # Just left of the stamp's rect must be solid band (no glyph spill),
-            # confirming the alignment gap — black under the inverted header.
+            # confirming the alignment gap — band ink under the inverted header
+            # (black, or red on the tri-color design; mono renders red black).
             hx, hy, hw, hh = time_metrics["rt"]
             r0, g0, b0, a0 = page.evaluate(_CANVAS_RGBA_JS, [hx - 2, hy + 2])
-            assert (r0, g0, b0) == (0, 0, 0)
+            assert (r0, g0, b0) in ((0, 0, 0), (204, 0, 0))
             browser.close()
     finally:
         server.terminate()

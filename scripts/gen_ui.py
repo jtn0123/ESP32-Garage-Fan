@@ -637,9 +637,11 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p1 = int(op.get("y", -32768))
                 except Exception:
                     p0, p1 = 0, -32768
-                # p3: 1 draws inverse (white) over a fill; 2 draws the red
-                # accent (black on mono panels).
-                p3 = {"inverse": 1, "red": 2}.get(str(op.get("color", "")), 0)
+                # p3: 1 = inverse (white) over a fill; 2 = red accent (black
+                # on mono); 3 = red-inverse (red on tri-color, white on mono -
+                # for red text over dark fills, where a black fallback would
+                # vanish into the background).
+                p3 = {"inverse": 1, "red": 2, "red-inverse": 3}.get(str(op.get("color", "")), 0)
             elif kind == "timeRight":
                 src = str(op.get("source", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
@@ -657,6 +659,8 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 val = str(op.get("value", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(val)
                 align = 2
+                # p3 = digit color code (0 black, 2 red accent - black on mono)
+                p3 = {"black": 0, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "textCenteredIn":
                 try:
                     p0 = int(op.get("yOffset", 0))
@@ -664,14 +668,18 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p0 = 0
                 s0 = _cxx_string_literal(str(op.get("text", "")))
                 align = 2
-                p3 = {"inverse": 1, "red": 2}.get(str(op.get("color", "")), 0)
+                p3 = {"inverse": 1, "red": 2, "red-inverse": 3}.get(str(op.get("color", "")), 0)
             elif kind == "sparkline":
-                # s0 = history series key; p0 = 1 for dashed stroke.
+                # s0 = history series key; p0 = 1 for dashed stroke; p1 =
+                # line color code (0 black, 2 red accent - black on mono).
                 s0 = _cxx_string_literal(str(op.get("series", "")).strip())
                 p0 = 1 if str(op.get("style", "")) == "dashed" else 0
+                p1 = {"black": 0, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "iconIn":
                 src = str(op.get("iconFromWeather", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
+                # p3 = glyph color code (0 black, 2 red accent - black on mono)
+                p3 = {"black": 0, "red": 2}.get(str(op.get("color", "black")), 0)
             elif kind == "shortCondition":
                 try:
                     p0 = int(op.get("xOffset", 0))

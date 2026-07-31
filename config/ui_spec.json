@@ -646,7 +646,8 @@
     "header_v3": [
       {
         "op": "fill",
-        "rect": "HEADER_BAND_V3"
+        "rect": "HEADER_BAND_V3",
+        "color": "red"
       },
       {
         "op": "text",
@@ -690,7 +691,8 @@
       {
         "op": "tempGroupCentered",
         "rect": "INSIDE_TEMP_V3",
-        "value": "{inside_temp_f}"
+        "value": "{inside_temp_f}",
+        "color": "red"
       },
       {
         "op": "text",
@@ -724,12 +726,14 @@
       {
         "op": "tempGroupCentered",
         "rect": "OUT_TEMP_V3",
-        "value": "{outside_temp_f}"
+        "value": "{outside_temp_f}",
+        "color": "red"
       },
       {
         "op": "iconIn",
         "rect": "WEATHER_ICON",
-        "iconFromWeather": "{weather}"
+        "iconFromWeather": "{weather}",
+        "color": "red"
       },
       {
         "op": "text",
@@ -820,7 +824,7 @@
         "yOffset": 3,
         "font": "small",
         "text": "IN {inside_temp_f}",
-        "color": "inverse"
+        "color": "red-inverse"
       },
       {
         "op": "frame",
@@ -831,19 +835,22 @@
         "rect": "GRAPH_TEMP_OUT_CHIP",
         "yOffset": 3,
         "font": "small",
-        "text": "OUT {outside_temp_f}"
+        "text": "OUT {outside_temp_f}",
+        "color": "red"
       },
       {
         "op": "sparkline",
         "rect": "GRAPH_TEMP_PLOT",
         "series": "hist_temp_in",
-        "style": "solid"
+        "style": "solid",
+        "color": "red"
       },
       {
         "op": "sparkline",
         "rect": "GRAPH_TEMP_PLOT",
         "series": "hist_temp_out",
-        "style": "dashed"
+        "style": "dashed",
+        "color": "red"
       },
       {
         "op": "text",
@@ -876,7 +883,7 @@
         "yOffset": 3,
         "font": "small",
         "text": "IN {inside_hum_pct}",
-        "color": "inverse"
+        "color": "red-inverse"
       },
       {
         "op": "frame",
@@ -887,19 +894,22 @@
         "rect": "GRAPH_RH_OUT_CHIP",
         "yOffset": 3,
         "font": "small",
-        "text": "OUT {outside_hum_pct}"
+        "text": "OUT {outside_hum_pct}",
+        "color": "red"
       },
       {
         "op": "sparkline",
         "rect": "GRAPH_RH_PLOT",
         "series": "hist_rh_in",
-        "style": "solid"
+        "style": "solid",
+        "color": "red"
       },
       {
         "op": "sparkline",
         "rect": "GRAPH_RH_PLOT",
         "series": "hist_rh_out",
-        "style": "dashed"
+        "style": "dashed",
+        "color": "red"
       },
       {
         "op": "text",
@@ -929,6 +939,37 @@
         "align": "right",
         "text": "now"
       }
+    ],
+    "header_v3g": [
+      {
+        "op": "fill",
+        "rect": "HEADER_BAND_V3"
+      },
+      {
+        "op": "text",
+        "rect": "HEADER_NAME_V3",
+        "font": "label",
+        "align": "left",
+        "text": "{room_name}",
+        "truncate": "ellipsis",
+        "color": "inverse"
+      },
+      {
+        "op": "textCenteredIn",
+        "rect": "HEADER_UPDATED_V3",
+        "yOffset": 1,
+        "font": "time",
+        "text": "{date_mmmdd} {time_hhmm}",
+        "color": "inverse"
+      },
+      {
+        "op": "text",
+        "rect": "HEADER_VERSION_V3",
+        "font": "time",
+        "align": "right",
+        "text": "v{fw_version}",
+        "color": "inverse"
+      }
     ]
   },
   "variants": {
@@ -948,7 +989,7 @@
     ],
     "v3g": [
       "chrome_v3g",
-      "header_v3",
+      "header_v3g",
       "graphs_v3g"
     ]
   },

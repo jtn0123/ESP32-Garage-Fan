@@ -47,15 +47,20 @@ extern DisplayType display;
 // 15 s wave, which would make every 5-minute sample a screen-wide flash.
 constexpr bool kDisplayHasFastPartial = DisplayPanel::hasFastPartialUpdate;
 
-// Spec op color codes as emitted by gen_ui.py: 0 black, 1 white, 2 red.
+// Spec op color codes as emitted by gen_ui.py: 0 black, 1 white, 2 red,
+// 3 red-inverse (red over a dark fill; mono must fall back WHITE, because a
+// black fallback would vanish into the fill it sits on).
 inline uint16_t map_op_color(int code) {
   if (code == 1)
     return GxEPD_WHITE;
-  if (code == 2)
 #if EINK_TRICOLOR
+  if (code == 2 || code == 3)
     return GxEPD_RED;
 #else
-    return GxEPD_BLACK;  // mono fallback: accents render as ink
+  if (code == 2)
+    return GxEPD_BLACK;  // red-on-white accent: mono renders ink
+  if (code == 3)
+    return GxEPD_WHITE;  // red-on-dark accent: mono renders knockout
 #endif
   return GxEPD_BLACK;
 }

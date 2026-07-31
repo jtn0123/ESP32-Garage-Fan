@@ -50,8 +50,15 @@ Diff any visual change against it.
 
 - `when: "has(<field>)"` skips the op when the field has no live value.
 - `color: "inverse"` draws white — use over a `fill`.
-- `color: "red"` (fill/frame/text/textCenteredIn) draws the tri-color wing's
-  accent; mono panels render it black, so red is safe to author everywhere.
+- `color: "red"` (fill/frame/text/textCenteredIn/sparkline/iconIn/
+  tempGroupCentered) draws the tri-color wing's accent; mono panels render it
+  black, so red-on-white is safe to author everywhere.
+- `color: "red-inverse"` (text/textCenteredIn) is for red text over a dark
+  fill: red on tri-color, **white** on mono — a plain red would fall back to
+  black and vanish into the fill (this happened; see fw 1.21→1.22).
+- Owner-approved tri-color design: `docs/ui/v3_tricolor_reference.png` and
+  `v3g_tricolor_reference.png` (red crown + red digits + red icon on the data
+  page; black crown + red lines + red chips on the graphs page).
 - Template fields resolve in `spec_format_field()` (firmware,
   `main.cpp`) and the sim's expander. **Adding a new `{field}` means adding it
   in both places** — a missing firmware key renders `--` on the glass while the

@@ -162,8 +162,9 @@ void draw_temp_number_and_units(const int r[4], const char* t) {
 }
 
 // Direct temperature drawing (without region clearing)
-void draw_temp_number_and_units_direct(int16_t x, int16_t y, int16_t w, int16_t h, const char* t) {
-  DUAL_SET_TEXT_COLOR(GxEPD_BLACK);
+void draw_temp_number_and_units_direct(int16_t x, int16_t y, int16_t w, int16_t h, const char* t,
+                                       uint16_t color) {
+  DUAL_SET_TEXT_COLOR(color);
   // Tall rects (v3) get size-3 digits (21 px), matching the sim's 22 px "big"
   // font; the v2 rects keep the size-2 look they were tuned for.
   const uint8_t ts = (h >= 32) ? 3 : 2;
@@ -205,7 +206,7 @@ void draw_status_line(const BatteryStatus& bs, const char* ip_cstr) {
 
 // Draw weather icon based on condition string
 void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h,
-                                 const char* condition) {
+                                 const char* condition, uint16_t color) {
   if (!condition)
     return;
 
@@ -222,7 +223,7 @@ void draw_weather_icon_region_at(int16_t x, int16_t y, int16_t w, int16_t h,
     icon_y = y;  // Don't go above region
 
   // Draw the icon to display
-  draw_icon(display, icon_x, icon_y, iconId, GxEPD_BLACK);
+  draw_icon(display, icon_x, icon_y, iconId, color);
 
   // Also draw to screenshot canvas if context is set
   DualGFX* ctx = get_dual_gfx_context();

@@ -1792,6 +1792,13 @@
     const d = img.data;
     for (let i=0;i<d.length;i+=4){
       const r=d[i], g=d[i+1], b=d[i+2];
+      // Tri-color aware: the panel has three inks, so clearly-red pixels snap
+      // to the red ink (#cc0000) instead of being crushed by the luminance
+      // threshold; everything else quantizes black/white as before.
+      if (r > 120 && r > g * 2 && r > b * 2){
+        d[i]=204; d[i+1]=0; d[i+2]=0; d[i+3]=255;
+        continue;
+      }
       const y = 0.2126*r + 0.7152*g + 0.0722*b;
       const v = y < THRESH ? 0 : 255;
       d[i]=d[i+1]=d[i+2]=v;
@@ -2148,7 +2155,7 @@
               }
               if (!isFinite(mn) || mx===mn) { mx = mn+1; }
               const cap = 288;  // 24h of 5-min samples; 'now' anchors right
-              ctx.strokeStyle='#000'; ctx.lineWidth=1;
+              ctx.strokeStyle = (op.color === 'red') ? '#cc0000' : '#000'; ctx.lineWidth=1;
               ctx.setLineDash(op.style==='dashed' ? [2,2] : []);
               ctx.beginPath();
               let started=false;
@@ -2159,7 +2166,9 @@
                 if (!started){ ctx.moveTo(px,py); started=true; } else ctx.lineTo(px,py);
               }
               ctx.stroke(); ctx.setLineDash([]);
-              // Plot frame
+              // Plot frame stays black regardless of the series' line color,
+              // matching the device (its frame is hard-coded GxEPD_BLACK).
+              ctx.strokeStyle = '#000';
               ctx.strokeRect(r[0]-1, r[1]-1, r[2]+2, r[3]+2);
               break;
             }
@@ -2227,7 +2236,7 @@
                 // Add 1px padding from top for better appearance
                 const y = (op.y !== undefined) ? (r[1] + op.y) : (r[1] + 1);
                 // Use our text function for tracking
-                text(x, y, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red') ? '#cc0000' : null);
+                text(x, y, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red' || op.color === 'red-inverse') ? '#cc0000' : null);
                 // Export footer metrics for layout tests, keyed by rect
                 if (op.rect === 'FOOTER_BATTERY'){
                   const textW = ctx.measureText(s).width;
@@ -2302,10 +2311,12 @@
               const totalW = Math.min(Math.max(0, r[2]-2), tw + unitsW);
               const left = Math.round(r[0] + Math.max(0, Math.floor((r[2] - totalW)/2)));
               const yTop = Math.round(r[1] + Math.max(0, Math.floor(((r[3]||28) - fontSize) / 2)));
-              text(left, yTop, s, fontSize, 'bold', op.rect);
+              // color:"red" renders the digits + units in the tri-color accent
+              const digitColor = (op.color === 'red') ? '#cc0000' : null;
+              text(left, yTop, s, fontSize, 'bold', op.rect, digitColor);
               const unitSize = 12, unitYOffset = 3;
-              text(left + tw + 2, yTop + unitYOffset, '°', unitSize);
-              text(left + tw + 8, yTop + unitYOffset, 'F', unitSize);
+              text(left + tw + 2, yTop + unitYOffset, '°', unitSize, 'normal', undefined, digitColor);
+              text(left + tw + 8, yTop + unitYOffset, 'F', unitSize, 'normal', undefined, digitColor);
               const key = field.startsWith('inside') ? 'inside'
                         : (field.startsWith('outside') ? 'outside' : null);
               if (key){ window.__tempMetrics[key] = { rect: { x: r[0], y: r[1], w: r[2], h: (r[3]||0) }, contentLeft: left, totalW: (tw + unitsW) }; }
@@ -2322,7 +2333,7 @@
               // Center text horizontally in rect (matches firmware behavior)
               const x = r[0] + Math.max(0, Math.floor((r[2]-tw)/2));
               const yTop = (op.yOffset? (r[1]+op.yOffset) : r[1]);
-              text(x, yTop, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red') ? '#cc0000' : null);
+              text(x, yTop, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : (op.color === 'red' || op.color === 'red-inverse') ? '#cc0000' : null);
               if (raw.includes('IP ')){
                 window.__layoutMetrics.statusLeft.ip = { x, w: tw };
               }
@@ -2364,6 +2375,18 @@
                 if (!drewSvg) drawWeatherGlyph(category, startX, startY, iconW, iconH);
               }
               ctx.restore();
+              if (op.color === 'red'){
+                // Recolor the glyph's dark pixels to the red ink, mirroring the
+                // device passing map_op_color(p3) into draw_icon().
+                const img = ctx.getImageData(barX, barY, barW, barH);
+                const d = img.data;
+                for (let i = 0; i < d.length; i += 4){
+                  if (d[i] < 128 && d[i+1] < 128 && d[i+2] < 128){
+                    d[i] = 204; d[i+1] = 0; d[i+2] = 0;
+                  }
+                }
+                ctx.putImageData(img, barX, barY);
+              }
               break;
             }
             case 'batteryGlyph': {
