@@ -407,44 +407,14 @@ void draw_values(const char* in_temp_f, const char* in_rh, const char* out_temp_
 }
 
 #if USE_UI_SPEC
-// Utility to map RectId->rect pointer
+// Map RectId -> rect geometry via the generated table. This used to be a
+// hand-maintained switch that silently returned nullptr for any rect added
+// after it was written — every op targeting a v3 rect drew at (0,0) or not at
+// all on the device while the sim rendered perfectly.
 const int* rect_ptr_by_id(uint8_t rid) {
-  switch (rid) {
-    case ui::RECT_HEADER_NAME:
-      return HEADER_NAME;
-    case ui::RECT_HEADER_TIME_CENTER:
-      return HEADER_TIME_CENTER;
-    case ui::RECT_HEADER_VERSION:
-      return HEADER_VERSION;
-    case ui::RECT_INSIDE_LABEL:
-      return INSIDE_LABEL;
-    case ui::RECT_INSIDE_TEMP:
-      return INSIDE_TEMP;
-    case ui::RECT_INSIDE_HUMIDITY:
-      return INSIDE_HUMIDITY;
-    case ui::RECT_INSIDE_PRESSURE:
-      return INSIDE_PRESSURE;
-    case ui::RECT_OUTSIDE_LABEL:
-      return OUTSIDE_LABEL;
-    case ui::RECT_OUT_TEMP:
-      return OUT_TEMP;
-    case ui::RECT_WEATHER_ICON:
-      return WEATHER_ICON;
-    case ui::RECT_FOOTER_WEATHER:
-      return FOOTER_WEATHER;
-    case ui::RECT_FOOTER_BATTERY:
-      return FOOTER_BATTERY;
-    case ui::RECT_OUT_PRESSURE:
-      return OUT_PRESSURE;
-    case ui::RECT_OUT_HUMIDITY:
-      return OUT_HUMIDITY;
-    case ui::RECT_OUT_WIND:
-      return OUT_WIND;
-    case ui::RECT_FOOTER_IP:
-      return FOOTER_STATUS;  // FOOTER_STATUS is alias for RECT_FOOTER_IP
-    default:
-      return nullptr;
-  }
+  if (rid >= ui::RECT__COUNT)
+    return nullptr;
+  return ui::kRectTable[rid];
 }
 #endif
 

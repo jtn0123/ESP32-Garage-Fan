@@ -5,6 +5,40 @@
 
 namespace ui {
 
+const int kRectTable[RECT__COUNT][4] = {
+    {6, 88, 118, 12},  // RECT_FOOTER_BATTERY
+    {6, 104, 120, 14},  // RECT_FOOTER_IP
+    {174, 90, 72, 30},  // RECT_FOOTER_WEATHER
+    {0, 0, 250, 14},  // RECT_HEADER_BAND_V3
+    {6, 2, 90, 14},  // RECT_HEADER_NAME
+    {6, 2, 82, 12},  // RECT_HEADER_NAME_V3
+    {100, 2, 50, 14},  // RECT_HEADER_TIME_CENTER
+    {88, 2, 94, 12},  // RECT_HEADER_UPDATED_V3
+    {172, 2, 72, 14},  // RECT_HEADER_VERSION
+    {184, 2, 60, 12},  // RECT_HEADER_VERSION_V3
+    {6, 60, 118, 10},  // RECT_INSIDE_HUMIDITY
+    {6, 18, 60, 14},  // RECT_INSIDE_LABEL
+    {10, 18, 42, 10},  // RECT_INSIDE_LABEL_V3
+    {6, 70, 118, 10},  // RECT_INSIDE_PRESSURE
+    {60, 64, 62, 10},  // RECT_INSIDE_PRESS_V3
+    {8, 64, 58, 10},  // RECT_INSIDE_RH_V3
+    {6, 16, 50, 12},  // RECT_INSIDE_TAB_V3
+    {6, 34, 118, 26},  // RECT_INSIDE_TEMP
+    {6, 28, 118, 32},  // RECT_INSIDE_TEMP_V3
+    {129, 18, 70, 14},  // RECT_OUTSIDE_LABEL
+    {133, 18, 50, 10},  // RECT_OUTSIDE_LABEL_V3
+    {129, 16, 58, 12},  // RECT_OUTSIDE_TAB_V3
+    {131, 64, 44, 10},  // RECT_OUT_HUMIDITY
+    {131, 74, 110, 10},  // RECT_OUT_PRESSURE
+    {131, 74, 110, 10},  // RECT_OUT_PRESS_V3
+    {131, 64, 52, 10},  // RECT_OUT_RH_V3
+    {129, 36, 94, 28},  // RECT_OUT_TEMP
+    {128, 28, 118, 32},  // RECT_OUT_TEMP_V3
+    {177, 64, 64, 10},  // RECT_OUT_WIND
+    {185, 64, 58, 10},  // RECT_OUT_WIND_V3
+    {140, 90, 30, 30},  // RECT_WEATHER_ICON
+};
+
 const UiOpHeader kOps_chrome[] = {
     { OP_LINE, 255, 0, 0, 0, 0, 249, 0, NULL, NULL },
     { OP_LINE, 255, 0, 0, 0, 121, 249, 121, NULL, NULL },

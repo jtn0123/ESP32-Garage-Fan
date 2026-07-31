@@ -420,6 +420,12 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
     lines.append("    RECT__COUNT,")
     lines.append("};")
     lines.append("")
+    # Geometry table indexed by RectId. Generated so the renderer's id->rect
+    # lookup can never drift from the enum again: a hand-maintained switch in
+    # display_renderer.cpp once knew only the v2 rects, and every op targeting a
+    # newer rect silently fell back to (0,0) on the device.
+    lines.append("extern const int kRectTable[RECT__COUNT][4];")
+    lines.append("")
     # FontId enum from tokens
     font_order = []
     for n in ["big", "label", "small", "time"]:
@@ -580,6 +586,13 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
     lines.append('#include "ui_ops_generated.h"')
     lines.append("")
     lines.append("namespace ui {")
+    lines.append("")
+    # Rect geometry indexed by RectId (same sorted order as the enum).
+    lines.append("const int kRectTable[RECT__COUNT][4] = {")
+    for name in sorted(rects.keys()):
+        r = rects[name]
+        lines.append(f"    {{{int(r[0])}, {int(r[1])}, {int(r[2])}, {int(r[3])}}},  // RECT_{name.upper()}")
+    lines.append("};")
     lines.append("")
     # Emit ops per component
     for cname, ops in components.items():

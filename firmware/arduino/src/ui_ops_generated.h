@@ -40,6 +40,8 @@ enum RectId {
     RECT__COUNT,
 };
 
+extern const int kRectTable[RECT__COUNT][4];
+
 enum FontId {
     FONT_BIG,
     FONT_LABEL,
