@@ -184,7 +184,9 @@ def test_firmware_evaluates_every_guard_field():
 def test_firmware_formats_outside_pressure():
     """Without a formatter the guarded row would render "-- hPa" once data arrives."""
     txt = MAIN_CPP.read_text()
-    assert 'key.startsWith("outside_pressure_hpa")' in txt
+    # A3 replaced the String-based spec_format_field with the buffer-based
+    # spec_format_field_into; prefix dispatch is a strncmp via starts().
+    assert 'starts("outside_pressure_hpa")' in txt
     assert "o.pressureHPa" in txt
 
 
