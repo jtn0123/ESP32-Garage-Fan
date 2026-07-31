@@ -118,6 +118,90 @@
       90,
       72,
       30
+    ],
+    "HEADER_NAME_V3": [
+      6,
+      2,
+      140,
+      12
+    ],
+    "HEADER_UPDATED_V3": [
+      148,
+      2,
+      96,
+      12
+    ],
+    "INSIDE_LABEL_V3": [
+      8,
+      17,
+      60,
+      10
+    ],
+    "INSIDE_TEMP_V3": [
+      6,
+      28,
+      118,
+      36
+    ],
+    "INSIDE_RH_V3": [
+      8,
+      70,
+      58,
+      10
+    ],
+    "INSIDE_PRESS_V3": [
+      66,
+      70,
+      56,
+      10
+    ],
+    "OUTSIDE_LABEL_V3": [
+      131,
+      17,
+      64,
+      10
+    ],
+    "OUT_TEMP_V3": [
+      128,
+      28,
+      118,
+      36
+    ],
+    "OUT_RH_V3": [
+      131,
+      70,
+      54,
+      10
+    ],
+    "OUT_WIND_V3": [
+      187,
+      70,
+      58,
+      10
+    ],
+    "FOOTER_BATT_GLYPH_V3": [
+      8,
+      97,
+      20,
+      12
+    ],
+    "FOOTER_BATT_TEXT_V3": [
+      32,
+      96,
+      90,
+      14
+    ],
+    "WEATHER_ICON_V3": [
+      136,
+      88,
+      30,
+      30
+    ],
+    "FOOTER_COND_V3": [
+      170,
+      90,
+      76,
+      30
     ]
   },
   "iconMap": [
@@ -433,6 +517,187 @@
         "font": "small",
         "text": "{weather_short}"
       }
+    ],
+    "chrome_v3": [
+      {
+        "op": "line",
+        "from": [
+          0,
+          0
+        ],
+        "to": [
+          249,
+          0
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          0,
+          121
+        ],
+        "to": [
+          249,
+          121
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          0,
+          0
+        ],
+        "to": [
+          0,
+          121
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          249,
+          0
+        ],
+        "to": [
+          249,
+          121
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          1,
+          14
+        ],
+        "to": [
+          249,
+          14
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          125,
+          14
+        ],
+        "to": [
+          125,
+          121
+        ]
+      },
+      {
+        "op": "line",
+        "from": [
+          1,
+          86
+        ],
+        "to": [
+          249,
+          86
+        ]
+      }
+    ],
+    "header_v3": [
+      {
+        "op": "text",
+        "rect": "HEADER_NAME_V3",
+        "font": "label",
+        "align": "left",
+        "text": "{room_name}",
+        "truncate": "ellipsis"
+      },
+      {
+        "op": "text",
+        "rect": "HEADER_UPDATED_V3",
+        "font": "time",
+        "align": "right",
+        "text": "upd {time_hhmm}"
+      }
+    ],
+    "inside_v3": [
+      {
+        "op": "text",
+        "rect": "INSIDE_LABEL_V3",
+        "font": "small",
+        "align": "left",
+        "text": "INSIDE"
+      },
+      {
+        "op": "tempGroupCentered",
+        "rect": "INSIDE_TEMP_V3",
+        "value": "{inside_temp_f}"
+      },
+      {
+        "op": "text",
+        "rect": "INSIDE_RH_V3",
+        "font": "small",
+        "align": "left",
+        "text": "{inside_hum_pct}% RH"
+      },
+      {
+        "op": "text",
+        "rect": "INSIDE_PRESS_V3",
+        "font": "small",
+        "align": "right",
+        "text": "{pressure_hpa:.0f} hPa",
+        "when": "has(pressure_hpa)"
+      }
+    ],
+    "outside_v3": [
+      {
+        "op": "text",
+        "rect": "OUTSIDE_LABEL_V3",
+        "font": "small",
+        "align": "left",
+        "text": "OUTSIDE"
+      },
+      {
+        "op": "tempGroupCentered",
+        "rect": "OUT_TEMP_V3",
+        "value": "{outside_temp_f}"
+      },
+      {
+        "op": "text",
+        "rect": "OUT_RH_V3",
+        "font": "small",
+        "align": "left",
+        "text": "{outside_hum_pct}% RH",
+        "when": "has(outside_hum_pct)"
+      },
+      {
+        "op": "text",
+        "rect": "OUT_WIND_V3",
+        "font": "small",
+        "align": "right",
+        "text": "{wind_mps->mph:.0f} mph",
+        "when": "has(wind_mps)"
+      }
+    ],
+    "footer_v3": [
+      {
+        "op": "batteryGlyph",
+        "rect": "FOOTER_BATT_GLYPH_V3",
+        "percent": "{battery_percent}"
+      },
+      {
+        "op": "text",
+        "rect": "FOOTER_BATT_TEXT_V3",
+        "font": "small",
+        "align": "left",
+        "text": "{battery_percent}%  ~{days}d"
+      },
+      {
+        "op": "iconIn",
+        "rect": "WEATHER_ICON_V3",
+        "iconFromWeather": "{weather}"
+      },
+      {
+        "op": "textCenteredIn",
+        "rect": "FOOTER_COND_V3",
+        "yOffset": 12,
+        "font": "small",
+        "text": "{weather_short}"
+      }
     ]
   },
   "variants": {
@@ -442,6 +707,13 @@
       "inside",
       "outside",
       "footer_split"
+    ],
+    "v3": [
+      "chrome_v3",
+      "header_v3",
+      "inside_v3",
+      "outside_v3",
+      "footer_v3"
     ]
   },
   "defaultVariant": "v2",

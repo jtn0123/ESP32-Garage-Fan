@@ -2339,9 +2339,12 @@
                   return mode.startsWith('v2') || variant.startsWith('v2') || defVar.startsWith('v2');
                 }catch(_){ return false; }
               })();
-              // For WEATHER_ICON region in v2: left-justify icon in its rect (no border)
+              // For WEATHER_ICON-family regions: icon only, label drawn by its
+              // own text op (matches firmware). Prefix match so variant rects
+              // (WEATHER_ICON_V3, ...) get the same treatment instead of the
+              // legacy icon+label path, which double-printed the condition.
               let iconW, iconH, startX, startY;
-              if (op.rect === 'WEATHER_ICON' && isV2) {
+              if (String(op.rect || '').startsWith('WEATHER_ICON') && isV2) {
                 // Clear the icon area, clamped to the frame interior so the
                 // 1px display border (x=0/249, y=0/121) is never erased.
                 // The firmware does no clear at all here (full refresh starts

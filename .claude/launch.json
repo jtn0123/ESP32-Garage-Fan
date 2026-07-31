@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["scripts/start_device_manager.py", "--port", "8080", "--no-broker"],
       "port": 8080
+    },
+    {
+      "name": "sim",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8144", "--bind", "127.0.0.1", "--directory", "web/sim"],
+      "port": 8144
     }
   ]
 }
