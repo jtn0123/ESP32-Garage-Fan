@@ -69,9 +69,12 @@ def test_web_sim_basic_pixels():
                 r, g, b, a = _canvas_rgba(page, x, y)
                 assert (r, g, b) == (0, 0, 0)
 
-            # Header underline at y=14 should be black (from ui_spec.json chrome)
-            r, g, b, a = _canvas_rgba(page, 5, 14)
+            # v3 header is an inverted band (fill op): solid black inside the
+            # band; the old y=14 underline is deliberately gone.
+            r, g, b, a = _canvas_rgba(page, 5, 7)
             assert (r, g, b) == (0, 0, 0)
+            r, g, b, a = _canvas_rgba(page, 5, 14)
+            assert (r, g, b) == (255, 255, 255)
 
             # Footer separator: read its y from the spec rather than hardcoding.
             # It previously lived at y=80 and the spec moved it to 84, which this
