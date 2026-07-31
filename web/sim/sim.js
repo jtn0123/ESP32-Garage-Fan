@@ -560,15 +560,18 @@
       // /index.html). Neither single path resolves under both, so try each.
       const base = (typeof window !== 'undefined' ? window.location.href : '');
       const candidates = [
-        new URL(`../icons/device_baked/50x50/${name}.png`, base).href,
-        new URL(`icons/device_baked/50x50/${name}.png`, base).href,
+        new URL(`../icons/device_baked/28x28/${name}.png`, base).href,
+        new URL(`icons/device_baked/28x28/${name}.png`, base).href,
       ];
       const key = `baked::${name}::${w}x${h}`;
       const entry = __mdiCache.get(key);
       if (entry && entry.bitmaps && entry.bitmaps.get('img')){
         const img = entry.bitmaps.get('img');
-        // Scale to fit the target size while maintaining aspect ratio
-        const targetSize = Math.min(w, h, STANDARD_ICON_SIZE);
+        // Native size when it fits (a 28px baked icon in the 30px box draws
+        // 1:1, matching the device exactly); only shrink when the box is
+        // smaller. Downscaling a 1-bit outline drops rows and breaks 1px
+        // strokes, so never scale unless forced.
+        const targetSize = Math.min(w - 2, h - 2, Math.max(img.width, img.height));
         const scale = targetSize / Math.max(img.width, img.height);
         const drawW = Math.floor(img.width * scale);
         const drawH = Math.floor(img.height * scale);

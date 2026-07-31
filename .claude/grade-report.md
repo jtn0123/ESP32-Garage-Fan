@@ -48,9 +48,14 @@ H1+H2 `1adcd97` (README rewrite, `docs/UI_SPEC.md`).
 NeoPixel rail gating, single boot draw). Outside the audit list: graphs-page
 current-reading chips + `frame` op, owner request, `4a75528` fw 1.16.
 
-**Open:** A1–A3 · B2 · D2, D3 (history_ring extraction done; sd_store CSV
-parse/rotation still .cpp-bound) · E2 (optional TLS only) · F1–F3 · G1 (with
-A3) · R4 (icon unification, incl. task #11 filled-blob icon).
+**Done 2026-07-31 (cont. 2):** A1 `caa4634` (storage_* rename, no aliases) ·
+A3+G1 `75f05dd` fw 1.18 (allocation-free render path; spec_render.h pure
+header + native_spec_render env, 8 tests — first slice of D2).
+
+**Open:** A2 · B2 · D2 (sparkline-scaling extraction + spec key-coverage
+assertion remain) · D3 (history_ring done; storage.cpp CSV parse/rotation
+still .cpp-bound) · E2 (optional TLS only) · F1–F3 · R4 (icon unification,
+incl. task #11 filled-blob icon).
 
 Post-execution regrade snapshot (honest read, not re-audited): D C+→**B+**,
 C C+→**B**, H B→**A−**, I B+→**A−**; overall B→**B+**. Section grades below
@@ -69,7 +74,7 @@ built but never wired (net_begin, Logger::begin, HA discovery, boot counters,
 all found dead this session) — indicates integration discipline, not design,
 and the cure is D1.
 
-#### A1 — Retire the sd_ prefix on the storage layer
+#### ~~A1 — Retire the sd_ prefix on the storage layer~~ ✓ done 2026-07-31 (`caa4634`)
 - **Where:** `firmware/arduino/src/sd_store.h`, `sd_store.cpp`, call sites in `app_controller.cpp`, `ota_manager.cpp`, `logging/logger.cpp`
 - **What's wrong:** The storage layer now runs on internal FFat on the deployed device; every API is still `sd_*`. The header documents the lie, but new code reads misleadingly.
 - **Fix:** Rename module to `storage.{h,cpp}` and functions to `storage_*`; keep thin `sd_*` aliases for one release or fix all ~20 call sites in one pass.
@@ -83,7 +88,7 @@ and the cure is D1.
 - **Effort:** M
 - **Grade lift:** B+ → A− (bounded blast radius for future UI work)
 
-#### A3 — spec_format_field: static buffer + String returns
+#### ~~A3 — spec_format_field: static buffer + String returns~~ ✓ done 2026-07-31 (`75f05dd`, fw 1.18)
 - **Where:** `firmware/arduino/src/main.cpp:129-231`
 - **What's wrong:** One shared `static char buf[32]` behind heap-allocating String returns on the render path; correctness holds today only because callers consume immediately.
 - **Fix:** Take a caller-provided buffer (`bool spec_format_field(const String& key, char* out, size_t n)`), drop String returns.
@@ -271,7 +276,7 @@ deliberately (80 MHz, modem sleep, 11 dBm) with measured results (38.5→22.5 °
 e-ink refresh budget explicitly rationed (900 s floor, alternation spends each
 refresh on new content); MQTT batched. Remaining items are polish.
 
-#### G1 — Render-path String allocations
+#### ~~G1 — Render-path String allocations~~ ✓ done 2026-07-31 (with A3, `75f05dd`)
 - **Where:** `main.cpp` spec_expand_template/spec_format_field (per full refresh: dozens of temporary Strings)
 - **What's wrong:** Each refresh churns small heap blocks in the 60%-fragmented... now-healthy heap; A3/D2's pure-header refactor removes it for free.
 - **Fix:** Same work as A3 — count it once.
