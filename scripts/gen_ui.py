@@ -471,6 +471,12 @@ def emit_fw_ops_header(spec: Dict[str, Any]) -> str:
         lines.append(f'    "{name}",')
     lines.append("};")
     lines.append("")
+    # Index of the spec's defaultVariant, so the firmware's full-refresh entry
+    # point tracks the spec instead of hardcoding an array position.
+    default_variant = str(spec.get("defaultVariant", "") or "")
+    default_idx = order.index(default_variant) if default_variant in order else 0
+    lines.append(f"static constexpr uint8_t kDefaultVariantId = {default_idx};")
+    lines.append("")
     # Component name lists per variant (by string for now)
     for name in order:
         comp_list = variants.get(name, [])
@@ -595,6 +601,10 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                 to = op.get("to") or [0, 0]
                 p0, p1 = int(frm[0]), int(frm[1])
                 p2, p3 = int(to[0]), int(to[1])
+            elif kind == "fill":
+                # Solid fill of the op's rect. p0 = 1 means white (rarely
+                # needed); default black. The rect id carries the geometry.
+                p0 = 1 if str(op.get("color", "black")) == "white" else 0
             elif kind == "text":
                 # Pass template through; device interprets placeholders like {ip}, {fw_version}
                 txt = str(op.get("text", ""))
@@ -604,6 +614,8 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p1 = int(op.get("y", 0))
                 except Exception:
                     p0 = p1 = 0
+                # p3 = 1 draws the text inverse (white), for use over a fill.
+                p3 = 1 if str(op.get("color", "")) == "inverse" else 0
             elif kind == "timeRight":
                 src = str(op.get("source", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)
@@ -628,6 +640,7 @@ def emit_fw_ops_cpp(spec: Dict[str, Any]) -> str:
                     p0 = 0
                 s0 = _cxx_string_literal(str(op.get("text", "")))
                 align = 2
+                p3 = 1 if str(op.get("color", "")) == "inverse" else 0
             elif kind == "iconIn":
                 src = str(op.get("iconFromWeather", "")).strip().strip("{}")
                 s0 = _cxx_string_literal(src)

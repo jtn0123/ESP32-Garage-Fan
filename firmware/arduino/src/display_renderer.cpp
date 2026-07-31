@@ -168,7 +168,10 @@ void draw_temp_number_and_units(const int r[4], const char* t) {
 // Direct temperature drawing (without region clearing)
 void draw_temp_number_and_units_direct(int16_t x, int16_t y, int16_t w, int16_t h, const char* t) {
   DUAL_SET_TEXT_COLOR(GxEPD_BLACK);
-  DUAL_DRAW(setTextSize, 2);
+  // Tall rects (v3) get size-3 digits (21 px), matching the sim's 22 px "big"
+  // font; the v2 rects keep the size-2 look they were tuned for.
+  const uint8_t ts = (h >= 32) ? 3 : 2;
+  DUAL_DRAW(setTextSize, ts);
 
   int16_t x1, y1;
   uint16_t bw, bh;
@@ -258,7 +261,7 @@ void full_refresh() {
     display.fillScreen(GxEPD_WHITE);
     // draw_from_spec_full_impl sets up DualGFX context and draws to both
     // display and screenshot canvas
-    draw_from_spec_full_impl(0);  // variantId 0 = "v2"
+    draw_from_spec_full_impl(ui::kDefaultVariantId);  // tracks spec defaultVariant
   } while (display.nextPage());
   reset_partial_counter();
   return;

@@ -138,10 +138,10 @@
       12
     ],
     "INSIDE_LABEL_V3": [
-      8,
-      16,
-      60,
-      11
+      10,
+      18,
+      42,
+      10
     ],
     "INSIDE_TEMP_V3": [
       6,
@@ -162,10 +162,10 @@
       10
     ],
     "OUTSIDE_LABEL_V3": [
-      131,
-      16,
-      64,
-      11
+      133,
+      18,
+      50,
+      10
     ],
     "OUT_TEMP_V3": [
       128,
@@ -190,6 +190,24 @@
       74,
       110,
       10
+    ],
+    "HEADER_BAND_V3": [
+      0,
+      0,
+      250,
+      14
+    ],
+    "INSIDE_TAB_V3": [
+      6,
+      16,
+      50,
+      12
+    ],
+    "OUTSIDE_TAB_V3": [
+      129,
+      16,
+      58,
+      12
     ]
   },
   "iconMap": [
@@ -587,35 +605,47 @@
     ],
     "header_v3": [
       {
+        "op": "fill",
+        "rect": "HEADER_BAND_V3"
+      },
+      {
         "op": "text",
         "rect": "HEADER_NAME_V3",
         "font": "label",
         "align": "left",
         "text": "{room_name}",
-        "truncate": "ellipsis"
+        "truncate": "ellipsis",
+        "color": "inverse"
       },
       {
         "op": "textCenteredIn",
         "rect": "HEADER_UPDATED_V3",
         "yOffset": 1,
         "font": "time",
-        "text": "{date_mmmdd} {time_hhmm}"
+        "text": "{date_mmmdd} {time_hhmm}",
+        "color": "inverse"
       },
       {
         "op": "text",
         "rect": "HEADER_VERSION_V3",
         "font": "time",
         "align": "right",
-        "text": "v{fw_version}"
+        "text": "v{fw_version}",
+        "color": "inverse"
       }
     ],
     "inside_v3": [
+      {
+        "op": "fill",
+        "rect": "INSIDE_TAB_V3"
+      },
       {
         "op": "text",
         "rect": "INSIDE_LABEL_V3",
         "font": "small",
         "align": "left",
-        "text": "INSIDE"
+        "text": "INSIDE",
+        "color": "inverse"
       },
       {
         "op": "tempGroupCentered",
@@ -640,11 +670,16 @@
     ],
     "outside_v3": [
       {
+        "op": "fill",
+        "rect": "OUTSIDE_TAB_V3"
+      },
+      {
         "op": "text",
         "rect": "OUTSIDE_LABEL_V3",
         "font": "small",
         "align": "left",
-        "text": "OUTSIDE"
+        "text": "OUTSIDE",
+        "color": "inverse"
       },
       {
         "op": "tempGroupCentered",
@@ -724,7 +759,7 @@
       "footer_split"
     ]
   },
-  "defaultVariant": "v2",
+  "defaultVariant": "v3",
   "regions": {
     "partial": {
       "INSIDE_LABEL": [

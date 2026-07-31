@@ -5,8 +5,8 @@
 
 // Layout identity for simulator ↔ firmware parity checks
 #define LAYOUT_VERSION 1
-#define LAYOUT_CRC 0x307DFE54u
-#define LAYOUT_MD5 "c90b6ddf79da58553d805bcefe2e2a90"
+#define LAYOUT_CRC 0x997AAED0u
+#define LAYOUT_MD5 "cb43d48904c3a9122003c2dac3ffebfc"
 
 // Display dimensions
 #define DISPLAY_WIDTH 250
@@ -29,6 +29,21 @@ static constexpr int RECT_OUT_WIND[4] = { 177,  64,  64, 10};
 static constexpr int RECT_FOOTER_BATTERY[4] = {   6,  88, 118, 12};
 static constexpr int RECT_FOOTER_IP[4] = {   6, 104, 120, 14};
 static constexpr int RECT_FOOTER_WEATHER[4] = { 174,  90,  72, 30};
+static constexpr int RECT_HEADER_NAME_V3[4] = {   6,   2,  82, 12};
+static constexpr int RECT_HEADER_UPDATED_V3[4] = {  88,   2,  94, 12};
+static constexpr int RECT_HEADER_VERSION_V3[4] = { 184,   2,  60, 12};
+static constexpr int RECT_INSIDE_LABEL_V3[4] = {  10,  18,  42, 10};
+static constexpr int RECT_INSIDE_TEMP_V3[4] = {   6,  28, 118, 32};
+static constexpr int RECT_INSIDE_RH_V3[4] = {   8,  64,  58, 10};
+static constexpr int RECT_INSIDE_PRESS_V3[4] = {  60,  64,  62, 10};
+static constexpr int RECT_OUTSIDE_LABEL_V3[4] = { 133,  18,  50, 10};
+static constexpr int RECT_OUT_TEMP_V3[4] = { 128,  28, 118, 32};
+static constexpr int RECT_OUT_RH_V3[4] = { 131,  64,  52, 10};
+static constexpr int RECT_OUT_WIND_V3[4] = { 185,  64,  58, 10};
+static constexpr int RECT_OUT_PRESS_V3[4] = { 131,  74, 110, 10};
+static constexpr int RECT_HEADER_BAND_V3[4] = {   0,   0, 250, 14};
+static constexpr int RECT_INSIDE_TAB_V3[4] = {   6,  16,  50, 12};
+static constexpr int RECT_OUTSIDE_TAB_V3[4] = { 129,  16,  58, 12};
 
 enum WeatherIconId {
     ICON_CLEAR = 0,
@@ -89,4 +104,49 @@ static_assert(104 + 14 <= DISPLAY_HEIGHT, "FOOTER_IP height");
 static_assert(RECT_FOOTER_WEATHER[0] >= 0 && RECT_FOOTER_WEATHER[1] >= 0, "FOOTER_WEATHER origin");
 static_assert(174 + 72 <= DISPLAY_WIDTH,  "FOOTER_WEATHER width");
 static_assert(90 + 30 <= DISPLAY_HEIGHT, "FOOTER_WEATHER height");
+static_assert(RECT_HEADER_NAME_V3[0] >= 0 && RECT_HEADER_NAME_V3[1] >= 0, "HEADER_NAME_V3 origin");
+static_assert(6 + 82 <= DISPLAY_WIDTH,  "HEADER_NAME_V3 width");
+static_assert(2 + 12 <= DISPLAY_HEIGHT, "HEADER_NAME_V3 height");
+static_assert(RECT_HEADER_UPDATED_V3[0] >= 0 && RECT_HEADER_UPDATED_V3[1] >= 0, "HEADER_UPDATED_V3 origin");
+static_assert(88 + 94 <= DISPLAY_WIDTH,  "HEADER_UPDATED_V3 width");
+static_assert(2 + 12 <= DISPLAY_HEIGHT, "HEADER_UPDATED_V3 height");
+static_assert(RECT_HEADER_VERSION_V3[0] >= 0 && RECT_HEADER_VERSION_V3[1] >= 0, "HEADER_VERSION_V3 origin");
+static_assert(184 + 60 <= DISPLAY_WIDTH,  "HEADER_VERSION_V3 width");
+static_assert(2 + 12 <= DISPLAY_HEIGHT, "HEADER_VERSION_V3 height");
+static_assert(RECT_INSIDE_LABEL_V3[0] >= 0 && RECT_INSIDE_LABEL_V3[1] >= 0, "INSIDE_LABEL_V3 origin");
+static_assert(10 + 42 <= DISPLAY_WIDTH,  "INSIDE_LABEL_V3 width");
+static_assert(18 + 10 <= DISPLAY_HEIGHT, "INSIDE_LABEL_V3 height");
+static_assert(RECT_INSIDE_TEMP_V3[0] >= 0 && RECT_INSIDE_TEMP_V3[1] >= 0, "INSIDE_TEMP_V3 origin");
+static_assert(6 + 118 <= DISPLAY_WIDTH,  "INSIDE_TEMP_V3 width");
+static_assert(28 + 32 <= DISPLAY_HEIGHT, "INSIDE_TEMP_V3 height");
+static_assert(RECT_INSIDE_RH_V3[0] >= 0 && RECT_INSIDE_RH_V3[1] >= 0, "INSIDE_RH_V3 origin");
+static_assert(8 + 58 <= DISPLAY_WIDTH,  "INSIDE_RH_V3 width");
+static_assert(64 + 10 <= DISPLAY_HEIGHT, "INSIDE_RH_V3 height");
+static_assert(RECT_INSIDE_PRESS_V3[0] >= 0 && RECT_INSIDE_PRESS_V3[1] >= 0, "INSIDE_PRESS_V3 origin");
+static_assert(60 + 62 <= DISPLAY_WIDTH,  "INSIDE_PRESS_V3 width");
+static_assert(64 + 10 <= DISPLAY_HEIGHT, "INSIDE_PRESS_V3 height");
+static_assert(RECT_OUTSIDE_LABEL_V3[0] >= 0 && RECT_OUTSIDE_LABEL_V3[1] >= 0, "OUTSIDE_LABEL_V3 origin");
+static_assert(133 + 50 <= DISPLAY_WIDTH,  "OUTSIDE_LABEL_V3 width");
+static_assert(18 + 10 <= DISPLAY_HEIGHT, "OUTSIDE_LABEL_V3 height");
+static_assert(RECT_OUT_TEMP_V3[0] >= 0 && RECT_OUT_TEMP_V3[1] >= 0, "OUT_TEMP_V3 origin");
+static_assert(128 + 118 <= DISPLAY_WIDTH,  "OUT_TEMP_V3 width");
+static_assert(28 + 32 <= DISPLAY_HEIGHT, "OUT_TEMP_V3 height");
+static_assert(RECT_OUT_RH_V3[0] >= 0 && RECT_OUT_RH_V3[1] >= 0, "OUT_RH_V3 origin");
+static_assert(131 + 52 <= DISPLAY_WIDTH,  "OUT_RH_V3 width");
+static_assert(64 + 10 <= DISPLAY_HEIGHT, "OUT_RH_V3 height");
+static_assert(RECT_OUT_WIND_V3[0] >= 0 && RECT_OUT_WIND_V3[1] >= 0, "OUT_WIND_V3 origin");
+static_assert(185 + 58 <= DISPLAY_WIDTH,  "OUT_WIND_V3 width");
+static_assert(64 + 10 <= DISPLAY_HEIGHT, "OUT_WIND_V3 height");
+static_assert(RECT_OUT_PRESS_V3[0] >= 0 && RECT_OUT_PRESS_V3[1] >= 0, "OUT_PRESS_V3 origin");
+static_assert(131 + 110 <= DISPLAY_WIDTH,  "OUT_PRESS_V3 width");
+static_assert(74 + 10 <= DISPLAY_HEIGHT, "OUT_PRESS_V3 height");
+static_assert(RECT_HEADER_BAND_V3[0] >= 0 && RECT_HEADER_BAND_V3[1] >= 0, "HEADER_BAND_V3 origin");
+static_assert(0 + 250 <= DISPLAY_WIDTH,  "HEADER_BAND_V3 width");
+static_assert(0 + 14 <= DISPLAY_HEIGHT, "HEADER_BAND_V3 height");
+static_assert(RECT_INSIDE_TAB_V3[0] >= 0 && RECT_INSIDE_TAB_V3[1] >= 0, "INSIDE_TAB_V3 origin");
+static_assert(6 + 50 <= DISPLAY_WIDTH,  "INSIDE_TAB_V3 width");
+static_assert(16 + 12 <= DISPLAY_HEIGHT, "INSIDE_TAB_V3 height");
+static_assert(RECT_OUTSIDE_TAB_V3[0] >= 0 && RECT_OUTSIDE_TAB_V3[1] >= 0, "OUTSIDE_TAB_V3 origin");
+static_assert(129 + 58 <= DISPLAY_WIDTH,  "OUTSIDE_TAB_V3 width");
+static_assert(16 + 12 <= DISPLAY_HEIGHT, "OUTSIDE_TAB_V3 height");
 

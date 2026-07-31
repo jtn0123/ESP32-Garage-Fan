@@ -197,6 +197,14 @@ static String spec_format_field(const String& key) {
     net_time_hhmm(buf, sizeof(buf));
     return String(buf);
   }
+  if (key == "date_mmmdd") {
+    // "Jul 30" - the date half of the header's last-updated stamp.
+    time_t now = time(nullptr);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+    strftime(buf, sizeof(buf), "%b %d", &tm_now);
+    return String(buf);
+  }
   return String("--");
 }
 
@@ -263,6 +271,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
   using ui::ALIGN_RIGHT;
   using ui::ComponentOps;
   using ui::OP_BATTERYGLYPH;
+  using ui::OP_FILL;
   using ui::OP_ICONIN;
   using ui::OP_LINE;
   using ui::OP_TEMPGROUPCENTERED;
@@ -295,6 +304,15 @@ void draw_from_spec_full_impl(uint8_t variantId) {
       if (op.s1 && !spec_field_has(op.s1))
         continue;
       switch (op.kind) {
+        case OP_FILL: {
+          // Solid fill of the op's rect; p0=1 selects white. Basis of the
+          // inverted header band and section tabs.
+          const int* r = rect_ptr_by_id(op.rect);
+          if (!r)
+            break;
+          gfx.fillRect(r[0], r[1], r[2], r[3], op.p0 ? GxEPD_WHITE : GxEPD_BLACK);
+          break;
+        }
         case ui::OP_LINE: {
           int16_t x0 = op.p0, y0 = op.p1, x1 = op.p2, y1 = op.p3;
           // Ensure correct endpoint order for iteration
@@ -320,7 +338,8 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           int16_t tx = op.p0;
           int16_t ty = op.p1;
           String out = spec_expand_template(op.s0 ? String(op.s0) : String(""));
-          gfx.setTextColor(GxEPD_BLACK);
+          // p3=1: inverse (white) text, drawn over an OP_FILL band.
+          gfx.setTextColor(op.p3 ? GxEPD_WHITE : GxEPD_BLACK);
           gfx.setTextSize(1);
           // Handle rect-based positioning for all alignments (LEFT, RIGHT, CENTER)
           if (r && tx == 0) {
@@ -361,7 +380,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           char temp_buf[16];
           temp_buf[0] = 0;
           // Check by rect ID, not pointer comparison
-          if (op.rect == ui::RECT_INSIDE_TEMP) {
+          if (op.rect == ui::RECT_INSIDE_TEMP || op.rect == ui::RECT_INSIDE_TEMP_V3) {
             InsideReadings ir = read_inside_sensors();
             if (isfinite(ir.temperatureC)) {
               float tempF = ir.temperatureC * 9.0f / 5.0f + 32.0f;
@@ -369,7 +388,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
             } else {
               snprintf(temp_buf, sizeof(temp_buf), "--");
             }
-          } else if (op.rect == ui::RECT_OUT_TEMP) {
+          } else if (op.rect == ui::RECT_OUT_TEMP || op.rect == ui::RECT_OUT_TEMP_V3) {
             OutsideReadings orr = net_get_outside();
             if (orr.validTemp && isfinite(orr.temperatureC)) {
               float tempF = orr.temperatureC * 9.0f / 5.0f + 32.0f;
@@ -400,7 +419,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           if (!r)
             break;
           String out = spec_expand_template(op.s0 ? String(op.s0) : String(""));
-          gfx.setTextColor(GxEPD_BLACK);
+          gfx.setTextColor(op.p3 ? GxEPD_WHITE : GxEPD_BLACK);
           gfx.setTextSize(1);
           int16_t tw = text_width_default_font(out.c_str(), 1);
           int16_t tx = r[0] + (r[2] - tw) / 2;

@@ -2009,8 +2009,8 @@
     pendingDraw = requestAnimationFrame(()=>{ pendingDraw = 0; draw({}); });
   }
 
-  function text(x,y,str,size=10,weight='normal',regionName=null){
-    ctx.fillStyle = '#000';
+  function text(x,y,str,size=10,weight='normal',regionName=null,color=null){
+    ctx.fillStyle = color || '#000';
     ctx.font = `${weight} ${size}px ${FONT_STACK}`;
     ctx.textBaseline = 'top';
     ctx.fillText(str, x, y);
@@ -2084,6 +2084,13 @@
           // firmware (firmware/arduino/src/main.cpp).
           if (op.when && !specFieldHas(op.when, data)) continue;
           switch(op.op){
+            case 'fill': {
+              // Solid rect fill (inverted regions). Matches firmware OP_FILL.
+              const r = rects[op.rect]; if (!r) break;
+              ctx.fillStyle = (op.color === 'white') ? '#fff' : '#000';
+              ctx.fillRect(r[0], r[1], r[2], r[3]);
+              break;
+            }
             case 'line': {
               const fx = (op.from && op.from[0]) || 0;
               const fy = (op.from && op.from[1]) || 0;
@@ -2173,7 +2180,7 @@
                 // Add 1px padding from top for better appearance
                 const y = (op.y !== undefined) ? (r[1] + op.y) : (r[1] + 1);
                 // Use our text function for tracking
-                text(x, y, s, fpx, weight, op.rect);
+                text(x, y, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : null);
                 // Export footer metrics for layout tests, keyed by rect
                 if (op.rect === 'FOOTER_BATTERY'){
                   const textW = ctx.measureText(s).width;
@@ -2296,7 +2303,8 @@
                 text(left + tw + 2, yTop + unitYOffset, '°', unitSize);
                 text(left + tw + 8, yTop + unitYOffset, 'F', unitSize);
               }
-              const key = (op.rect === 'INSIDE_TEMP') ? 'inside' : (op.rect === 'OUT_TEMP' ? 'outside' : null);
+              // Prefix match so v3 rects (INSIDE_TEMP_V3, ...) export metrics too.
+              const key = String(op.rect||'').startsWith('INSIDE_TEMP') ? 'inside' : (String(op.rect||'').startsWith('OUT_TEMP') ? 'outside' : null);
               if (key){ window.__tempMetrics[key] = { rect: { x: areaX, y: areaY, w: areaW, h: (area[3]||0) }, contentLeft: left, totalW: (tw + unitsW) }; }
               break;
             }
@@ -2314,7 +2322,7 @@
               // Center text horizontally in rect (matches firmware behavior)
               const x = r[0] + Math.max(0, Math.floor((r[2]-tw)/2));
               const yTop = (op.yOffset? (r[1]+op.yOffset) : r[1]);
-              text(x, yTop, s, fpx, weight, op.rect);
+              text(x, yTop, s, fpx, weight, op.rect, (op.color === 'inverse') ? '#fff' : null);
               if (raw.includes('IP ')){
                 window.__layoutMetrics.statusLeft.ip = { x, w: tw };
               }
@@ -2344,7 +2352,10 @@
               // (WEATHER_ICON_V3, ...) get the same treatment instead of the
               // legacy icon+label path, which double-printed the condition.
               let iconW, iconH, startX, startY;
-              if (String(op.rect || '').startsWith('WEATHER_ICON') && isV2) {
+              // Unconditional: the old isV2 gate keyed off defaultVariant and
+              // broke the moment the default became v3, dropping the icon into
+              // the legacy icon+label path (doubled condition text).
+              if (String(op.rect || '').startsWith('WEATHER_ICON')) {
                 // Clear the icon area, clamped to the frame interior so the
                 // 1px display border (x=0/249, y=0/121) is never erased.
                 // The firmware does no clear at all here (full refresh starts
@@ -2517,6 +2528,7 @@
   const DEFAULTS = {
     room_name: 'Office',
     time_hhmm: '10:32',
+    date_mmmdd: 'Jul 30',
     inside_temp_f: 72.5,
     inside_hum_pct: 47,
     outside_temp_f: 68.4,
