@@ -28,6 +28,7 @@
 #include "sd_store.h"
 #include "logging/logger.h"
 #include "history_ring.h"
+#include "usb_msc.h"
 
 // Diagnostic test functions (from diagnostic_test.cpp)
 extern void diagnostic_test_init();
@@ -318,6 +319,12 @@ void app_setup() {
 #endif
   rc_log_summary();
 
+#if FEATURE_USB_MSC
+  // After storage: geometry probe needs the partition, and the handoff logic
+  // assumes the storage layer is the current owner.
+  usb_msc_begin();
+#endif
+
   // Initialize state management with error checking
   Serial.println("[3] Initializing NVS cache...");
   Serial.flush();
@@ -491,6 +498,11 @@ static void record_sample_to_sd() {
   if (!sd_is_mounted() || !rc_history_enabled())
     return;
 
+  if (usb_msc_host_active()) {
+    // Host owns the disk; the CSV write would remount mid-transfer. The RAM
+    // ring below still collects, so the graphs lose nothing.
+    return;
+  }
   BatteryStatus bs = read_battery_status();
   OutsideReadings out_now = net_get_outside();
   sd_append_history(
@@ -639,6 +651,7 @@ void app_loop() {
 
   const uint32_t now = millis();
 
+  usb_msc_tick();
 #if USE_STATUS_PIXEL
   pixel_tick();
   // Idle twinkle: a soft blip every ~7 s says "alive" without lighting the

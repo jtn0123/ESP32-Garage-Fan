@@ -71,6 +71,12 @@
 #define FEATURE_SD_STORAGE 1
 #endif
 
+// USB mass-storage: history/logs mount as a read-only flash drive on a host.
+// Requires the tinyusb (OTG) USB stack; only meaningful on always-on nodes.
+#ifndef FEATURE_USB_MSC
+#define FEATURE_USB_MSC 0
+#endif
+
 // Over-the-air firmware updates (network via ArduinoOTA, plus apply-from-SD).
 #ifndef FEATURE_OTA
 #define FEATURE_OTA 1
