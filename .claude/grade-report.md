@@ -254,7 +254,7 @@ is current and changes NeoPixel/RMT + WiFi APIs), PubSubClient 2.8 is
 minimally-maintained, GxEPD2 pinned at ^1.5. Nothing EOL-dangerous; upgrade
 paths are known-breaking so they rot quietly.
 
-#### F1 — Plan the arduino-esp32 3.x migration
+#### F1 — Plan the arduino-esp32 3.x migration — *code-complete 2026-07-31 (`4cb4ab5`, `bda18a2`): pioarduino 55.03.311 / core 3.3.11 / IDF 5.5.5, all envs + TLS variant build warning-free, image fits OTA slots (1216K/1408K), 10 native suites green. Remaining: bench burn-in over USB before any OTA deploy.*
 - **Where:** `firmware/arduino/platformio.ini` (espressif32 platform), RMT usage via NeoPixel, WiFi event APIs
 - **What's wrong:** Core 2.0.17 is two majors behind; security fixes and S2 improvements land on 3.x only. The longer the wait, the bigger the API delta (subagent verified the legacy RMT path is already in play).
 - **Fix:** Spike branch: bump platform, fix compile breaks (NeoPixel/RMT, esp_task_wdt config struct, WiFi events), burn-in on the bench before adopting.
