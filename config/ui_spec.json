@@ -122,86 +122,74 @@
     "HEADER_NAME_V3": [
       6,
       2,
-      140,
+      82,
       12
     ],
     "HEADER_UPDATED_V3": [
-      148,
+      88,
       2,
-      96,
+      94,
+      12
+    ],
+    "HEADER_VERSION_V3": [
+      184,
+      2,
+      60,
       12
     ],
     "INSIDE_LABEL_V3": [
       8,
-      17,
+      16,
       60,
-      10
+      11
     ],
     "INSIDE_TEMP_V3": [
       6,
       28,
       118,
-      36
+      32
     ],
     "INSIDE_RH_V3": [
       8,
-      70,
+      64,
       58,
       10
     ],
     "INSIDE_PRESS_V3": [
-      66,
-      70,
-      56,
+      60,
+      64,
+      62,
       10
     ],
     "OUTSIDE_LABEL_V3": [
       131,
-      17,
+      16,
       64,
-      10
+      11
     ],
     "OUT_TEMP_V3": [
       128,
       28,
       118,
-      36
+      32
     ],
     "OUT_RH_V3": [
       131,
-      70,
-      54,
+      64,
+      52,
       10
     ],
     "OUT_WIND_V3": [
-      187,
-      70,
+      185,
+      64,
       58,
       10
     ],
-    "FOOTER_BATT_GLYPH_V3": [
-      8,
-      97,
-      20,
-      12
-    ],
-    "FOOTER_BATT_TEXT_V3": [
-      32,
-      96,
-      90,
-      14
-    ],
-    "WEATHER_ICON_V3": [
-      136,
-      88,
-      30,
-      30
-    ],
-    "FOOTER_COND_V3": [
-      170,
-      90,
-      76,
-      30
+    "OUT_PRESS_V3": [
+      131,
+      74,
+      110,
+      10
     ]
   },
   "iconMap": [
@@ -589,11 +577,11 @@
         "op": "line",
         "from": [
           1,
-          86
+          84
         ],
         "to": [
           249,
-          86
+          84
         ]
       }
     ],
@@ -607,11 +595,18 @@
         "truncate": "ellipsis"
       },
       {
-        "op": "text",
+        "op": "textCenteredIn",
         "rect": "HEADER_UPDATED_V3",
+        "yOffset": 1,
+        "font": "time",
+        "text": "{date_mmmdd} {time_hhmm}"
+      },
+      {
+        "op": "text",
+        "rect": "HEADER_VERSION_V3",
         "font": "time",
         "align": "right",
-        "text": "upd {time_hhmm}"
+        "text": "v{fw_version}"
       }
     ],
     "inside_v3": [
@@ -639,7 +634,7 @@
         "rect": "INSIDE_PRESS_V3",
         "font": "small",
         "align": "right",
-        "text": "{pressure_hpa:.0f} hPa",
+        "text": "{pressure_hpa:.1f} hPa",
         "when": "has(pressure_hpa)"
       }
     ],
@@ -657,6 +652,11 @@
         "value": "{outside_temp_f}"
       },
       {
+        "op": "iconIn",
+        "rect": "WEATHER_ICON",
+        "iconFromWeather": "{weather}"
+      },
+      {
         "op": "text",
         "rect": "OUT_RH_V3",
         "font": "small",
@@ -669,8 +669,16 @@
         "rect": "OUT_WIND_V3",
         "font": "small",
         "align": "right",
-        "text": "{wind_mps->mph:.0f} mph",
+        "text": "{wind_mps->mph:.1f} mph",
         "when": "has(wind_mps)"
+      },
+      {
+        "op": "text",
+        "rect": "OUT_PRESS_V3",
+        "font": "small",
+        "align": "left",
+        "text": "{outside_pressure_hpa:.0f} hPa",
+        "when": "has(outside_pressure_hpa)"
       }
     ],
     "footer_v3": [
@@ -713,7 +721,7 @@
       "header_v3",
       "inside_v3",
       "outside_v3",
-      "footer_v3"
+      "footer_split"
     ]
   },
   "defaultVariant": "v2",

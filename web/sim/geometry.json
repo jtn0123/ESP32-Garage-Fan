@@ -1,6 +1,6 @@
 {
   "layout_version": 1,
-  "layout_crc": "0x31D8CB2E",
+  "layout_crc": "0x46B0BBA7",
   "canvas": {
     "w": 250,
     "h": 122
@@ -110,86 +110,74 @@
     "HEADER_NAME_V3": [
       6,
       2,
-      140,
+      82,
       12
     ],
     "HEADER_UPDATED_V3": [
-      148,
+      88,
       2,
-      96,
+      94,
+      12
+    ],
+    "HEADER_VERSION_V3": [
+      184,
+      2,
+      60,
       12
     ],
     "INSIDE_LABEL_V3": [
       8,
-      17,
+      16,
       60,
-      10
+      11
     ],
     "INSIDE_TEMP_V3": [
       6,
       28,
       118,
-      36
+      32
     ],
     "INSIDE_RH_V3": [
       8,
-      70,
+      64,
       58,
       10
     ],
     "INSIDE_PRESS_V3": [
-      66,
-      70,
-      56,
+      60,
+      64,
+      62,
       10
     ],
     "OUTSIDE_LABEL_V3": [
       131,
-      17,
+      16,
       64,
-      10
+      11
     ],
     "OUT_TEMP_V3": [
       128,
       28,
       118,
-      36
+      32
     ],
     "OUT_RH_V3": [
       131,
-      70,
-      54,
+      64,
+      52,
       10
     ],
     "OUT_WIND_V3": [
-      187,
-      70,
+      185,
+      64,
       58,
       10
     ],
-    "FOOTER_BATT_GLYPH_V3": [
-      8,
-      97,
-      20,
-      12
-    ],
-    "FOOTER_BATT_TEXT_V3": [
-      32,
-      96,
-      90,
-      14
-    ],
-    "WEATHER_ICON_V3": [
-      136,
-      88,
-      30,
-      30
-    ],
-    "FOOTER_COND_V3": [
-      170,
-      90,
-      76,
-      30
+    "OUT_PRESS_V3": [
+      131,
+      74,
+      110,
+      10
     ]
   }
 }
