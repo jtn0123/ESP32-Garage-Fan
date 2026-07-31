@@ -627,6 +627,27 @@ void app_loop() {
 
 #if USE_STATUS_PIXEL
   pixel_tick();
+  // Idle twinkle: a soft blip every ~7 s says "alive" without lighting the
+  // room. Rotates through three dim tints so it reads as a twinkle, not a
+  // metronome. Duty cycle ~1%, so the battery cost is noise.
+  {
+    static uint32_t s_last_twinkle_ms = 0;
+    static uint8_t s_phase = 0;
+    if (now - s_last_twinkle_ms >= 7000) {
+      s_last_twinkle_ms = now;
+      switch (s_phase++ % 3) {
+        case 0:
+          pixel_flash(4, 10, 4, 70);  // soft green
+          break;
+        case 1:
+          pixel_flash(4, 6, 12, 70);  // soft blue
+          break;
+        default:
+          pixel_flash(8, 8, 8, 70);  // soft white
+          break;
+      }
+    }
+  }
 #endif
 
 #if USE_DISPLAY
