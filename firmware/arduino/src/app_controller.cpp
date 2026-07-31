@@ -503,30 +503,23 @@ void app_setup() {
   run_sleep_phase();
 }
 
-// Persist one row of sensor history to the card. Silent no-op when the card is
-// absent or history is turned off in config.
+// Record one sample: always into the RAM sparkline ring, and additionally onto
+// the card when one is mounted and available. Storage is a silent no-op when the
+// card is absent or history is turned off in config.
 static void record_sample_to_storage() {
-#if FEATURE_STORAGE
-  if (!storage_is_mounted() || !rc_history_enabled())
-    return;
-
-  if (usb_msc_host_active()) {
-    // Host owns the disk; the CSV write would remount mid-transfer. The RAM
-    // ring below still collects, so the graphs lose nothing.
-    return;
-  }
-  BatteryStatus bs = read_battery_status();
-  OutsideReadings out_now = net_get_outside();
-  storage_append_history(
-      time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
-      get_last_published_inside_rh(), get_last_published_inside_pressureHPa(), bs.voltage,
-      bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0,
-      (out_now.validTemp && isfinite(out_now.temperatureC)) ? out_now.temperatureC : NAN,
-      (out_now.validHum && isfinite(out_now.humidityPct)) ? out_now.humidityPct : NAN);
-#endif
-
-  // Feed the 24h sparkline ring (display-ready units: F / %). Outside values
-  // only when currently valid; NaN renders as a gap.
+  // The ring comes first and is deliberately outside every storage guard: it is
+  // RAM-only and the graphs page is the only thing that reads it.
+  //
+  // This used to sit below the guards, which made the 24h graphs depend on the
+  // SD card. A node with no card mounted, with history disabled, or whose disk
+  // the USB host had claimed took the early return and never pushed a sample, so
+  // the graphs page stayed empty for the entire boot -- and the "the RAM ring
+  // below still collects" comment on the USB branch asserted exactly the
+  // invariant the control flow broke. The status-pixel blip below was lost the
+  // same way.
+  //
+  // Display-ready units (F / %); outside values only when currently valid, since
+  // NaN is what renders as a gap.
   {
     const float tin = get_last_published_inside_tempC();
     OutsideReadings o = net_get_outside();
@@ -536,6 +529,23 @@ static void record_sample_to_storage() {
         get_last_published_inside_rh(),
         (o.validHum && isfinite(o.humidityPct)) ? o.humidityPct : NAN);
   }
+
+#if FEATURE_STORAGE
+  // usb_msc_host_active(): the host owns the disk and the CSV write would
+  // remount it mid-transfer. Skipping the write costs nothing now that the ring
+  // above has already taken the sample.
+  if (storage_is_mounted() && rc_history_enabled() && !usb_msc_host_active()) {
+    BatteryStatus bs = read_battery_status();
+    OutsideReadings out_now = net_get_outside();
+    storage_append_history(
+        time(nullptr), millis() / 1000, get_last_published_inside_tempC(),
+        get_last_published_inside_rh(), get_last_published_inside_pressureHPa(), bs.voltage,
+        bs.percent, wifi_is_connected() ? wifi_get_rssi() : 0,
+        (out_now.validTemp && isfinite(out_now.temperatureC)) ? out_now.temperatureC : NAN,
+        (out_now.validHum && isfinite(out_now.humidityPct)) ? out_now.humidityPct : NAN);
+  }
+#endif
+
 #if USE_STATUS_PIXEL
   // Quiet cyan blip: a sample was just taken. Dim and brief on purpose.
   pixel_flash(0, 18, 18, 120);

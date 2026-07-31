@@ -65,6 +65,43 @@ struct DevModeState {
   }
 };
 
+// How long to wait before re-probing hardware that did not answer.
+//
+// The fuel-gauge probe used to be one-shot: a single failed begin() latched the
+// reading off for the life of the process, and read_battery_status() then
+// returned its defaults (voltage NAN, percent -1) forever, which the footer
+// renders as "nanV -1% ~-1d" with an empty glyph. On the deep-sleep build that
+// self-healed, because every wake is a fresh boot. An always-on node runs for
+// days, so one unlucky probe -- a warm reboot after an OTA can catch the gauge
+// mid-conversion -- killed the battery readout until someone power-cycled it.
+#ifndef FUELGAUGE_RETRY_INTERVAL_MS
+#define FUELGAUGE_RETRY_INTERVAL_MS 60000UL
+#endif
+
+// Rate limiter for "probe hardware that may not be there".
+//
+// An interval rather than a per-call retry because read_battery_status() runs
+// several times per display refresh (percent, voltage, days and the glyph each
+// call it), and probing an absent I2C device costs a full bus timeout each time.
+struct ProbeRetry {
+  bool attempted = false;
+  uint32_t last_attempt_ms = 0;
+
+  // True on the first call, then at most once per interval_ms. Unsigned
+  // subtraction handles the ~49-day millis() rollover on its own.
+  //
+  // `attempted` is the authoritative flag, for the same reason DevModeState
+  // keeps one: millis() really does return 0 for the first millisecond after
+  // boot, so "last_attempt_ms == 0 means never tried" would be a bug.
+  bool due(uint32_t now_ms, uint32_t interval_ms = FUELGAUGE_RETRY_INTERVAL_MS) {
+    if (attempted && (now_ms - last_attempt_ms) < interval_ms)
+      return false;
+    attempted = true;
+    last_attempt_ms = now_ms;
+    return true;
+  }
+};
+
 // Minimum accepted sleep/sample cadence. Polling the BME280 harder than this
 // self-heats it and biases the temperature reading upward.
 #ifndef MIN_SLEEP_INTERVAL_SEC

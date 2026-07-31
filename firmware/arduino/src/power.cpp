@@ -97,15 +97,17 @@ BatteryStatus read_battery_status() {
   BatteryStatus b;
 
 #if USE_MAX17048
-  static bool s_maxfg_attempted = false;
-  if (!g_maxfg_initialized && !s_maxfg_attempted) {
+  static ProbeRetry s_maxfg_probe;
+  if (!g_maxfg_initialized && s_maxfg_probe.due(millis())) {
     enable_i2c_power();
     ensure_i2c_initialized();
-    s_maxfg_attempted = true;
 
     if (g_maxfg.begin()) {
       g_maxfg_initialized = true;
       Serial.println("MAX17048 fuel gauge found");
+      // A late probe means the gauge may still be in the sleep the deep-sleep
+      // path left it in; reading it asleep returns stale values.
+      g_maxfg.sleep(false);
       g_maxfg.setAlertVoltages(2.0, 4.2);
       uint8_t vers = g_maxfg.getChipID();
       Serial.printf("MAX17048 version: 0x%02X\n", vers);
@@ -130,11 +132,10 @@ BatteryStatus read_battery_status() {
 #endif
 
 #if USE_LC709203F
-  static bool s_lcfg_attempted = false;
-  if (!g_lcfg_initialized && !s_lcfg_attempted) {
+  static ProbeRetry s_lcfg_probe;
+  if (!g_lcfg_initialized && s_lcfg_probe.due(millis())) {
     enable_i2c_power();
     ensure_i2c_initialized();
-    s_lcfg_attempted = true;
 
     if (g_lcfg.begin()) {
       g_lcfg_initialized = true;

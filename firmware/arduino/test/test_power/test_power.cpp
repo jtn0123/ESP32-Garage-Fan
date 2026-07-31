@@ -433,6 +433,64 @@ void test_sleep_interval_at_threshold_boundaries() {
     TEST_ASSERT_EQUAL(600, interval);  // Low battery
 }
 
+// === ProbeRetry (src/power_pure.h, compiled directly - no hand copy) ===
+
+// The first probe must always happen, including at millis() == 0. A gate keyed
+// on "last_attempt_ms == 0 means never tried" would pass this by accident and
+// then fail test_probe_retry_first_attempt_at_time_zero below.
+void test_probe_retry_first_attempt_is_due(void) {
+    ProbeRetry r;
+    TEST_ASSERT_TRUE(r.due(5000));
+}
+
+void test_probe_retry_first_attempt_at_time_zero(void) {
+    ProbeRetry r;
+    TEST_ASSERT_TRUE(r.due(0));
+    // Still rate limited afterwards, even though last_attempt_ms is 0.
+    TEST_ASSERT_FALSE(r.due(1));
+    TEST_ASSERT_FALSE(r.due(59999));
+    TEST_ASSERT_TRUE(r.due(60000));
+}
+
+void test_probe_retry_rate_limits_within_interval(void) {
+    ProbeRetry r;
+    TEST_ASSERT_TRUE(r.due(1000));
+    TEST_ASSERT_FALSE(r.due(1001));
+    TEST_ASSERT_FALSE(r.due(30000));
+    TEST_ASSERT_FALSE(r.due(60999));
+}
+
+// The regression this guards: a one-shot probe meant a single failed fuel-gauge
+// begin() left the battery reading dead until a power cycle.
+void test_probe_retry_retries_after_interval(void) {
+    ProbeRetry r;
+    TEST_ASSERT_TRUE(r.due(1000));
+    TEST_ASSERT_TRUE(r.due(61000));
+    TEST_ASSERT_FALSE(r.due(61001));
+    TEST_ASSERT_TRUE(r.due(121000));
+}
+
+void test_probe_retry_honors_custom_interval(void) {
+    ProbeRetry r;
+    TEST_ASSERT_TRUE(r.due(0, 100));
+    TEST_ASSERT_FALSE(r.due(99, 100));
+    TEST_ASSERT_TRUE(r.due(100, 100));
+}
+
+// Unsigned subtraction must carry the gate across the ~49-day millis() wrap
+// rather than stalling it for another full epoch. The casts are the point of the
+// test: they are the wrap millis() itself performs, so writing them out keeps
+// the arithmetic identical on a 64-bit host and a 32-bit target.
+void test_probe_retry_survives_millis_rollover(void) {
+    ProbeRetry r;
+    const uint32_t near_max = 0xFFFFFFFFUL - 1000UL;
+    TEST_ASSERT_TRUE(r.due(near_max));
+    // Still inside the interval.
+    TEST_ASSERT_FALSE(r.due(static_cast<uint32_t>(near_max + 500UL)));
+    // Wrapped past it: the clock now reads 58999, far below last_attempt_ms.
+    TEST_ASSERT_TRUE(r.due(static_cast<uint32_t>(near_max + 60000UL)));
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
 
@@ -471,6 +529,14 @@ int main(int argc, char** argv) {
     RUN_TEST(test_sleep_interval_custom_overrides_adaptive);
     RUN_TEST(test_sleep_interval_critical_battery_overrides_temp_change);
     RUN_TEST(test_sleep_interval_custom_overrides_critical_battery);
+
+    // Fuel-gauge probe retry gate
+    RUN_TEST(test_probe_retry_first_attempt_is_due);
+    RUN_TEST(test_probe_retry_first_attempt_at_time_zero);
+    RUN_TEST(test_probe_retry_rate_limits_within_interval);
+    RUN_TEST(test_probe_retry_retries_after_interval);
+    RUN_TEST(test_probe_retry_honors_custom_interval);
+    RUN_TEST(test_probe_retry_survives_millis_rollover);
 
     // Edge cases
     RUN_TEST(test_battery_percent_boundary_values);
