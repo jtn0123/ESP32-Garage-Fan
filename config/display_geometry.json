@@ -1,6 +1,6 @@
 {
   "layout_version": 1,
-  "layout_crc": "0x915AE2BC",
+  "layout_crc": "0x399DC0EF",
   "canvas": {
     "w": 250,
     "h": 122
@@ -217,7 +217,7 @@
     ],
     "GRAPH_TEMP_MAX": [
       217,
-      27,
+      28,
       30,
       9
     ],
@@ -247,7 +247,7 @@
     ],
     "GRAPH_RH_MAX": [
       217,
-      76,
+      77,
       30,
       9
     ],

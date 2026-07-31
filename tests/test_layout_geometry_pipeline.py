@@ -88,6 +88,30 @@ class TestLayoutGeometryPipeline:
             ("WEATHER_ICON", "FOOTER_WEATHER"),
         ]
 
+        # The rect table is shared across variants; only rects drawn by the
+        # SAME variant can meaningfully collide (v3's rects overlap v2's by
+        # design). Underlay fills (_BAND/_TAB) contain their text rects on
+        # purpose. Mirrors tests/test_ui_validation_edge_cases.py.
+        import json as _json
+        from pathlib import Path as _Path
+
+        spec = _json.loads(
+            (_Path(__file__).resolve().parents[1] / "config" / "ui_spec.json").read_text()
+        )
+        variant_rects = {}
+        for vname, comps in spec.get("variants", {}).items():
+            used = set()
+            for cname in comps:
+                for op in spec.get("components", {}).get(cname, []):
+                    if isinstance(op.get("rect"), str):
+                        used.add(op["rect"])
+            variant_rects[vname] = used
+
+        def same_variant(a, b):
+            return any(a in used and b in used for used in variant_rects.values())
+
+        allowed_overlaps.append(("INSIDE_PRESS_V3", "INSIDE_RH_V3"))  # middle slack, like v2
+
         # Check for overlaps
         rect_names = list(rects.keys())
         for i, name1 in enumerate(rect_names):
@@ -97,6 +121,12 @@ class TestLayoutGeometryPipeline:
 
                 if "_INNER" in name1 or "_INNER" in name2:
                     continue  # Inner regions are allowed to overlap
+
+                if any(t in name1 or t in name2 for t in ("_BAND", "_TAB")):
+                    continue  # underlay fills contain their content rects
+
+                if not same_variant(name1, name2):
+                    continue
 
                 r1 = rects[name1]
                 r2 = rects[name2]

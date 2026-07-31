@@ -21,8 +21,14 @@ def mosquitto_broker():
     conf = os.path.join(ROOT, "mosquitto_test.conf")
     port = 18884
 
+    # DEVNULL, not PIPE: -v logs every packet, nobody drains the pipe, and a
+    # full-suite's worth of traffic fills the 64 KB buffer - at which point
+    # mosquitto blocks on its next write and the frozen broker drops clients.
+    # That surfaced as rc=4 publish/subscribe failures in whichever test ran
+    # after the buffer filled (reproducible only at full-suite volume).
+    _blog = open("/tmp/mosq_fixture.log", "w")
     proc = subprocess.Popen(
-        [mosq, "-c", conf, "-v"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        [mosq, "-c", conf], stdout=_blog, stderr=subprocess.STDOUT
     )
 
     host = "127.0.0.1"
@@ -60,31 +66,3 @@ def mosquitto_broker():
             except Exception:
                 pass
 
-
-def _default_broker_reachable() -> bool:
-    import socket
-
-    host = os.environ.get("MQTT_HOST", "127.0.0.1")
-    port = int(os.environ.get("MQTT_PORT", "1883"))
-    try:
-        with socket.create_connection((host, port), timeout=0.5):
-            return True
-    except OSError:
-        return False
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip integration-marked tests when no broker is reachable.
-
-    These are not abandoned: the mqtt-itest CI job provisions mosquitto and
-    runs `pytest -m integration`, so they gate every PR there. Locally,
-    `mosquitto -p 1883 -d` (brew install mosquitto) makes them run.
-    """
-    if _default_broker_reachable():
-        return
-    skip = pytest.mark.skip(
-        reason="needs an MQTT broker (start one: `mosquitto -p 1883 -d`); CI covers this in mqtt-itest"
-    )
-    for item in items:
-        if "integration" in item.keywords:
-            item.add_marker(skip)

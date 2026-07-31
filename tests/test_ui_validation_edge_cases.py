@@ -41,7 +41,10 @@ class TestUIValidationEdgeCases:
     def test_collision_detection_with_exclusions(self):
         """Test region collision detection with allowed overlaps."""
         # Regions that should be excluded from collision detection
-        exclusion_patterns = ["_INNER", "_BADGE", "_ICON", "_LABEL"]
+        # _BAND/_TAB are fill underlays: containing their own text rects is
+        # their entire purpose, so like _INNER/_BADGE they are structural,
+        # not content, and sit outside collision semantics.
+        exclusion_patterns = ["_INNER", "_BADGE", "_ICON", "_LABEL", "_BAND", "_TAB"]
 
         rects = self.geometry["rects"]
         collisions = []

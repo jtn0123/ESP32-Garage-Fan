@@ -229,7 +229,7 @@
     ],
     "GRAPH_TEMP_MAX": [
       217,
-      27,
+      28,
       30,
       9
     ],
@@ -259,7 +259,7 @@
     ],
     "GRAPH_RH_MAX": [
       217,
-      76,
+      77,
       30,
       9
     ],
@@ -461,33 +461,6 @@
         "font": "time",
         "align": "right",
         "text": "v{fw_version}"
-      }
-    ],
-    "header": [
-      {
-        "op": "line",
-        "from": [
-          1,
-          14
-        ],
-        "to": [
-          249,
-          14
-        ]
-      },
-      {
-        "op": "text",
-        "rect": "HEADER_NAME",
-        "font": "label",
-        "align": "left",
-        "text": "{room_name}",
-        "truncate": "ellipsis"
-      },
-      {
-        "op": "timeRight",
-        "rect": "HEADER_VERSION",
-        "font": "time",
-        "source": "{time_hhmm}"
       }
     ],
     "inside": [
@@ -769,32 +742,6 @@
         "align": "left",
         "text": "{outside_pressure_hpa:.0f} hPa",
         "when": "has(outside_pressure_hpa)"
-      }
-    ],
-    "footer_v3": [
-      {
-        "op": "batteryGlyph",
-        "rect": "FOOTER_BATT_GLYPH_V3",
-        "percent": "{battery_percent}"
-      },
-      {
-        "op": "text",
-        "rect": "FOOTER_BATT_TEXT_V3",
-        "font": "small",
-        "align": "left",
-        "text": "{battery_percent}%  ~{days}d"
-      },
-      {
-        "op": "iconIn",
-        "rect": "WEATHER_ICON_V3",
-        "iconFromWeather": "{weather}"
-      },
-      {
-        "op": "textCenteredIn",
-        "rect": "FOOTER_COND_V3",
-        "yOffset": 12,
-        "font": "small",
-        "text": "{weather_short}"
       }
     ],
     "chrome_v3g": [

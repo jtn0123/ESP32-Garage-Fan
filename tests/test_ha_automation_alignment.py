@@ -30,8 +30,7 @@ def _mqtt_host_port():
     return host, port
 
 
-def _broker_required():
-    host, port = _mqtt_host_port()
+def _broker_required(host, port):
     c = MqttTestClient(host, port, client_id=f"probe-{_now_ms()}")
     try:
         c.connect()
@@ -44,10 +43,12 @@ def _broker_required():
             pass
 
 
-def test_homeassistant_yaml_loads_and_retained_topics_present():
+def test_homeassistant_yaml_loads_and_retained_topics_present(mosquitto_broker):
     _try_yaml_lint()
-    _broker_required()
-    host, port = _mqtt_host_port()
+    host, port = mosquitto_broker
+    if os.environ.get("MQTT_HOST"):
+        host, port = _mqtt_host_port()
+    _broker_required(host, port)
 
     # Simulate HA/automation by publishing retained outdoor topics the device expects
     pub = MqttTestClient(host, port, client_id=f"ha-pub-{_now_ms()}")

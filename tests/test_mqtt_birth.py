@@ -23,8 +23,7 @@ def _mqtt_host_port():
     return host, port
 
 
-def _try_connect_or_skip():
-    host, port = _mqtt_host_port()
+def _try_connect_or_skip(host, port):
     c = MqttTestClient(host, port, client_id=f"probe-{_now_ms()}")
     try:
         c.connect()
@@ -37,9 +36,10 @@ def _try_connect_or_skip():
             pass
 
 
-def test_homeassistant_birth_triggers_rediscovery_and_state_republish():
-    _try_connect_or_skip()
-    host, port = _mqtt_host_port()
+def test_homeassistant_birth_triggers_rediscovery_and_state_republish(mosquitto_broker):
+    host, port = mosquitto_broker
+    if os.environ.get("MQTT_HOST"):
+        host, port = _mqtt_host_port()
 
     device_id = f"room_node_birth_{_now_ms()}"
     state_base = f"sensors/{device_id}"

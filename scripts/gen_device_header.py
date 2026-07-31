@@ -29,17 +29,25 @@ def repo_root() -> Path:
 
 ROOT = repo_root()
 
-# Try to load environment variables from .env file
-try:
-    from dotenv import load_dotenv
+def _load_dotenv_once() -> None:
+    """Pull the repo .env into os.environ - called from main(), NOT at import.
 
-    env_path = ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-        print(f"Loaded environment variables from {env_path}")
-except ImportError:
-    # dotenv not installed, will use environment variables only
-    pass
+    This used to run at module import, which meant any test importing this
+    module for its pure helpers silently injected the developer's real broker
+    host and credentials into the whole pytest process. Downstream integration
+    tests then skipped their local fixture broker and dialed production,
+    failing with auth errors that only reproduced in full-suite runs.
+    """
+    try:
+        from dotenv import load_dotenv
+
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            print(f"Loaded environment variables from {env_path}")
+    except ImportError:
+        # dotenv not installed, will use environment variables only
+        pass
 
 
 def parse_duration(s: str) -> int:
@@ -113,6 +121,7 @@ def c_string(s: str) -> str:
 
 
 def main():
+    _load_dotenv_once()
     prj = str(ROOT)
     cfg_dir = os.path.join(prj, "config")
     y_path = os.path.join(cfg_dir, "device.yaml")
