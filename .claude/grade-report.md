@@ -55,9 +55,16 @@ header + native_spec_render env, 8 tests — first slice of D2).
 **Done 2026-07-31 (cont. 3):** R4 + task #11 `5a9a727` fw 1.19 (outline icon
 pipeline: convert_icons.py --outline, 28×28, sim draws the same baked frames).
 
+**Done 2026-07-31 (cont. 4):** E2 `646f387` (optional MQTT_TLS=1, CA from
+storage, no passwords — off by default per owner posture) · Tri-color wing
+support (Adafruit 4814) `2a93474`: display_hw.h panel selection, `_3c` env,
+`color:"red"` spec accent with mono fallback, partial-refresh auto-skip on
+the 15 s-flash panel; hardware verify awaits the wing swap (task #25).
+fw 1.20 deployed (panel abstraction verified pixel-identical on mono).
+
 **Open:** A2 · B2 · D2 (sparkline-scaling extraction + spec key-coverage
 assertion remain) · D3 (history_ring done; storage.cpp CSV parse/rotation
-still .cpp-bound) · E2 (optional TLS only) · F1–F3.
+still .cpp-bound) · F1–F3.
 
 Post-execution regrade snapshot (honest read, not re-audited): D C+→**B+**,
 C C+→**B**, H B→**A−**, I B+→**A−**; overall B→**B+**. Section grades below
@@ -223,7 +230,7 @@ broker path. Graded on surface, not intent.
 - **Effort:** M
 - **Grade lift:** B− → B+ (control plane matches the trust model instead of inheriting the broker's)
 
-#### E2 — TLS to the broker is unsupported
+#### ~~E2 — TLS to the broker is unsupported~~ ✓ done 2026-07-31 (`646f387`, compile-time opt-in, off by default)
 - **Where:** `mqtt_client.cpp` (WiFiClient, port 1883)
 - **What's wrong:** Credentials and commands transit the LAN in cleartext. Acceptable on this network by owner choice; unavailable even as an option.
 - **Fix:** Optional `MQTT_TLS=1` path using WiFiClientSecure + CA in FFat; document heap cost (~40 KB).
