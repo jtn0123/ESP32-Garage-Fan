@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <cstdio>
 #include <cstring>
 
 #include "esp_app_desc.h"
