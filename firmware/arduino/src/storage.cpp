@@ -211,6 +211,18 @@ bool storage_begin() {
   static const uint32_t kMountFreqs[] = {SD_SPI_FREQ_HZ, 4000000, 1000000, 400000};
   bool mounted = false;
   for (size_t i = 0; i < sizeof(kMountFreqs) / sizeof(kMountFreqs[0]); i++) {
+    if (i > 0) {
+      // A card interrupted mid-transaction (a reset landing between command and
+      // response -- routine during OTA/flash sessions) can stop answering
+      // entirely: every frequency then reports cardType=0 even though the card
+      // is fine. The card keeps 3.3 V across ESP resets, so nothing else clears
+      // its state machine. Tear the whole bus down and let SD.begin()'s init
+      // sequence (74+ clocks with CS high, then CMD0) start from silence.
+      SD.end();
+      SPI.end();
+      delay(50);
+      SPI.begin();
+    }
     // Re-park the SRAM select each pass: a failed SD.begin() can leave the bus
     // pins reconfigured.
     pinMode(SRAM_CS_PIN, OUTPUT);

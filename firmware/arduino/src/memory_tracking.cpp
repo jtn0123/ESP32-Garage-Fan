@@ -42,9 +42,17 @@ void MemoryTracker::update() {
     stats_.stack_high_watermark = stack_usage;
   }
 
-  // Update fragmentation peak
+  // Update fragmentation peak. getCurrentFragmentation() already returns a
+  // 0-100 percentage; the old *100 here treated it as a ratio and published
+  // "3103" as a percent through the memory debug command.
   float current_frag = getCurrentFragmentation();
-  uint32_t frag_pct = static_cast<uint32_t>(current_frag * 100.0f);
+  uint32_t frag_pct = static_cast<uint32_t>(current_frag + 0.5f);
+  // The stats live in RTC memory and the peak only ratchets up, so a basis-point
+  // value recorded by the old code would outlive the fix across every warm
+  // reboot. >100 is impossible for a percentage: discard it.
+  if (stats_.fragmentation_peak > 100) {
+    stats_.fragmentation_peak = 0;
+  }
   if (frag_pct > stats_.fragmentation_peak) {
     stats_.fragmentation_peak = frag_pct;
   }

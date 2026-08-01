@@ -305,9 +305,19 @@ void DebugCommands::cmdMemory(PubSubClient* client) {
   char stats[384];
   MemoryTracker::getInstance().formatStatsJson(stats, sizeof(stats));
 
+  // Merge the stats object into the response by stripping BOTH braces of the
+  // inner JSON. Stripping only the opening one (as before) kept the inner
+  // closing brace and then appended another, publishing `...}}` -- invalid JSON
+  // that broke every consumer that actually parsed it.
   char response[512];
-  // Safely merge JSON: skip opening brace only if stats starts with '{'
-  const char* stats_content = (stats[0] == '{') ? stats + 1 : stats;
+  const char* stats_content = stats;
+  if (stats[0] == '{') {
+    stats_content = stats + 1;
+    size_t len = strlen(stats);
+    if (len >= 2 && stats[len - 1] == '}') {
+      stats[len - 1] = '\0';
+    }
+  }
   snprintf(response, sizeof(response), "{\"cmd\":\"memory\",%s}", stats_content);
   publishResponse(client, response);
 }

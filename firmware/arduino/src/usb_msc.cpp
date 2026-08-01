@@ -26,10 +26,31 @@ static const esp_partition_t* g_part = nullptr;
 static volatile bool g_host_active = false;
 static volatile uint32_t g_last_io_ms = 0;
 
+// Ownership transitions are not single-threaded: msc_on_read() runs on the
+// tinyusb service task while the release path runs from the main loop's
+// usb_msc_tick(). Unserialized, a host read landing during a release re-mounts
+// the wear-levelling layer between the release's wl_unmount() and its
+// storage_begin(), so FFat finds the partition claimed and the remount fails --
+// observed on hardware 2026-08-01 as "no card and internal FFat failed" after
+// an "io idle timeout" release, leaving the node storage-less until reboot.
+static SemaphoreHandle_t s_ownership_lock = nullptr;
+
+static void ownership_lock_init() {
+  if (!s_ownership_lock) {
+    s_ownership_lock = xSemaphoreCreateMutex();
+  }
+}
+
 // Take exclusive ownership of the partition for the host.
 static bool msc_take_ownership() {
-  if (g_wl != WL_INVALID_HANDLE)
+  // No lock means usb_msc_begin() has not run; there is no geometry to serve.
+  if (!s_ownership_lock)
+    return false;
+  xSemaphoreTake(s_ownership_lock, portMAX_DELAY);
+  if (g_wl != WL_INVALID_HANDLE) {
+    xSemaphoreGive(s_ownership_lock);
     return true;
+  }
   // FFat (and the whole storage layer) must let go first: two wear-levelling
   // instances on one partition corrupt each other's sector mapping.
   storage_end();
@@ -37,15 +58,20 @@ static bool msc_take_ownership() {
     g_wl = WL_INVALID_HANDLE;
     LOG_WARN("USB-MSC: wl_mount failed; remounting storage");
     storage_begin();
+    xSemaphoreGive(s_ownership_lock);
     return false;
   }
   g_host_active = true;
   LOG_INFO("USB-MSC: host took the disk (storage writes paused)");
+  xSemaphoreGive(s_ownership_lock);
   return true;
 }
 
 // Give the partition back to the firmware.
 static void msc_release_ownership(const char* why) {
+  if (!s_ownership_lock)
+    return;
+  xSemaphoreTake(s_ownership_lock, portMAX_DELAY);
   if (g_wl != WL_INVALID_HANDLE) {
     wl_unmount(g_wl);
     g_wl = WL_INVALID_HANDLE;
@@ -55,6 +81,7 @@ static void msc_release_ownership(const char* why) {
     LOG_INFO("USB-MSC: released (%s); storage remounting", why);
   }
   storage_begin();
+  xSemaphoreGive(s_ownership_lock);
 }
 
 static int32_t msc_on_read(uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize) {
@@ -81,6 +108,7 @@ static bool msc_on_start_stop(uint8_t, bool start, bool load_eject) {
 }
 
 void usb_msc_begin() {
+  ownership_lock_init();
   g_part =
       esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "ffat");
   if (!g_part) {
