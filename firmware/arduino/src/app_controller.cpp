@@ -79,6 +79,22 @@ static uint32_t g_unreachable_checks = 0;
 // Cadence for uptime accounting, the NVS commit and the retention sweep.
 #define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
 
+// Tear the radio down and bring it back up, forcing a fresh association and a
+// fresh DHCP exchange rather than reusing a lease that routes nowhere. Returns
+// whether the link came back. Shared by the automatic recovery path and the
+// `wifi` console command so the retry parameters cannot drift apart.
+static bool cycle_wifi_radio() {
+  WiFi.disconnect(true);
+  delay(500);
+  WiFi.mode(WIFI_OFF);
+  delay(500);
+  WiFi.mode(WIFI_STA);
+  // The reconnect below can block for seconds; start it on a fresh budget so it
+  // cannot combine with the caller's elapsed time to cross the 30 s watchdog.
+  esp_task_wdt_reset();
+  return wifi_connect_with_exponential_backoff(2, 500);
+}
+
 #if USE_DISPLAY
 static void maybe_refresh_display();
 #endif
@@ -791,13 +807,7 @@ void app_loop() {
         // which forces a fresh DHCP exchange rather than keeping a lease that
         // routes nowhere.
         Serial.println("[ALWAYS-ON] cycling the radio to force a fresh DHCP lease");
-        WiFi.disconnect(true);
-        delay(500);
-        WiFi.mode(WIFI_OFF);
-        delay(500);
-        WiFi.mode(WIFI_STA);
-        esp_task_wdt_reset();
-        if (wifi_connect_with_exponential_backoff(2, 500)) {
+        if (cycle_wifi_radio()) {
           Serial.printf("[ALWAYS-ON] radio cycle recovered the link: %s\n", wifi_get_ip().c_str());
         }
       } else if (g_unreachable_checks >= UNREACHABLE_CHECKS_BEFORE_REBOOT) {
@@ -887,14 +897,7 @@ void app_loop() {
                     FW_VERSION, static_cast<unsigned long>(millis() / 1000UL));
     } else if (cmd == "wifi") {
       Serial.println("[NET] forcing reconnect...");
-      WiFi.disconnect(true);
-      delay(500);
-      WiFi.mode(WIFI_OFF);
-      delay(500);
-      WiFi.mode(WIFI_STA);
-      esp_task_wdt_reset();
-      Serial.printf("[NET] reconnect %s, ip=%s\n",
-                    wifi_connect_with_exponential_backoff(2, 500) ? "ok" : "failed",
+      Serial.printf("[NET] reconnect %s, ip=%s\n", cycle_wifi_radio() ? "ok" : "failed",
                     wifi_get_ip().c_str());
     } else if (cmd == "scan") {
       int n = WiFi.scanNetworks();
@@ -902,6 +905,9 @@ void app_loop() {
       for (int i = 0; i < n && i < 10; i++) {
         Serial.printf("  %s (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
       }
+      // scanNetworks() keeps its result buffer allocated until cleared; this
+      // console can be driven repeatedly during a debug session.
+      WiFi.scanDelete();
     } else if (cmd == "batt") {
       BatteryStatus bs = read_battery_status();
       Serial.printf("[BATT] %.2fV %d%% ~%dd\n", static_cast<double>(bs.voltage), bs.percent,
