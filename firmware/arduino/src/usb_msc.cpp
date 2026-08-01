@@ -46,7 +46,11 @@ static bool msc_take_ownership() {
   // No lock means usb_msc_begin() has not run; there is no geometry to serve.
   if (!s_ownership_lock)
     return false;
-  xSemaphoreTake(s_ownership_lock, portMAX_DELAY);
+  // Bounded: this runs on the tinyusb service task, and the release path can
+  // hold the lock through a full storage_begin() retry walk (seconds). Failing
+  // the read lets the host retry the sector instead of stalling the USB task.
+  if (xSemaphoreTake(s_ownership_lock, pdMS_TO_TICKS(250)) != pdTRUE)
+    return false;
   if (g_wl != WL_INVALID_HANDLE) {
     xSemaphoreGive(s_ownership_lock);
     return true;

@@ -29,6 +29,12 @@ ESPOTA=$(find ~/.platformio/packages -name espota.py -path "*arduinoespressif32*
 # flashing so a failed verify can say which version we EXPECTED to see.
 EXPECTED_FW=$(sed -n 's/#define FW_VERSION "\(.*\)"/\1/p' \
   "$ROOT/firmware/arduino/src/generated_config.h" 2>/dev/null | head -1)
+if [ -z "$EXPECTED_FW" ]; then
+  echo "ABORT: could not read FW_VERSION from generated_config.h."
+  echo "Without it the post-deploy verify would compare empty against empty and"
+  echo "report VERIFIED for any device that answers."
+  exit 1
+fi
 
 # Refuse to ship an image with no WiFi credentials. gen_device_header only
 # WARNS on a missing WIFI_SSID (CI builds legitimately have none), and a build
@@ -61,7 +67,12 @@ fi
 
 mqtt_verify() {
   set -a; . "$ENV_FILE"; set +a
-  local deadline=$((SECONDS + VERIFY_TIMEOUT)) fw="" avail=""
+  if [ -z "${MQTT_HOST:-}" ]; then
+    echo "(.env defines no MQTT_HOST - falling back to ping)"
+    ping_verify
+    return $?
+  fi
+  local started=$SECONDS deadline=$((SECONDS + VERIFY_TIMEOUT)) fw="" avail=""
   while [ $SECONDS -lt $deadline ]; do
     avail=$(mosquitto_sub -h "$MQTT_HOST" -p "${MQTT_PORT:-1883}" \
       -u "${MQTT_USER:-}" -P "${MQTT_PASSWORD:-}" \
@@ -74,7 +85,7 @@ mqtt_verify() {
         -t "homeassistant/sensor/${id}_temperature/config" -C 1 -W 5 2>/dev/null \
         | grep -o '"sw_version":"[^"]*"' | cut -d'"' -f4 || true)
       if [ "$fw" = "$EXPECTED_FW" ]; then
-        echo "VERIFIED: $id online, running $fw ($((SECONDS))s)"
+        echo "VERIFIED: $id online, running $fw ($((SECONDS - started))s)"
         return 0
       elif [ -n "$fw" ]; then
         # Online on a different version: either the retained discovery has not
@@ -95,10 +106,12 @@ mqtt_verify() {
 }
 
 ping_verify() {
-  local deadline=$((SECONDS + VERIFY_TIMEOUT))
+  local started=$SECONDS deadline=$((SECONDS + VERIFY_TIMEOUT))
   while [ $SECONDS -lt $deadline ]; do
-    if ping -c 1 -W 2000 -t 3 "$IP" >/dev/null 2>&1; then
-      echo "VERIFIED (ping only): $IP answers ($((SECONDS))s). No broker creds to check the version."
+    # -c 1 is the only flag whose meaning matches on macOS and Linux (-W/-t
+    # differ per platform); the loop bounds the total wait.
+    if ping -c 1 "$IP" >/dev/null 2>&1; then
+      echo "VERIFIED (ping only): $IP answers ($((SECONDS - started))s). No broker creds to check the version."
       return 0
     fi
     sleep 5

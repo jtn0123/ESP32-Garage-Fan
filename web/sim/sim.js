@@ -2145,6 +2145,11 @@
               // 24h history polyline. Series pairs sharing a rect share a scale
               // (group = hist_temp_* or hist_rh_*) so in/out are comparable.
               const r = rects[op.rect]; if (!r) break;
+              // Frame first, so an empty ring still shows the chart box --
+              // matching the firmware, which draws its frame before the
+              // empty-history check.
+              ctx.strokeStyle = '#000';
+              ctx.strokeRect(r[0]-1, r[1]-1, r[2]+2, r[3]+2);
               const arr = data[op.series]; if (!Array.isArray(arr) || arr.length < 1) break;
               const groupKeys = String(op.series).startsWith('hist_temp')
                 ? ['hist_temp_in','hist_temp_out'] : ['hist_rh_in','hist_rh_out'];
@@ -2178,10 +2183,6 @@
                   ctx.fillRect(px, py, 2, 2);
                 }
               }
-              // Plot frame stays black regardless of the series' line color,
-              // matching the device (its frame is hard-coded GxEPD_BLACK).
-              ctx.strokeStyle = '#000';
-              ctx.strokeRect(r[0]-1, r[1]-1, r[2]+2, r[3]+2);
               break;
             }
             case 'fill': {

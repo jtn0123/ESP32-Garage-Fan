@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <cstring>
 
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
@@ -14,6 +15,10 @@
 // Consecutive boots that never reached the broker. RTC: survives esp_restart
 // (the link-recovery reboots that usually drive this count), not power loss.
 RTC_DATA_ATTR static uint32_t rtc_unhealthy_boots = 0;
+// Which image owns the streak. An OTA reboots via esp_restart, so without this
+// a NEW image would inherit the old image's failure streak and could hit the
+// rollback threshold before its first fair chance to confirm.
+RTC_DATA_ATTR static char rtc_streak_sha[17] = {0};
 
 static bool g_confirmed_this_boot = false;
 static bool g_running_confirmed = false;
@@ -44,6 +49,15 @@ static bool image_is_confirmed() {
 
 void ota_rollback_check_at_boot() {
   g_running_confirmed = image_is_confirmed();
+
+  // A different image than the one that accumulated the streak starts fresh.
+  char sha[17];
+  running_sha_hex(sha, sizeof(sha));
+  if (strncmp(rtc_streak_sha, sha, sizeof(sha)) != 0) {
+    rtc_unhealthy_boots = 0;
+    snprintf(rtc_streak_sha, sizeof(rtc_streak_sha), "%s", sha);
+  }
+
   rtc_unhealthy_boots++;  // provisionally unhealthy; mark_healthy() clears it
 
   Serial.printf("[ROLLBACK] boot %u unhealthy in a row, image %s\n", rtc_unhealthy_boots,

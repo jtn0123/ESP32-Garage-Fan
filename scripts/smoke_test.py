@@ -74,29 +74,38 @@ def autodetect_port() -> str | None:
 
 def serial_console(port: str) -> dict:
     """Send each console command, return {cmd: response_text}."""
-    import serial  # deferred so --skip-serial-less runs don't need pyserial
+    import serial  # deferred so MQTT-only runs don't need pyserial
 
     p = serial.Serial()
     p.port = port
     p.baudrate = 115200
-    p.timeout = 1
+    p.timeout = 0.3
     p.dtr = True  # USB-CDC transmits only once the host raises DTR
     p.rts = False  # never toggle both: that can trip ROM download mode
     p.open()
-    time.sleep(2)
-    p.reset_input_buffer()
-
     out: dict[str, str] = {}
-    for cmd, wait in [("status", 2.5), ("batt", 3.0), ("hist", 2.0), ("storage", 10.0)]:
-        p.write((cmd + "\n").encode())
-        p.flush()
-        time.sleep(wait)
-        buf = b""
-        while p.in_waiting:
-            buf += p.read(p.in_waiting)
-            time.sleep(0.2)
-        out[cmd] = buf.decode("utf-8", "replace")
-    p.close()
+    # Context manager: any exception below still closes the port, so the MQTT
+    # half never runs with the serial handle held open.
+    with p:
+        time.sleep(2)
+        p.reset_input_buffer()
+        for cmd, deadline_s in [("status", 6.0), ("batt", 8.0), ("hist", 5.0), ("storage", 15.0)]:
+            p.write((cmd + "\n").encode())
+            p.flush()
+            # Deadline-based read: collect until the command's budget runs out
+            # or the port has been quiet for a second -- a slow answer is still
+            # an answer, and a fixed sleep failed working devices.
+            buf = b""
+            deadline = time.time() + deadline_s
+            quiet_since = time.time()
+            while time.time() < deadline:
+                chunk = p.read(4096)
+                if chunk:
+                    buf += chunk
+                    quiet_since = time.time()
+                elif buf and time.time() - quiet_since > 1.0:
+                    break
+            out[cmd] = buf.decode("utf-8", "replace")
     return out
 
 
@@ -126,6 +135,10 @@ def check_serial(responses: dict) -> str | None:
             "boot health",
             f"image_confirmed={confirmed} unhealthy_boots={boots}",
         )
+    else:
+        # Older firmware omits the fields; a silent skip would let the summary
+        # claim the rollback feature was verified when it never ran.
+        record(WARN, "boot health", "status reports no image_confirmed/unhealthy_boots")
 
     hist = re.search(r"ring count=(\d+)/(\d+)", responses.get("hist", ""))
     if hist:
@@ -150,7 +163,7 @@ def check_serial(responses: dict) -> str | None:
     return ip
 
 
-def mqtt_roundtrip(env: dict) -> None:
+def mqtt_roundtrip(env: dict, want_id: str | None = None) -> None:
     host = env.get("MQTT_HOST", "")
     if not host:
         record(WARN, "mqtt round-trip", "no MQTT_HOST in .env; skipped")
@@ -189,11 +202,19 @@ def mqtt_roundtrip(env: dict) -> None:
         m = re.match(r"espsensor/(\S+)/availability (\S+)", line)
         if m and m.group(1) != "unknown":
             online[m.group(1)] = m.group(2)
-    live = [d for d, s in online.items() if s == "online"]
+    live = sorted(d for d, s in online.items() if s == "online")
     if not live:
         record(FAIL, "device availability on broker", f"no online device in: {online or avail!r}")
         return
     device_id = live[0]
+    if want_id and want_id in live:
+        device_id = want_id
+    elif want_id:
+        record(WARN, "device selection", f"{want_id} not online; using {device_id}")
+    elif len(live) > 1:
+        # More than one node online and no --device-id: the MQTT half may be
+        # validating a different device than the one on the cable.
+        record(WARN, "device selection", f"{len(live)} devices online, using {device_id}")
     record(PASS, "device availability on broker", f"{device_id}: online")
 
     # Command round-trip: heap over cmd/debug, JSON back on debug/response.
@@ -253,6 +274,7 @@ def mqtt_roundtrip(env: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", help="serial port (default: first /dev/cu.usbmodem*)")
+    ap.add_argument("--device-id", help="MQTT client id to test (default: first online)")
     ap.add_argument("--skip-mqtt", action="store_true", help="serial checks only")
     ap.add_argument("--skip-serial", action="store_true", help="MQTT checks only")
     args = ap.parse_args()
@@ -266,11 +288,15 @@ def main() -> int:
             print(f"serial: {port}")
             try:
                 check_serial(serial_console(port))
+            except ImportError:
+                # A missing host-side library is a tooling gap, not a device
+                # fault; failing here would fail CI runners without pyserial.
+                record(WARN, "serial console", "pyserial not installed; serial half skipped")
             except Exception as e:  # port vanished mid-run, permissions, ...
                 record(FAIL, "serial console", f"{e.__class__.__name__}: {e}")
 
     if not args.skip_mqtt:
-        mqtt_roundtrip(load_dotenv())
+        mqtt_roundtrip(load_dotenv(), want_id=args.device_id)
 
     fails = [r for r in RESULTS if r[0] == FAIL]
     warns = [r for r in RESULTS if r[0] == WARN]

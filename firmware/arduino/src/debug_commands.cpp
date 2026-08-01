@@ -31,6 +31,20 @@ static void json_number(char* out, size_t out_size, float value, int decimals) {
   snprintf(out, out_size, "%.*f", decimals, value);
 }
 
+// Strip BOTH braces of an inner JSON object so it can be merged into a wrapper.
+// Stripping only the opening one -- as cmdMemory and cmdMqttBatch each once did
+// independently -- keeps the inner closing brace, and the wrapper then appends
+// another: the published payload ends in `}}` and no consumer can parse it.
+// Mutates `json` (writes a NUL over the closing brace); returns the body.
+static const char* json_object_body(char* json) {
+  if (json[0] != '{')
+    return json;
+  size_t len = strlen(json);
+  if (len >= 2 && json[len - 1] == '}')
+    json[len - 1] = '\0';
+  return json + 1;
+}
+
 DebugCommands& DebugCommands::getInstance() {
   static DebugCommands instance;
   return instance;
@@ -305,20 +319,8 @@ void DebugCommands::cmdMemory(PubSubClient* client) {
   char stats[384];
   MemoryTracker::getInstance().formatStatsJson(stats, sizeof(stats));
 
-  // Merge the stats object into the response by stripping BOTH braces of the
-  // inner JSON. Stripping only the opening one (as before) kept the inner
-  // closing brace and then appended another, publishing `...}}` -- invalid JSON
-  // that broke every consumer that actually parsed it.
   char response[512];
-  const char* stats_content = stats;
-  if (stats[0] == '{') {
-    stats_content = stats + 1;
-    size_t len = strlen(stats);
-    if (len >= 2 && stats[len - 1] == '}') {
-      stats[len - 1] = '\0';
-    }
-  }
-  snprintf(response, sizeof(response), "{\"cmd\":\"memory\",%s}", stats_content);
+  snprintf(response, sizeof(response), "{\"cmd\":\"memory\",%s}", json_object_body(stats));
   publishResponse(client, response);
 }
 
@@ -374,9 +376,7 @@ void DebugCommands::cmdMqttBatch(PubSubClient* client) {
   MQTTBatcher::getInstance().formatStatsJson(stats, sizeof(stats));
 
   char response[256];
-  // Safely merge JSON: skip opening brace only if stats starts with '{'
-  const char* stats_content = (stats[0] == '{') ? stats + 1 : stats;
-  snprintf(response, sizeof(response), "{\"cmd\":\"mqtt_batch\",%s}", stats_content);
+  snprintf(response, sizeof(response), "{\"cmd\":\"mqtt_batch\",%s}", json_object_body(stats));
   publishResponse(client, response);
 }
 
