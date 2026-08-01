@@ -28,6 +28,8 @@
 #include "storage.h"
 #include "logging/logger.h"
 #include "history_ring.h"
+#include "link_recovery.h"
+#include "ota_rollback.h"
 #include "usb_msc.h"
 
 // Diagnostic test functions (from diagnostic_test.cpp)
@@ -69,8 +71,29 @@ static float g_drawn_outside_tempC = NAN;
 
 // How often to re-check WiFi/MQTT health.
 #define LINK_CHECK_INTERVAL_MS 30000UL
+// Escalation policy for "link claims up, broker unreachable" lives in
+// link_recovery.h (pure header, natively tested). The reboot budget is
+// RTC-backed so it survives the reboots it is budgeting.
+static LinkRecovery g_link_recovery;
+RTC_DATA_ATTR static uint32_t rtc_link_recovery_reboots = 0;
 // Cadence for uptime accounting, the NVS commit and the retention sweep.
 #define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
+
+// Tear the radio down and bring it back up, forcing a fresh association and a
+// fresh DHCP exchange rather than reusing a lease that routes nowhere. Returns
+// whether the link came back. Shared by the automatic recovery path and the
+// `wifi` console command so the retry parameters cannot drift apart.
+static bool cycle_wifi_radio() {
+  WiFi.disconnect(true);
+  delay(500);
+  WiFi.mode(WIFI_OFF);
+  delay(500);
+  WiFi.mode(WIFI_STA);
+  // The reconnect below can block for seconds; start it on a fresh budget so it
+  // cannot combine with the caller's elapsed time to cross the 30 s watchdog.
+  esp_task_wdt_reset();
+  return wifi_connect_with_exponential_backoff(2, 500);
+}
 
 #if USE_DISPLAY
 static void maybe_refresh_display();
@@ -345,6 +368,11 @@ void app_setup() {
   Serial.println("[3] NVS cache OK");
   Serial.flush();
 
+  // Roll back a bad OTA image before spending time on anything else. Needs NVS
+  // (just initialised); must run before the network phase so a networkless
+  // image cannot burn its whole boot getting here. Does not return if it flips.
+  ota_rollback_check_at_boot();
+
   // Initialize power management with error checking
   Serial.println("[4] Initializing power management...");
   power_init();
@@ -449,6 +477,12 @@ void app_setup() {
 #endif
   }
 
+  // Boot-path health confirmation; the link-check loop covers the case where
+  // MQTT only comes up later.
+  if (mqtt_is_connected()) {
+    ota_rollback_mark_healthy();
+  }
+
   // The WiFi + MQTT block above can spend ~25 s against an unreachable AP and a
   // half-dead broker; give the boot phases below a fresh watchdog budget.
   esp_task_wdt_reset();
@@ -531,6 +565,17 @@ static void record_sample_to_storage() {
   }
 
 #if FEATURE_STORAGE
+  // Self-heal an unmounted backend. A failed remount after a USB-MSC handback
+  // used to be permanent -- storage_begin() ran once in the release path and
+  // nothing ever retried, so one bad handoff cost the rest of the boot's CSV
+  // history and logs. Same shape as the fuel-gauge probe fix: retry at the
+  // sample cadence instead of latching the failure.
+  if (!storage_is_mounted() && !usb_msc_host_active()) {
+    if (storage_begin()) {
+      Serial.println("[STORAGE] remount recovered");
+    }
+  }
+
   // usb_msc_host_active(): the host owns the disk and the CSV write would
   // remount it mid-transfer. Skipping the write costs nothing now that the ring
   // above has already taken the sample.
@@ -759,6 +804,34 @@ void app_loop() {
       ensure_mqtt_connected();
       publish_ha_discovery_once();
     }
+
+    // "Associated with an IP" is not the same as "can reach anything" -- the
+    // full story and the escalation policy live in link_recovery.h. This block
+    // only wires the policy's verdict to the hardware.
+    const bool mqtt_up = mqtt_is_connected();
+    switch (g_link_recovery.on_check(wifi_is_connected(), mqtt_up, rtc_link_recovery_reboots)) {
+      case LinkAction::kRadioCycle:
+        Serial.printf("[ALWAYS-ON] broker unreachable (%u checks) - cycling the radio\n",
+                      g_link_recovery.unreachable_checks);
+        if (cycle_wifi_radio()) {
+          Serial.printf("[ALWAYS-ON] radio cycle recovered the link: %s\n", wifi_get_ip().c_str());
+        }
+        break;
+      case LinkAction::kReboot:
+        Serial.printf("[ALWAYS-ON] still unreachable - recovery reboot %u/%u\n",
+                      rtc_link_recovery_reboots + 1, LINK_MAX_RECOVERY_REBOOTS);
+        Serial.flush();
+        rtc_link_recovery_reboots++;
+        ESP.restart();
+        break;
+      case LinkAction::kNone:
+        break;
+    }
+    if (mqtt_up) {
+      rtc_link_recovery_reboots = 0;
+      // Broker reached: this image works. First call persists the confirmation.
+      ota_rollback_mark_healthy();
+    }
   }
 
   // Pump MQTT so retained outside data and commands are handled between samples.
@@ -814,6 +887,65 @@ void app_loop() {
         Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
       }
 #endif
+    }
+  }
+
+  // Unconditional serial console.
+  //
+  // The diagnostic-mode command handler further down is unreachable in this
+  // build (the ALWAYS_ON branch returns above it), and it could only be entered
+  // over MQTT anyway -- so the diagnostics were unavailable in exactly the
+  // situation that needs them: a node that is up but off the network. These
+  // work whenever a cable is attached, no mode to enter.
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd == "status" || cmd == "net") {
+      Serial.printf("[NET] wifi_connected=%d ip=%s rssi=%d mqtt_connected=%d\n",
+                    wifi_is_connected() ? 1 : 0, wifi_get_ip().c_str(),
+                    wifi_is_connected() ? wifi_get_rssi() : 0, mqtt_is_connected() ? 1 : 0);
+      Serial.printf("[NET] unreachable_checks=%u recovery_reboots=%u fw=%s uptime=%lus\n",
+                    g_link_recovery.unreachable_checks, rtc_link_recovery_reboots, FW_VERSION,
+                    static_cast<unsigned long>(millis() / 1000UL));
+      Serial.printf("[NET] image_confirmed=%d unhealthy_boots=%u\n",
+                    ota_rollback_image_confirmed() ? 1 : 0, ota_rollback_unhealthy_boots());
+    } else if (cmd == "wifi") {
+      Serial.println("[NET] forcing reconnect...");
+      Serial.printf("[NET] reconnect %s, ip=%s\n", cycle_wifi_radio() ? "ok" : "failed",
+                    wifi_get_ip().c_str());
+    } else if (cmd == "scan") {
+      int n = WiFi.scanNetworks();
+      Serial.printf("[NET] %d networks\n", n);
+      for (int i = 0; i < n && i < 10; i++) {
+        Serial.printf("  %s (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+      }
+      // scanNetworks() keeps its result buffer allocated until cleared; this
+      // console can be driven repeatedly during a debug session.
+      WiFi.scanDelete();
+    } else if (cmd == "batt") {
+      BatteryStatus bs = read_battery_status();
+      Serial.printf("[BATT] %.2fV %d%% ~%dd\n", static_cast<double>(bs.voltage), bs.percent,
+                    bs.estimatedDays);
+    } else if (cmd == "hist") {
+      Serial.printf("[HIST] ring count=%u/%u\n", hist_ring().count, HIST_CAP);
+    } else if (cmd == "storage") {
+#if FEATURE_STORAGE
+      if (!storage_is_mounted() && !usb_msc_host_active()) {
+        Serial.printf("[STORAGE] not mounted; retry %s\n", storage_begin() ? "ok" : "failed");
+      }
+      const StorageInfo& si = storage_get_info();
+      Serial.printf("[STORAGE] mounted=%d type=%s total=%lluKB used=%lluKB msc_host=%d\n",
+                    si.mounted ? 1 : 0, si.type ? si.type : "-", si.total_bytes / 1024ULL,
+                    si.used_bytes / 1024ULL, usb_msc_host_active() ? 1 : 0);
+#else
+      Serial.println("[STORAGE] feature disabled");
+#endif
+    } else if (cmd == "reboot") {
+      Serial.println("[NET] rebooting");
+      Serial.flush();
+      ESP.restart();
+    } else if (cmd.length()) {
+      Serial.println("cmds: status|net, wifi, scan, batt, hist, storage, reboot");
     }
   }
 
