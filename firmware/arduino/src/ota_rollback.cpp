@@ -67,9 +67,10 @@ void ota_rollback_check_at_boot() {
     return;
   }
 
-  Serial.printf("[ROLLBACK] %u boots without reaching the broker and this image was "
-                "never confirmed - rolling back to %s\n",
-                rtc_unhealthy_boots, other->label);
+  Serial.printf(
+      "[ROLLBACK] %u boots without reaching the broker and this image was "
+      "never confirmed - rolling back to %s\n",
+      rtc_unhealthy_boots, other->label);
   Serial.flush();
   rtc_unhealthy_boots = 0;
   esp_restart();
