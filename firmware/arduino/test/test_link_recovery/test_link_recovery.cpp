@@ -55,20 +55,26 @@ void test_broker_blip_resets_counter(void) {
     }
 }
 
-// WiFi fully down is the other branch's problem; the counter freezes rather
-// than resetting, so a flapping AP cannot indefinitely defer escalation.
-void test_wifi_down_freezes_counter(void) {
+// WiFi fully down counts toward escalation like any other broker-less check.
+// The regression this pins: an image with empty credentials baked in can never
+// associate, so if wifi-down froze the counter the node would never reboot,
+// boot-health would never see the unhealthy boots it needs, and the rollback
+// one slot away would never fire.
+void test_wifi_down_counts_toward_escalation(void) {
     LinkRecovery r;
     r.on_check(true, false, 0);
     r.on_check(true, false, 0);
     TEST_ASSERT_EQUAL_UINT32(2, r.unreachable_checks);
     TEST_ASSERT_EQUAL(static_cast<int>(LinkAction::kNone),
                       static_cast<int>(r.on_check(false, false, 0)));
-    TEST_ASSERT_EQUAL_UINT32(2, r.unreachable_checks);  // frozen, not reset
-    // WiFi returns, broker still absent: escalation resumes where it left off.
-    r.on_check(true, false, 0);
+    TEST_ASSERT_EQUAL_UINT32(3, r.unreachable_checks);  // counted, not frozen
     TEST_ASSERT_EQUAL(static_cast<int>(LinkAction::kRadioCycle),
-                      static_cast<int>(r.on_check(true, false, 0)));
+                      static_cast<int>(r.on_check(false, false, 0)));
+    // An association-less image escalates all the way to the reboot that
+    // boot-health needs.
+    for (int i = 5; i <= 9; i++) r.on_check(false, false, 0);
+    TEST_ASSERT_EQUAL(static_cast<int>(LinkAction::kReboot),
+                      static_cast<int>(r.on_check(false, false, 0)));
 }
 
 // Reboot budget spent (broker outage, not a wedged link): never reboot again,
@@ -109,7 +115,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_healthy_link_no_action);
     RUN_TEST(test_escalates_radio_cycle_then_reboot);
     RUN_TEST(test_broker_blip_resets_counter);
-    RUN_TEST(test_wifi_down_freezes_counter);
+    RUN_TEST(test_wifi_down_counts_toward_escalation);
     RUN_TEST(test_reboot_budget_exhausted_falls_back_to_radio_cycles);
     RUN_TEST(test_reboot_budget_partially_spent_still_reboots);
     RUN_TEST(test_keeps_requesting_reboot_past_threshold);

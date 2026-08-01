@@ -2145,7 +2145,7 @@
               // 24h history polyline. Series pairs sharing a rect share a scale
               // (group = hist_temp_* or hist_rh_*) so in/out are comparable.
               const r = rects[op.rect]; if (!r) break;
-              const arr = data[op.series]; if (!Array.isArray(arr) || arr.length < 2) break;
+              const arr = data[op.series]; if (!Array.isArray(arr) || arr.length < 1) break;
               const groupKeys = String(op.series).startsWith('hist_temp')
                 ? ['hist_temp_in','hist_temp_out'] : ['hist_rh_in','hist_rh_out'];
               let mn=Infinity, mx=-Infinity;
@@ -2166,6 +2166,18 @@
                 if (!started){ ctx.moveTo(px,py); started=true; } else ctx.lineTo(px,py);
               }
               ctx.stroke(); ctx.setLineDash([]);
+              // Sparse-data dots, mirroring the firmware (main.cpp OP_SPARKLINE):
+              // on the fixed 24h axis a young ring is a sub-pixel stub, so mark
+              // each sample until the polyline can carry the chart.
+              if (arr.length < 48) {
+                ctx.fillStyle = (op.color === 'red') ? '#cc0000' : '#000';
+                for (let i=0;i<arr.length;i++){
+                  const v=arr[i]; if (!isFinite(v)) continue;
+                  const px = Math.min(r[0] + (r[2]-1) - (arr.length-1-i)*(r[2]-1)/(cap-1), r[0]+r[2]-2);
+                  const py = Math.min(r[1] + (r[3]-1) - (v-mn)/(mx-mn)*(r[3]-1), r[1]+r[3]-2);
+                  ctx.fillRect(px, py, 2, 2);
+                }
+              }
               // Plot frame stays black regardless of the series' line color,
               // matching the device (its frame is hard-coded GxEPD_BLACK).
               ctx.strokeStyle = '#000';

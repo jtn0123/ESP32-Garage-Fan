@@ -55,12 +55,15 @@ struct LinkRecovery {
       unreachable_checks = 0;
       return LinkAction::kNone;
     }
-    if (!wifi_connected) {
-      // WiFi itself is down; the caller's reconnect branch owns that. Freeze
-      // rather than reset: WiFi flapping up and down must not keep restarting
-      // this escalation from zero.
-      return LinkAction::kNone;
-    }
+    // WiFi-down checks COUNT toward escalation rather than freezing it. The
+    // first cut froze here on the theory that the caller's reconnect branch
+    // owns a down link -- and then a build with empty credentials baked in
+    // (2026-08-01) showed the hole: an image that can never associate never
+    // reboots, so boot-health never accumulates the unhealthy boots it needs
+    // to roll back, and the node sits dark forever with a good image one slot
+    // away. Reboots are budgeted and a confirmed image never rolls back, so
+    // counting a down link costs a transient AP outage at most three reboots.
+    (void)wifi_connected;
 
     unreachable_checks++;
 

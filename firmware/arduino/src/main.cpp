@@ -306,7 +306,7 @@ void draw_from_spec_full_impl(uint8_t variantId) {
           // Frame first so a freshly-booted (near-empty) ring still shows the
           // chart boxes instead of a blank page.
           gfx.drawRect(rr[0] - 1, rr[1] - 1, rr[2] + 2, rr[3] + 2, GxEPD_BLACK);
-          if (h.count < 2)
+          if (h.count < 1)
             break;
           bool temp_group = (strncmp(op.s0, "hist_temp", 9) == 0);
           const float* series = nullptr;
@@ -341,6 +341,17 @@ void draw_from_spec_full_impl(uint8_t variantId) {
             if (have_prev && (!op.p0 || (i % 4) < 2)) {
               // p1: line color code (red accent on tri-color, black on mono)
               gfx.drawLine(px, py, cx, cy, map_op_color(op.p1));
+            }
+            // A sparse ring is invisible as a polyline: on the fixed 24h x-axis
+            // each 5-min sample is (w-1)/287 px wide, so the first hours of data
+            // rendered as a sub-pixel stub at the right edge and the page read
+            // as "no data" (owner-reported). Mark each sample with a 2x2 dot
+            // until the line is long enough to carry the chart on its own.
+            // Mirrored in web/sim/sim.js.
+            if (h.count < 48) {
+              const int16_t dx = (cx > x0 + w - 2) ? static_cast<int16_t>(x0 + w - 2) : cx;
+              const int16_t dy = (cy > y0 + hgt - 2) ? static_cast<int16_t>(y0 + hgt - 2) : cy;
+              gfx.fillRect(dx, dy, 2, 2, map_op_color(op.p1));
             }
             px = cx;
             py = cy;
