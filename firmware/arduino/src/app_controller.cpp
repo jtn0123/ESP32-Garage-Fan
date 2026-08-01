@@ -69,6 +69,13 @@ static float g_drawn_outside_tempC = NAN;
 
 // How often to re-check WiFi/MQTT health.
 #define LINK_CHECK_INTERVAL_MS 30000UL
+// Consecutive link checks with an "up" link but no broker before we stop
+// believing the link. At the 30 s cadence that is 2 minutes before cycling the
+// radio and 5 before rebooting -- long enough to ride out a broker restart or a
+// slow AP, short enough that a wedged node is not lost for an evening.
+#define UNREACHABLE_CHECKS_BEFORE_RADIO_RESET 4
+#define UNREACHABLE_CHECKS_BEFORE_REBOOT 10
+static uint32_t g_unreachable_checks = 0;
 // Cadence for uptime accounting, the NVS commit and the retention sweep.
 #define MAINTENANCE_INTERVAL_MS (6UL * 3600UL * 1000UL)
 
@@ -759,6 +766,51 @@ void app_loop() {
       ensure_mqtt_connected();
       publish_ha_discovery_once();
     }
+
+    // "Associated with an IP" is not the same as "can reach anything".
+    //
+    // Observed 2026-08-01: after an OTA reboot the node came up with
+    // wifi_is_connected() true -- core 3.x defines that as connected() &&
+    // hasIP(), so it genuinely held a lease -- yet it was unreachable at its
+    // address from the same subnet and MQTT never connected. It sat that way for
+    // 40+ minutes. Nothing above recovers from it: the reconnect branch is gated
+    // on !wifi_is_connected(), which is false, so the link is declared healthy
+    // forever and the only symptom is ensure_mqtt_connected() logging into the
+    // void once per check.
+    //
+    // Treat a broker connection as the real liveness signal. MQTT sits on the
+    // same LAN as the node, so sustained failure to reach it while the link
+    // claims to be up means the link is lying.
+    if (wifi_is_connected() && !mqtt_is_connected()) {
+      g_unreachable_checks++;
+      Serial.printf("[ALWAYS-ON] link up but broker unreachable (%u/%u checks)\n",
+                    g_unreachable_checks, UNREACHABLE_CHECKS_BEFORE_REBOOT);
+
+      if (g_unreachable_checks == UNREACHABLE_CHECKS_BEFORE_RADIO_RESET) {
+        // Cheap remedy first: drop the association and rebuild it from scratch,
+        // which forces a fresh DHCP exchange rather than keeping a lease that
+        // routes nowhere.
+        Serial.println("[ALWAYS-ON] cycling the radio to force a fresh DHCP lease");
+        WiFi.disconnect(true);
+        delay(500);
+        WiFi.mode(WIFI_OFF);
+        delay(500);
+        WiFi.mode(WIFI_STA);
+        esp_task_wdt_reset();
+        if (wifi_connect_with_exponential_backoff(2, 500)) {
+          Serial.printf("[ALWAYS-ON] radio cycle recovered the link: %s\n", wifi_get_ip().c_str());
+        }
+      } else if (g_unreachable_checks >= UNREACHABLE_CHECKS_BEFORE_REBOOT) {
+        // Last resort. A reboot is cheap on an always-on node and is the only
+        // thing that reliably clears a wedged radio; staying up in a state where
+        // nothing can reach us is strictly worse, since it also means no OTA.
+        Serial.println("[ALWAYS-ON] still unreachable - rebooting to recover");
+        Serial.flush();
+        ESP.restart();
+      }
+    } else if (mqtt_is_connected()) {
+      g_unreachable_checks = 0;
+    }
   }
 
   // Pump MQTT so retained outside data and commands are handled between samples.
@@ -814,6 +866,54 @@ void app_loop() {
         Serial.printf("SD: pruned %u expired history file(s)\n", pruned);
       }
 #endif
+    }
+  }
+
+  // Unconditional serial console.
+  //
+  // The diagnostic-mode command handler further down is unreachable in this
+  // build (the ALWAYS_ON branch returns above it), and it could only be entered
+  // over MQTT anyway -- so the diagnostics were unavailable in exactly the
+  // situation that needs them: a node that is up but off the network. These
+  // work whenever a cable is attached, no mode to enter.
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd == "status" || cmd == "net") {
+      Serial.printf("[NET] wifi_connected=%d ip=%s rssi=%d mqtt_connected=%d\n",
+                    wifi_is_connected() ? 1 : 0, wifi_get_ip().c_str(),
+                    wifi_is_connected() ? wifi_get_rssi() : 0, mqtt_is_connected() ? 1 : 0);
+      Serial.printf("[NET] unreachable_checks=%u fw=%s uptime=%lus\n", g_unreachable_checks,
+                    FW_VERSION, static_cast<unsigned long>(millis() / 1000UL));
+    } else if (cmd == "wifi") {
+      Serial.println("[NET] forcing reconnect...");
+      WiFi.disconnect(true);
+      delay(500);
+      WiFi.mode(WIFI_OFF);
+      delay(500);
+      WiFi.mode(WIFI_STA);
+      esp_task_wdt_reset();
+      Serial.printf("[NET] reconnect %s, ip=%s\n",
+                    wifi_connect_with_exponential_backoff(2, 500) ? "ok" : "failed",
+                    wifi_get_ip().c_str());
+    } else if (cmd == "scan") {
+      int n = WiFi.scanNetworks();
+      Serial.printf("[NET] %d networks\n", n);
+      for (int i = 0; i < n && i < 10; i++) {
+        Serial.printf("  %s (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+      }
+    } else if (cmd == "batt") {
+      BatteryStatus bs = read_battery_status();
+      Serial.printf("[BATT] %.2fV %d%% ~%dd\n", static_cast<double>(bs.voltage), bs.percent,
+                    bs.estimatedDays);
+    } else if (cmd == "hist") {
+      Serial.printf("[HIST] ring count=%u/%u\n", hist_ring().count, HIST_CAP);
+    } else if (cmd == "reboot") {
+      Serial.println("[NET] rebooting");
+      Serial.flush();
+      ESP.restart();
+    } else if (cmd.length()) {
+      Serial.println("cmds: status|net, wifi, scan, batt, hist, reboot");
     }
   }
 
