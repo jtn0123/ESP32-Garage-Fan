@@ -59,7 +59,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.6.0";
+static const char* kFwVersion = "1.6.1";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -95,6 +95,7 @@ static float g_batt_v = NAN, g_batt_pct = NAN;
 static float g_pct_hist[12];
 static uint8_t g_pct_n = 0;  // 5-min cadence -> 1 h sliding window
 static bool g_sd_ok = false;
+static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
 static bool g_rmt_ready = false;
 static bool g_services_up = false;
 static bool g_ever_healthy = false;
@@ -615,6 +616,38 @@ static void handle_history() {
   g_http.send(200, "application/json", out);
 }
 
+// Token-guarded one-shot: mount with format-on-failure, turning a fresh
+// exFAT card into FAT32 in place. Deliberately NOT automatic on normal
+// mounts -- a flaky-but-full card must never be silently erased. Blocks the
+// loop for the duration (can be minutes on big cards); the RMT peripheral
+// keeps the fan running throughout.
+static void handle_sd_format() {
+  if (g_http.arg("token") != FAN_OTA_TOKEN) {
+    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+    return;
+  }
+  Serial.println("[SD] format requested");
+  SD.end();
+  SPI.end();
+  delay(50);
+  SPI.begin();
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
+  pinMode(SRAM_CS_PIN, OUTPUT);
+  digitalWrite(SRAM_CS_PIN, HIGH);
+  pinMode(EPD_CS_PIN, OUTPUT);
+  digitalWrite(EPD_CS_PIN, HIGH);
+  const bool ok = SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", 5, true);
+  g_sd_ok = ok;
+  g_sd_fails = 0;
+  char buf[80];
+  snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}",
+           ok ? "true" : "false",
+           ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0);
+  Serial.printf("[SD] format result: %s\n", buf);
+  g_http.send(ok ? 200 : 500, "application/json", buf);
+}
+
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.
 static void handle_raw() {
   if (!g_http.hasArg("high_pct")) {
@@ -760,6 +793,7 @@ void setup() {
   g_http.on("/api/config", handle_config);
   g_http.on("/api/sensors", handle_sensors);
   g_http.on("/api/history", handle_history);
+  g_http.on("/api/sdformat", handle_sd_format);
   g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
   g_http.onNotFound(
       []() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
@@ -794,11 +828,14 @@ void loop() {
     auto_tick();
     batt_begin();
     batt_read();
-    // Late card insertion mounts without a power cycle (quiet until it works).
+    // Late card insertion mounts without a power cycle -- every 5 min, and
+    // after 10 straight failures stop trying (an unmountable card must not
+    // stall the web server forever); /api/sdformat resets the count.
     static uint8_t sd_backoff = 0;
-    if (!g_sd_ok && ++sd_backoff >= 2) {
+    if (!g_sd_ok && g_sd_fails < 10 && ++sd_backoff >= 10) {
       sd_backoff = 0;
       sd_mount();
+      g_sd_fails = g_sd_ok ? 0 : g_sd_fails + 1;
     }
   }
   if (!g_ever_healthy && !ota_rollback_image_confirmed() &&
