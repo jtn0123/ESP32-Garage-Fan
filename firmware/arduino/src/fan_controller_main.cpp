@@ -57,7 +57,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.5.0";
+static const char* kFwVersion = "1.5.1";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -109,69 +109,89 @@ static const char kPage[] PROGMEM = R"html(<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Garage fan</title><style>
-body{font-family:system-ui;background:#111;color:#eee;text-align:center;margin:0;padding:24px}
-h1{font-size:1.2rem;font-weight:500}
-#speed{font-size:4rem;margin:12px 0;font-variant-numeric:tabular-nums}
-#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:340px;margin:0 auto}
-button{font-size:1.1rem;padding:12px 0;border:0;border-radius:10px;background:#333;color:#eee}
-button.on{background:#2b7de9;color:#fff}
-#off{grid-column:span 4;background:#552;color:#fff}
-#autorow{display:flex;gap:10px;justify-content:center;align-items:center;margin:16px 0 0}
-#autobtn.on{background:#2a7d4f}
-select{font-size:1rem;padding:8px;border-radius:8px;background:#333;color:#eee;border:0}
-#climate{display:none;max-width:380px;margin:22px auto 0}
+:root{--bg:#0e1116;--card:#171b21;--bd:#232a33;--tx:#e6e9ed;--mut:#8b94a1;--ac:#3b82f6;--ok:#22a06b}
+body{font-family:system-ui;background:var(--bg);color:var(--tx);margin:0;padding:20px 16px 28px;display:flex;justify-content:center}
+#wrap{width:100%;max-width:400px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+h1{font-size:1.05rem;font-weight:600;margin:0;letter-spacing:.02em}
+#dot{width:9px;height:9px;border-radius:50%;background:#555}
+#dot.up{background:var(--ok)}
+#speedcard{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px 16px 14px;margin-top:10px}
+#speed{font-size:3.4rem;line-height:1;font-variant-numeric:tabular-nums;font-weight:600}
+#of{color:var(--mut);font-size:.8rem;margin-top:2px}
+#bar{height:6px;border-radius:3px;background:#232a33;margin:12px 0 16px;overflow:hidden}
+#fill{height:100%;width:0%;background:var(--ac);border-radius:3px;transition:width .4s}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+button{font-size:1rem;padding:11px 0;border:1px solid var(--bd);border-radius:10px;background:#1d232b;color:var(--tx);cursor:pointer}
+button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+#off{grid-column:span 4;background:#241a1a;border-color:#3a2626;color:#e0a9a9}
+#off.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
+#autorow{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:14px}
+#autobtn{flex:1;display:flex;gap:8px;align-items:center;justify-content:center}
+#autobtn.on{background:var(--ok);border-color:var(--ok);color:#fff}
+select{font-size:.95rem;padding:9px 10px;border-radius:10px;background:#1d232b;color:var(--tx);border:1px solid var(--bd)}
+#outinfo{color:var(--mut);font-size:.75rem;white-space:nowrap}
+#climate{display:none;margin-top:14px}
 #tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.tile{background:#1c1c1c;border-radius:10px;padding:10px 2px}
-.tv{font-size:1.25rem}.tl{font-size:.65rem;color:#888}
-#ranges{margin-top:12px}#ranges button{font-size:.8rem;padding:6px 14px;margin:0 3px}
-canvas{width:100%;height:130px;margin-top:8px;background:#1c1c1c;border-radius:10px}
-#legend{font-size:.7rem;color:#888;margin-top:4px}
-#meta{color:#888;font-size:.75rem;margin-top:18px;line-height:1.6}
-</style></head><body>
-<h1>Garage fan</h1><div id="speed">-</div>
+.tile{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 2px;text-align:center}
+.tv{font-size:1.15rem;font-weight:600}.tl{font-size:.62rem;color:var(--mut);margin-top:3px;letter-spacing:.04em}
+#ranges{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:3px;margin-top:12px}
+#ranges button{flex:1;font-size:.78rem;padding:7px 0;border:0;background:none;color:var(--mut)}
+#ranges button.on{background:var(--ac);color:#fff;border-radius:8px}
+canvas{width:100%;height:140px;margin-top:10px;background:var(--card);border:1px solid var(--bd);border-radius:12px}
+#legend{font-size:.7rem;color:var(--mut);margin-top:6px;text-align:center}
+.chip{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:baseline}
+footer{color:var(--mut);font-size:.7rem;margin-top:16px;text-align:center;line-height:1.7}
+</style></head><body><div id="wrap">
+<header><h1>Garage fan</h1><div id="dot"></div></header>
+<div id="speedcard"><div id="speed">–</div><div id="of">of 12</div>
+<div id="bar"><div id="fill"></div></div>
 <div id="grid"><button id="off" onclick="go(0)">off</button></div>
 <div id="autorow"><button id="autobtn" onclick="toggleAuto()">auto</button>
-<label class="tl">max <select id="maxsel" onchange="setMax()"></select></label>
-<span class="tl" id="outinfo"></span></div>
+<select id="maxsel" onchange="setMax()"></select>
+<span id="outinfo"></span></div></div>
 <div id="climate"><div id="tiles">
-<div class="tile"><div class="tv" id="tT">-</div><div class="tl">garage °F</div></div>
-<div class="tile"><div class="tv" id="tO">-</div><div class="tl">outside °F</div></div>
-<div class="tile"><div class="tv" id="tH">-</div><div class="tl">humidity %</div></div>
-<div class="tile"><div class="tv" id="tP">-</div><div class="tl">inHg</div></div>
+<div class="tile"><div class="tv" id="tT">–</div><div class="tl">GARAGE °F</div></div>
+<div class="tile"><div class="tv" id="tO">–</div><div class="tl">OUTSIDE °F</div></div>
+<div class="tile"><div class="tv" id="tH">–</div><div class="tl">HUMIDITY %</div></div>
+<div class="tile"><div class="tv" id="tP">–</div><div class="tl">PRESSURE</div></div>
 </div><div id="ranges"><button id="r1" class="on" onclick="range(1)">24 h</button>
-<button id="r7" onclick="range(7)">7 d</button>
-<button id="r30" onclick="range(30)">30 d</button></div>
-<canvas id="cv" width="720" height="260"></canvas>
-<div id="legend"><span style="color:#e8834a">temp</span> ·
-<span style="color:#2b7de9">humidity</span> ·
-<span style="color:#4ac28a">pressure</span></div></div>
-<div id="meta">-</div>
-<script>
+<button id="r7" onclick="range(7)">7 days</button>
+<button id="r30" onclick="range(30)">30 days</button></div>
+<canvas id="cv" width="736" height="280"></canvas>
+<div id="legend"><span class="chip" style="background:#e8834a"></span>temp&ensp;
+<span class="chip" style="background:#3b82f6"></span>humidity&ensp;
+<span class="chip" style="background:#22a06b"></span>pressure</div></div>
+<footer id="meta">–</footer>
+</div><script>
 let days=1,auto=false,maxs=9;
 const g=document.getElementById('grid');
 for(let i=1;i<=12;i++){const b=document.createElement('button');b.textContent=i;b.id='b'+i;b.onclick=()=>go(i);g.appendChild(b);}
 const ms=document.getElementById('maxsel');
-for(let i=1;i<=12;i++){const o=document.createElement('option');o.value=i;o.textContent=i;ms.appendChild(o);}
+for(let i=1;i<=12;i++){const o=document.createElement('option');o.value=i;o.textContent='max '+i;ms.appendChild(o);}
 async function go(n){await fetch('/api/set?speed='+n);poll();}
 async function toggleAuto(){await fetch('/api/config?auto='+(auto?0:1));poll();}
 async function setMax(){await fetch('/api/config?max='+ms.value);}
 async function poll(){try{const s=await(await fetch('/api/state')).json();
 auto=s.auto;maxs=s.auto_max;ms.value=maxs;
 document.getElementById('speed').textContent=s.speed===0?'off':(s.speed<0?'raw':s.speed);
+document.getElementById('fill').style.width=(s.speed>0?s.speed/12*100:0)+'%';
 for(let i=1;i<=12;i++)document.getElementById('b'+i).className=i===s.speed?'on':'';
 document.getElementById('off').className=s.speed===0?'on':'';
+document.getElementById('dot').className=s.mqtt?'up':'';
 document.getElementById('autobtn').className=auto?'on':'';
-document.getElementById('autobtn').textContent=auto?'auto: on':'auto: off';
-document.getElementById('outinfo').textContent=s.outside_f===null?'no outdoor feed':('out '+s.outside_f.toFixed(1)+'°F');
-document.getElementById('tO').textContent=s.outside_f===null?'—':s.outside_f.toFixed(1);
-let sd=s.sd_total_mb?(' · sd '+(s.sd_used_mb/1024).toFixed(2)+'/'+(s.sd_total_mb/1024).toFixed(1)+' GB'):' · no sd';
-document.getElementById('meta').textContent='fw '+s.fw+' ('+s.slot+') · rssi '+s.rssi+' dBm · mqtt '+(s.mqtt?'up':'down')+sd+' · up '+s.uptime_s+'s';
+document.getElementById('autobtn').textContent=auto?'auto on':'auto off';
+document.getElementById('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
+document.getElementById('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
+let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+' / '+(s.sd_total_mb/1024).toFixed(1)+' GB'):'no sd card';
+document.getElementById('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+' dBm · '+sd+'<br>up '+Math.floor(s.uptime_s/3600)+'h '+Math.floor(s.uptime_s%3600/60)+'m';
 }catch(e){document.getElementById('meta').textContent='unreachable';}}
 function line(ctx,vals,color,W,H){if(vals.length<2)return;
 let mn=Math.min(...vals),mx=Math.max(...vals);if(mx-mn<1e-6){mn-=1;mx+=1;}
-const pad=8;ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
-vals.forEach((v,i)=>{const x=pad+i*(W-2*pad)/(vals.length-1);
-const y=H-pad-(v-mn)*(H-2*pad)/(mx-mn);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
+const pad=10;ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
+let lx,ly;vals.forEach((v,i)=>{const x=pad+i*(W-2*pad)/(vals.length-1);
+const y=H-pad-(v-mn)*(H-2*pad)/(mx-mn);i?ctx.lineTo(x,y):ctx.moveTo(x,y);lx=x;ly=y;});ctx.stroke();
+ctx.fillStyle=color;ctx.beginPath();ctx.arc(lx,ly,3.5,0,7);ctx.fill();}
 function range(d){days=d;[1,7,30].forEach(x=>document.getElementById('r'+x).className=x===d?'on':'');climate();}
 async function climate(){try{
 const c=await(await fetch('/api/sensors')).json();
@@ -183,11 +203,13 @@ document.getElementById('tP').textContent=(c.hpa*0.02953).toFixed(2);}
 const h=await(await fetch('/api/history?days='+days)).json();
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 ctx.clearRect(0,0,cv.width,cv.height);
-if(!h.temp_c||h.temp_c.length<2){ctx.fillStyle='#666';ctx.font='16px system-ui';
-ctx.textAlign='center';ctx.fillText('waiting for data…',cv.width/2,cv.height/2);return;}
+ctx.strokeStyle='#20262e';ctx.lineWidth=1;
+for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(10,i*cv.height/4);ctx.lineTo(cv.width-10,i*cv.height/4);ctx.stroke();}
+if(!h.temp_c||h.temp_c.length<2){ctx.fillStyle='#5a6472';ctx.font='15px system-ui';
+ctx.textAlign='center';ctx.fillText('waiting for data — one sample every 5 minutes',cv.width/2,cv.height/2);return;}
 line(ctx,h.temp_c,'#e8834a',cv.width,cv.height);
-line(ctx,h.rh,'#2b7de9',cv.width,cv.height);
-line(ctx,h.hpa,'#4ac28a',cv.width,cv.height);
+line(ctx,h.rh,'#3b82f6',cv.width,cv.height);
+line(ctx,h.hpa,'#22a06b',cv.width,cv.height);
 }catch(e){}}
 setInterval(poll,2000);poll();
 setInterval(climate,60000);climate();
@@ -269,23 +291,31 @@ static void auto_tick() {
 static bool time_synced() { return time(nullptr) > 1700000000; }
 
 static void sd_mount() {
-  pinMode(SD_CS_PIN, OUTPUT);
-  digitalWrite(SD_CS_PIN, HIGH);
-  pinMode(SRAM_CS_PIN, OUTPUT);
-  digitalWrite(SRAM_CS_PIN, HIGH);
-  pinMode(EPD_CS_PIN, OUTPUT);
-  digitalWrite(EPD_CS_PIN, HIGH);
+  // Full teardown between attempts, per storage.cpp: a card interrupted
+  // mid-transaction by a reset stops answering until the bus restarts from
+  // silence. Called at boot and retried from loop() until a card appears.
   static const uint32_t kFreqs[] = {4000000, 1000000, 400000};
-  for (uint32_t f : kFreqs) {
-    if (SD.begin(SD_CS_PIN, SPI, f)) {
+  for (size_t i = 0; i < 3; i++) {
+    if (i > 0) {
+      SD.end();
+      SPI.end();
+      delay(50);
+      SPI.begin();
+    }
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    pinMode(SRAM_CS_PIN, OUTPUT);
+    digitalWrite(SRAM_CS_PIN, HIGH);
+    pinMode(EPD_CS_PIN, OUTPUT);
+    digitalWrite(EPD_CS_PIN, HIGH);
+    if (SD.begin(SD_CS_PIN, SPI, kFreqs[i])) {
       g_sd_ok = true;
       Serial.printf("sd mounted at %lu Hz: %.1f/%.1f MB used\n",
-                    (unsigned long)f, SD.usedBytes() / 1048576.0,
+                    (unsigned long)kFreqs[i], SD.usedBytes() / 1048576.0,
                     SD.totalBytes() / 1048576.0);
       return;
     }
   }
-  Serial.println("no sd card (climate history limited to RAM ring)");
 }
 
 static void sd_log_sample(time_t now, float t, float h, float p) {
@@ -681,6 +711,12 @@ void loop() {
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
     auto_tick();
+    // Late card insertion mounts without a power cycle (quiet until it works).
+    static uint8_t sd_backoff = 0;
+    if (!g_sd_ok && ++sd_backoff >= 2) {
+      sd_backoff = 0;
+      sd_mount();
+    }
   }
   if (!g_ever_healthy && !ota_rollback_image_confirmed() &&
       millis() > kUnconfirmedDeadlineMs) {
