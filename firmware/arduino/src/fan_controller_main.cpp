@@ -31,6 +31,7 @@
 #include <ctime>
 
 #include "esp_ota_ops.h"
+#include "esp_task_wdt.h"
 #include "fan_auto_logic.h"
 #include "generated_config.h"
 #include "ota_rollback.h"
@@ -59,7 +60,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.6.3";
+static const char* kFwVersion = "1.6.4";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -101,8 +102,28 @@ static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
 // previous boot died inside the mount -- quarantine the card so it can never
 // boot-loop the controller. RTC memory survives resets but not power loss.
 RTC_DATA_ATTR static uint32_t rtc_sd_sentinel = 0;
+// Breadcrumb of the op in flight when a boot dies, read back on next boot.
+RTC_DATA_ATTR static char rtc_crumb[16] = {0};
 static bool g_sd_quarantined = false;
+static char g_last_death[48] = "none";
 static constexpr uint32_t kSdSentinelMagic = 0x5DDEAD01;
+
+#define CRUMB(x) snprintf(rtc_crumb, sizeof(rtc_crumb), "%s", x)
+#define CRUMB_CLEAR() (rtc_crumb[0] = 0)
+
+static const char* reset_reason_str(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "poweron";
+    case ESP_RST_SW: return "sw_reset";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT: return "wdt";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    default: return "other";
+  }
+}
 static bool g_rmt_ready = false;
 static bool g_services_up = false;
 static bool g_ever_healthy = false;
@@ -384,7 +405,9 @@ static void sd_mount() {
 
 static void sd_mount_guarded() {
   rtc_sd_sentinel = kSdSentinelMagic;
+  CRUMB("sd_mount");
   sd_mount();
+  CRUMB_CLEAR();
   rtc_sd_sentinel = 0;
 }
 
@@ -395,8 +418,10 @@ static void sd_log_sample(time_t now, float t, float h, float p) {
   char path[24];
   snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tm_now.tm_year + 1900,
            tm_now.tm_mon + 1);
+  CRUMB("sd_write");
   File f = SD.open(path, FILE_APPEND);
   if (!f) {
+    CRUMB_CLEAR();
     g_sd_ok = false;  // card yanked; re-detect on reboot
     return;
   }
@@ -406,6 +431,7 @@ static void sd_log_sample(time_t now, float t, float h, float p) {
                    (long)now, t, h, p, isnan(out) ? -999.0f : out, g_speed);
   f.write((const uint8_t*)line, n);
   f.close();
+  CRUMB_CLEAR();
 }
 
 static void sample_climate() {
@@ -477,7 +503,8 @@ static void state_json(char* out, size_t cap) {
   snprintf(out, cap,
            "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"outside_f\":%s,"
            "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%u,\"sensor\":%s,\"sd_q\":%s,"
+           "\"unhealthy_boots\":%u,\"sensor\":%s,\"last_reset\":\"%s\","
+           "\"sd_q\":%s,"
            "\"sd_total_mb\":%lu,"
            "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\"}",
@@ -485,7 +512,7 @@ static void state_json(char* out, size_t cap) {
            kFwVersion, run ? run->label : "?",
            ota_rollback_image_confirmed() ? "true" : "false",
            ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false",
-           g_sd_quarantined ? "true" : "false",
+           g_last_death, g_sd_quarantined ? "true" : "false",
            g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
            g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt,
            WiFi.RSSI(), g_mqtt.connected() ? "true" : "false",
@@ -545,6 +572,7 @@ static void append_series(String& out, const char* name, const float* v,
 // the caller's arrays. Two passes: count, then collect every (count/max)th.
 static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p,
                               uint16_t max_pts) {
+  CRUMB("sd_read");
   time_t now = time(nullptr);
   char paths[2][24];
   int npaths = 0;
@@ -595,9 +623,16 @@ static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p,
       }
       f.close();
     }
-    if (pass == 1) return kept;
-    if (rows == 0) return 0;
+    if (pass == 1) {
+      CRUMB_CLEAR();
+      return kept;
+    }
+    if (rows == 0) {
+      CRUMB_CLEAR();
+      return 0;
+    }
   }
+  CRUMB_CLEAR();
   return 0;
 }
 
@@ -642,8 +677,10 @@ static void handle_sd_format() {
     return;
   }
   Serial.println("[SD] format requested");
+  esp_task_wdt_delete(NULL);  // a big-card format legitimately takes minutes
   g_sd_quarantined = false;  // manual override un-quarantines
   rtc_sd_sentinel = kSdSentinelMagic;
+  CRUMB("sd_format");
   SD.end();
   SPI.end();
   delay(50);
@@ -656,6 +693,8 @@ static void handle_sd_format() {
   digitalWrite(EPD_CS_PIN, HIGH);
   const bool ok = SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", 5, true);
   rtc_sd_sentinel = 0;
+  CRUMB_CLEAR();
+  esp_task_wdt_add(NULL);
   g_sd_ok = ok;
   g_sd_fails = 0;
   char buf[80];
@@ -845,10 +884,27 @@ void setup() {
   // and the first mount attempt happens ~60 s later from loop(). A card that
   // crashes the mount gets quarantined by the sentinel above -- no card can
   // take fan control down with it.
-  g_sd_quarantined = (rtc_sd_sentinel == kSdSentinelMagic);
+  const esp_reset_reason_t rr = esp_reset_reason();
+  const bool abnormal = rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT ||
+                        rr == ESP_RST_TASK_WDT || rr == ESP_RST_WDT ||
+                        rr == ESP_RST_BROWNOUT;
+  snprintf(g_last_death, sizeof(g_last_death), "%s%s%s", reset_reason_str(rr),
+           rtc_crumb[0] ? " during " : "", rtc_crumb[0] ? rtc_crumb : "");
+  // Quarantine on a mount sentinel from any reset, or any abnormal death
+  // while an SD op was in flight.
+  g_sd_quarantined = (rtc_sd_sentinel == kSdSentinelMagic) ||
+                     (abnormal && strncmp(rtc_crumb, "sd", 2) == 0);
   rtc_sd_sentinel = 0;
+  CRUMB_CLEAR();
   if (g_sd_quarantined)
-    Serial.println("[SD] previous boot died mid-mount -- card quarantined");
+    Serial.println("[SD] previous boot died in an SD op -- card quarantined");
+  Serial.printf("last reset: %s\n", g_last_death);
+  // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
+  // in 30 s instead of hanging dark forever. The fan rides through on RMT.
+  esp_task_wdt_config_t wdt_cfg = {
+      .timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
+  if (esp_task_wdt_init(&wdt_cfg) != ESP_OK) esp_task_wdt_reconfigure(&wdt_cfg);
+  esp_task_wdt_add(NULL);
   Wire.begin();
   SPI.begin();
   WiFi.mode(WIFI_STA);
@@ -889,6 +945,7 @@ void loop() {
       }
     }
   }
+  esp_task_wdt_reset();
   ensure_mqtt();
   g_mqtt.loop();
   g_http.handleClient();
