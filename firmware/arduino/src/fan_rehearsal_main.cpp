@@ -33,15 +33,9 @@ static bool g_rmt_ready = false;
 static rmt_data_t g_wave;
 
 static void drive_setting(const Step& s) {
-  if (s.high_us >= kPeriodUs) {
-    if (g_rmt_ready) {
-      rmtDeinit(FAN_PWM_PIN);
-      g_rmt_ready = false;
-    }
-    pinMode(FAN_PWM_PIN, OUTPUT);
-    digitalWrite(FAN_PWM_PIN, HIGH);
-    return;
-  }
+  // Pin stays owned by RMT; "off" is a wave that never goes low. Handing the
+  // pin back to plain GPIO left it stuck at the RMT's last level (LOW = full
+  // throttle on this active-low link).
   if (!g_rmt_ready) {
     if (!rmtInit(FAN_PWM_PIN, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 1000000)) {
       Serial.println("rmtInit FAILED");
@@ -49,10 +43,17 @@ static void drive_setting(const Step& s) {
     }
     g_rmt_ready = true;
   }
-  g_wave.level0 = 1;
-  g_wave.duration0 = s.high_us;
-  g_wave.level1 = 0;
-  g_wave.duration1 = kPeriodUs - s.high_us;
+  if (s.high_us >= kPeriodUs) {
+    g_wave.level0 = 1;
+    g_wave.duration0 = kPeriodUs / 2;
+    g_wave.level1 = 1;
+    g_wave.duration1 = kPeriodUs - kPeriodUs / 2;
+  } else {
+    g_wave.level0 = 1;
+    g_wave.duration0 = s.high_us;
+    g_wave.level1 = 0;
+    g_wave.duration1 = kPeriodUs - s.high_us;
+  }
   rmtWriteLooping(FAN_PWM_PIN, &g_wave, 1);
 }
 

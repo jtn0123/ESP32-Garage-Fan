@@ -37,13 +37,17 @@
 #define FAN_OTA_TOKEN "iliving-ota"
 #endif
 
-static const char* kFwVersion = "1.1.1";
+static const char* kFwVersion = "1.3.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
-// HIGH width per setting 0..12, measured from the wall controller.
-static constexpr uint16_t kHighUs[13] = {kPeriodUs, 6457, 5862, 5066, 4868,
-                                         4273,      3775, 3180, 2683, 2087,
-                                         1590,      994,  497};
+// HIGH width per setting 0..12. Live fan testing (2026-08-04) showed this
+// rig's fan tracks the HIGH fraction -- inverse of the wall-controller
+// captures in PROTOCOL.md -- so this table is the measured one mirrored
+// (high = period - controller_high). Off = solid LOW on this rig.
+// Use /api/raw?high_pct=N to re-derive empirically if behavior shifts.
+static constexpr uint16_t kHighUs[13] = {0,    3477, 4072, 4868, 5066,
+                                         5661, 6159, 6754, 7251, 7847,
+                                         8344, 8940, 9437};
 
 static const char* kTopicSet = "garage/fan/set";
 static const char* kTopicState = "garage/fan/state";
@@ -92,16 +96,10 @@ setInterval(poll,2000);poll();
 </script></body></html>)html";
 
 static void drive_speed(int speed) {
-  const uint16_t high_us = kHighUs[speed];
-  if (high_us >= kPeriodUs) {
-    if (g_rmt_ready) {
-      rmtDeinit(FAN_PWM_PIN);
-      g_rmt_ready = false;
-    }
-    pinMode(FAN_PWM_PIN, OUTPUT);
-    digitalWrite(FAN_PWM_PIN, HIGH);
-    return;
-  }
+  // The pin stays owned by RMT forever: handing it back to plain GPIO for
+  // "off" (rmtDeinit + digitalWrite) left the line stuck at the RMT's last
+  // level — LOW reads as 100% throttle, so "off" ran the fan flat out.
+  // Off is simply a wave that never goes low.
   if (!g_rmt_ready) {
     if (!rmtInit(FAN_PWM_PIN, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 1000000)) {
       Serial.println("rmtInit FAILED");
@@ -109,10 +107,18 @@ static void drive_speed(int speed) {
     }
     g_rmt_ready = true;
   }
-  g_wave.level0 = 1;
-  g_wave.duration0 = high_us;
-  g_wave.level1 = 0;
-  g_wave.duration1 = kPeriodUs - high_us;
+  const uint16_t high_us = kHighUs[speed];
+  if (high_us >= kPeriodUs || high_us == 0) {
+    g_wave.level0 = high_us ? 1 : 0;
+    g_wave.duration0 = kPeriodUs / 2;
+    g_wave.level1 = high_us ? 1 : 0;
+    g_wave.duration1 = kPeriodUs - kPeriodUs / 2;
+  } else {
+    g_wave.level0 = 1;
+    g_wave.duration0 = high_us;
+    g_wave.level1 = 0;
+    g_wave.duration1 = kPeriodUs - high_us;
+  }
   rmtWriteLooping(FAN_PWM_PIN, &g_wave, 1);
 }
 
@@ -150,6 +156,46 @@ static void handle_state() {
   g_http.send(200, "application/json", buf);
 }
 
+// Test instrument: drive an arbitrary duty so duty->airflow can be mapped
+// empirically on the real fan, no reflash per data point.
+static void handle_raw() {
+  if (!g_http.hasArg("high_pct")) {
+    g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
+    return;
+  }
+  const int pct = g_http.arg("high_pct").toInt();
+  if (pct < 0 || pct > 100) {
+    g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
+    return;
+  }
+  const uint16_t high_us = (uint16_t)((uint32_t)kPeriodUs * pct / 100);
+  if (!g_rmt_ready) {
+    if (!rmtInit(FAN_PWM_PIN, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 1000000)) {
+      g_http.send(500, "application/json", "{\"error\":\"rmt\"}");
+      return;
+    }
+    g_rmt_ready = true;
+  }
+  if (high_us >= kPeriodUs || high_us == 0) {
+    g_wave.level0 = high_us ? 1 : 0;
+    g_wave.duration0 = kPeriodUs / 2;
+    g_wave.level1 = high_us ? 1 : 0;
+    g_wave.duration1 = kPeriodUs - kPeriodUs / 2;
+  } else {
+    g_wave.level0 = 1;
+    g_wave.duration0 = high_us;
+    g_wave.level1 = 0;
+    g_wave.duration1 = kPeriodUs - high_us;
+  }
+  rmtWriteLooping(FAN_PWM_PIN, &g_wave, 1);
+  g_speed = -1;  // raw mode; next /api/set re-enters the table
+  char buf[96];
+  snprintf(buf, sizeof(buf), "{\"raw_high_pct\":%d,\"high_us\":%u}", pct,
+           high_us);
+  Serial.printf("raw duty: %d%% high (%u us)\n", pct, high_us);
+  g_http.send(200, "application/json", buf);
+}
+
 static void handle_set() {
   if (!g_http.hasArg("speed")) {
     g_http.send(400, "application/json", "{\"error\":\"speed required\"}");
@@ -160,6 +206,7 @@ static void handle_set() {
     g_http.send(400, "application/json", "{\"error\":\"0-12 only\"}");
     return;
   }
+  if (g_speed == -1 && v == 0) g_speed = -2;  // force off to re-apply after raw
   apply_speed(v, "http");
   handle_state();
 }
@@ -247,6 +294,7 @@ void setup() {
   g_http.on("/", []() { g_http.send_P(200, "text/html", kPage); });
   g_http.on("/api/state", handle_state);
   g_http.on("/api/set", handle_set);
+  g_http.on("/api/raw", handle_raw);
   g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
   g_http.onNotFound(
       []() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
