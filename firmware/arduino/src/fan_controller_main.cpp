@@ -15,6 +15,8 @@
 //           retained on the broker; whichever answers first wins the tie.
 // OTA:      POST /update?token=...; A/B slots with ota_rollback confirm.
 #include <Adafruit_BME280.h>
+#include <Adafruit_LC709203F.h>
+#include <Adafruit_MAX1704X.h>
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
@@ -57,7 +59,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.5.1";
+static const char* kFwVersion = "1.6.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -84,8 +86,14 @@ static WiFiClient g_net;
 static PubSubClient g_mqtt(g_net);
 static WebServer g_http(80);
 static Adafruit_BME280 g_bme;
+static Adafruit_MAX17048 g_max;
+static Adafruit_LC709203F g_lc;
 static Preferences g_prefs;
 static bool g_bme_ok = false;
+static uint8_t g_batt_kind = 0;  // 0 none, 1 MAX17048, 2 LC709203F
+static float g_batt_v = NAN, g_batt_pct = NAN;
+static float g_pct_hist[12];
+static uint8_t g_pct_n = 0;  // 5-min cadence -> 1 h sliding window
 static bool g_sd_ok = false;
 static bool g_rmt_ready = false;
 static bool g_services_up = false;
@@ -116,6 +124,10 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 h1{font-size:1.05rem;font-weight:600;margin:0;letter-spacing:.02em}
 #dot{width:9px;height:9px;border-radius:50%;background:#555}
 #dot.up{background:var(--ok)}
+#batt{display:flex;align-items:center;gap:5px;color:var(--mut);font-size:.72rem}
+#bshell{width:22px;height:11px;border:1px solid var(--mut);border-radius:3px;padding:1px;position:relative}
+#bshell:after{content:'';position:absolute;right:-4px;top:2px;width:2px;height:5px;background:var(--mut);border-radius:1px}
+#bfill{height:100%;background:var(--ok);border-radius:1px;width:0%}
 #speedcard{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px 16px 14px;margin-top:10px}
 #speed{font-size:3.4rem;line-height:1;font-variant-numeric:tabular-nums;font-weight:600}
 #of{color:var(--mut);font-size:.8rem;margin-top:2px}
@@ -135,6 +147,7 @@ select{font-size:.95rem;padding:9px 10px;border-radius:10px;background:#1d232b;c
 #tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .tile{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 2px;text-align:center}
 .tv{font-size:1.15rem;font-weight:600}.tl{font-size:.62rem;color:var(--mut);margin-top:3px;letter-spacing:.04em}
+.src{font-size:.55rem;color:#5a6472;margin-top:2px}
 #ranges{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:3px;margin-top:12px}
 #ranges button{flex:1;font-size:.78rem;padding:7px 0;border:0;background:none;color:var(--mut)}
 #ranges button.on{background:var(--ac);color:#fff;border-radius:8px}
@@ -143,7 +156,9 @@ canvas{width:100%;height:140px;margin-top:10px;background:var(--card);border:1px
 .chip{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:baseline}
 footer{color:var(--mut);font-size:.7rem;margin-top:16px;text-align:center;line-height:1.7}
 </style></head><body><div id="wrap">
-<header><h1>Garage fan</h1><div id="dot"></div></header>
+<header><h1>Garage fan</h1><div style="display:flex;gap:10px;align-items:center">
+<div id="batt" style="display:none"><span id="bpct"></span><div id="bshell"><div id="bfill"></div></div></div>
+<div id="dot"></div></div></header>
 <div id="speedcard"><div id="speed">–</div><div id="of">of 12</div>
 <div id="bar"><div id="fill"></div></div>
 <div id="grid"><button id="off" onclick="go(0)">off</button></div>
@@ -151,10 +166,10 @@ footer{color:var(--mut);font-size:.7rem;margin-top:16px;text-align:center;line-h
 <select id="maxsel" onchange="setMax()"></select>
 <span id="outinfo"></span></div></div>
 <div id="climate"><div id="tiles">
-<div class="tile"><div class="tv" id="tT">–</div><div class="tl">GARAGE °F</div></div>
-<div class="tile"><div class="tv" id="tO">–</div><div class="tl">OUTSIDE °F</div></div>
-<div class="tile"><div class="tv" id="tH">–</div><div class="tl">HUMIDITY %</div></div>
-<div class="tile"><div class="tv" id="tP">–</div><div class="tl">PRESSURE</div></div>
+<div class="tile"><div class="tv" id="tO">–</div><div class="tl">OUTSIDE °F</div><div class="src">yard feed</div></div>
+<div class="tile"><div class="tv" id="tT">–</div><div class="tl">GARAGE °F</div><div class="src">this board</div></div>
+<div class="tile"><div class="tv" id="tH">–</div><div class="tl">HUMIDITY %</div><div class="src">this board</div></div>
+<div class="tile"><div class="tv" id="tP">–</div><div class="tl">PRESSURE MB</div><div class="src">this board</div></div>
 </div><div id="ranges"><button id="r1" class="on" onclick="range(1)">24 h</button>
 <button id="r7" onclick="range(7)">7 days</button>
 <button id="r30" onclick="range(30)">30 days</button></div>
@@ -179,12 +194,17 @@ document.getElementById('fill').style.width=(s.speed>0?s.speed/12*100:0)+'%';
 for(let i=1;i<=12;i++)document.getElementById('b'+i).className=i===s.speed?'on':'';
 document.getElementById('off').className=s.speed===0?'on':'';
 document.getElementById('dot').className=s.mqtt?'up':'';
+if(s.batt){document.getElementById('batt').style.display='flex';
+document.getElementById('bpct').textContent=(s.batt.chg?'⚡':'')+s.batt.pct+'%';
+const bf=document.getElementById('bfill');bf.style.width=s.batt.pct+'%';
+bf.style.background=s.batt.chg?'#3b82f6':(s.batt.pct>40?'#22a06b':(s.batt.pct>15?'#c9852a':'#c0392b'));}
 document.getElementById('autobtn').className=auto?'on':'';
 document.getElementById('autobtn').textContent=auto?'auto on':'auto off';
 document.getElementById('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
 document.getElementById('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
 let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+' / '+(s.sd_total_mb/1024).toFixed(1)+' GB'):'no sd card';
-document.getElementById('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+' dBm · '+sd+'<br>up '+Math.floor(s.uptime_s/3600)+'h '+Math.floor(s.uptime_s%3600/60)+'m';
+let bt=s.batt?(' · batt '+s.batt.v.toFixed(2)+'V'+(s.batt.eta_h?(' · ~'+(s.batt.eta_h/24).toFixed(1)+'d left'):'')):'';
+document.getElementById('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+' dBm · '+sd+bt+'<br>home link '+(s.mqtt?'up':'down')+' (local mqtt, not HA) · up '+Math.floor(s.uptime_s/3600)+'h '+Math.floor(s.uptime_s%3600/60)+'m';
 }catch(e){document.getElementById('meta').textContent='unreachable';}}
 function line(ctx,vals,color,W,H){if(vals.length<2)return;
 let mn=Math.min(...vals),mx=Math.max(...vals);if(mx-mn<1e-6){mn-=1;mx+=1;}
@@ -199,7 +219,7 @@ document.getElementById('climate').style.display='block';
 if(c.ok){
 document.getElementById('tT').textContent=(c.temp_c*9/5+32).toFixed(1);
 document.getElementById('tH').textContent=c.rh.toFixed(0);
-document.getElementById('tP').textContent=(c.hpa*0.02953).toFixed(2);}
+document.getElementById('tP').textContent=c.hpa.toFixed(1);}
 const h=await(await fetch('/api/history?days='+days)).json();
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 ctx.clearRect(0,0,cv.width,cv.height);
@@ -267,6 +287,42 @@ static void apply_speed(int v, const char* source) {
   }
   g_prefs.putInt("speed", v);  // survives power loss even broker-less
   Serial.printf("speed -> %d via %s\n", v, source);
+}
+
+// Boards in this project carry either fuel gauge depending on Feather rev --
+// probe both (see memory: LC709203F lives at 0x0B, MAX17048 at 0x36).
+static void batt_begin() {
+  if (g_batt_kind) return;
+  if (g_max.begin(&Wire)) {
+    g_batt_kind = 1;
+    Serial.println("fuel gauge: MAX17048");
+  } else if (g_lc.begin(&Wire)) {
+    g_lc.setPackAPA(0x56);  // dual-18650 6600 mAh pack, per the sensor node
+    g_batt_kind = 2;
+    Serial.println("fuel gauge: LC709203F");
+  }
+}
+
+static void batt_read() {
+  if (!g_batt_kind) return;
+  const float v = g_batt_kind == 1 ? g_max.cellVoltage() : g_lc.cellVoltage();
+  const float p = g_batt_kind == 1 ? g_max.cellPercent() : g_lc.cellPercent();
+  if (v > 2.0f && v < 5.0f) {
+    g_batt_v = v;
+    g_batt_pct = p > 100 ? 100 : p;
+  }
+}
+
+// Discharge slope over the last hour of 5-min points -> hours remaining.
+// Rising charge or a flat line means no meaningful ETA.
+static void batt_eta(bool* charging, float* eta_h) {
+  *charging = g_batt_v >= 4.18f;
+  *eta_h = NAN;
+  if (g_pct_n < 6) return;
+  const float delta = g_pct_hist[0] - g_pct_hist[g_pct_n - 1];  // + = draining
+  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
+  if (delta < -0.3f) *charging = true;
+  if (delta > 0.2f && !*charging) *eta_h = g_batt_pct / (delta / hours);
 }
 
 static float outside_c_fresh() {
@@ -362,6 +418,15 @@ static void sample_climate() {
   g_ring_h[g_ring_count] = h;
   g_ring_p[g_ring_count] = p;
   g_ring_count++;
+  batt_begin();
+  batt_read();
+  if (!isnan(g_batt_pct)) {
+    if (g_pct_n == 12) {
+      memmove(g_pct_hist, g_pct_hist + 1, 11 * sizeof(float));
+      g_pct_n--;
+    }
+    g_pct_hist[g_pct_n++] = g_batt_pct;
+  }
   if (time_synced()) sd_log_sample(time(nullptr), t, h, p);
   if (g_mqtt.connected()) {
     char buf[96];
@@ -379,24 +444,40 @@ static void state_json(char* out, size_t cap) {
     snprintf(outside, sizeof(outside), "null");
   else
     snprintf(outside, sizeof(outside), "%.1f", oc * 9 / 5 + 32);
+  bool chg = false;
+  float eta = NAN;
+  batt_eta(&chg, &eta);
+  char batt[96];
+  if (g_batt_kind && !isnan(g_batt_v)) {
+    if (isnan(eta))
+      snprintf(batt, sizeof(batt),
+               "{\"v\":%.2f,\"pct\":%.0f,\"chg\":%s,\"eta_h\":null}",
+               g_batt_v, g_batt_pct, chg ? "true" : "false");
+    else
+      snprintf(batt, sizeof(batt),
+               "{\"v\":%.2f,\"pct\":%.0f,\"chg\":%s,\"eta_h\":%.1f}",
+               g_batt_v, g_batt_pct, chg ? "true" : "false", eta);
+  } else {
+    snprintf(batt, sizeof(batt), "null");
+  }
   snprintf(out, cap,
            "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"outside_f\":%s,"
            "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
            "\"unhealthy_boots\":%u,\"sensor\":%s,\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"rssi\":%d,\"mqtt\":%s,\"uptime_s\":%lu,"
-           "\"ip\":\"%s\"}",
+           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
+           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
            g_speed, g_auto_on ? "true" : "false", g_auto_max, outside,
            kFwVersion, run ? run->label : "?",
            ota_rollback_image_confirmed() ? "true" : "false",
            ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false",
            g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
-           g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0,
+           g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt,
            WiFi.RSSI(), g_mqtt.connected() ? "true" : "false",
            millis() / 1000UL, WiFi.localIP().toString().c_str());
 }
 
 static void handle_state() {
-  char buf[448];
+  char buf[560];
   state_json(buf, sizeof(buf));
   g_http.send(200, "application/json", buf);
 }
@@ -711,6 +792,8 @@ void loop() {
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
     auto_tick();
+    batt_begin();
+    batt_read();
     // Late card insertion mounts without a power cycle (quiet until it works).
     static uint8_t sd_backoff = 0;
     if (!g_sd_ok && ++sd_backoff >= 2) {
