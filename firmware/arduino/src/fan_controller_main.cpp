@@ -59,7 +59,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.6.1";
+static const char* kFwVersion = "1.6.3";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -96,6 +96,13 @@ static float g_pct_hist[12];
 static uint8_t g_pct_n = 0;  // 5-min cadence -> 1 h sliding window
 static bool g_sd_ok = false;
 static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
+// Crash forensics for the SD path: the sentinel holds a magic value only
+// while a mount is in flight. If a boot starts and finds it still set, the
+// previous boot died inside the mount -- quarantine the card so it can never
+// boot-loop the controller. RTC memory survives resets but not power loss.
+RTC_DATA_ATTR static uint32_t rtc_sd_sentinel = 0;
+static bool g_sd_quarantined = false;
+static constexpr uint32_t kSdSentinelMagic = 0x5DDEAD01;
 static bool g_rmt_ready = false;
 static bool g_services_up = false;
 static bool g_ever_healthy = false;
@@ -203,7 +210,7 @@ document.getElementById('autobtn').className=auto?'on':'';
 document.getElementById('autobtn').textContent=auto?'auto on':'auto off';
 document.getElementById('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
 document.getElementById('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
-let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+' / '+(s.sd_total_mb/1024).toFixed(1)+' GB'):'no sd card';
+let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+' / '+(s.sd_total_mb/1024).toFixed(1)+' GB'):(s.sd_q?'sd quarantined — crashed a boot':'no sd card');
 let bt=s.batt?(' · batt '+s.batt.v.toFixed(2)+'V'+(s.batt.eta_h?(' · ~'+(s.batt.eta_h/24).toFixed(1)+'d left'):'')):'';
 document.getElementById('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+' dBm · '+sd+bt+'<br>home link '+(s.mqtt?'up':'down')+' (local mqtt, not HA) · up '+Math.floor(s.uptime_s/3600)+'h '+Math.floor(s.uptime_s%3600/60)+'m';
 }catch(e){document.getElementById('meta').textContent='unreachable';}}
@@ -375,6 +382,12 @@ static void sd_mount() {
   }
 }
 
+static void sd_mount_guarded() {
+  rtc_sd_sentinel = kSdSentinelMagic;
+  sd_mount();
+  rtc_sd_sentinel = 0;
+}
+
 static void sd_log_sample(time_t now, float t, float h, float p) {
   if (!g_sd_ok) return;
   struct tm tm_now;
@@ -464,13 +477,15 @@ static void state_json(char* out, size_t cap) {
   snprintf(out, cap,
            "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"outside_f\":%s,"
            "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%u,\"sensor\":%s,\"sd_total_mb\":%lu,"
+           "\"unhealthy_boots\":%u,\"sensor\":%s,\"sd_q\":%s,"
+           "\"sd_total_mb\":%lu,"
            "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\"}",
            g_speed, g_auto_on ? "true" : "false", g_auto_max, outside,
            kFwVersion, run ? run->label : "?",
            ota_rollback_image_confirmed() ? "true" : "false",
            ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false",
+           g_sd_quarantined ? "true" : "false",
            g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
            g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt,
            WiFi.RSSI(), g_mqtt.connected() ? "true" : "false",
@@ -627,6 +642,8 @@ static void handle_sd_format() {
     return;
   }
   Serial.println("[SD] format requested");
+  g_sd_quarantined = false;  // manual override un-quarantines
+  rtc_sd_sentinel = kSdSentinelMagic;
   SD.end();
   SPI.end();
   delay(50);
@@ -638,6 +655,7 @@ static void handle_sd_format() {
   pinMode(EPD_CS_PIN, OUTPUT);
   digitalWrite(EPD_CS_PIN, HIGH);
   const bool ok = SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", 5, true);
+  rtc_sd_sentinel = 0;
   g_sd_ok = ok;
   g_sd_fails = 0;
   char buf[80];
@@ -646,6 +664,53 @@ static void handle_sd_format() {
            ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0);
   Serial.printf("[SD] format result: %s\n", buf);
   g_http.send(ok ? 200 : 500, "application/json", buf);
+}
+
+// Raw SD probe: bit-level CMD0/CMD8 handshake at 400 kHz, reporting each
+// step, so "card not seated", "card dead", and "card incompatible" stop
+// looking identical. Read-only; safe on any card.
+static void handle_sd_test() {
+  SD.end();
+  SPI.end();
+  delay(50);
+  SPI.begin();
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
+  pinMode(SRAM_CS_PIN, OUTPUT);
+  digitalWrite(SRAM_CS_PIN, HIGH);
+  pinMode(EPD_CS_PIN, OUTPUT);
+  digitalWrite(EPD_CS_PIN, HIGH);
+  SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+  for (int i = 0; i < 10; i++) SPI.transfer(0xFF);  // 80 warm-up clocks
+  digitalWrite(SD_CS_PIN, LOW);
+  static const uint8_t kCmd0[] = {0x40, 0, 0, 0, 0, 0x95};
+  for (uint8_t b : kCmd0) SPI.transfer(b);
+  uint8_t r1 = 0xFF;
+  for (int i = 0; i < 16 && (r1 & 0x80); i++) r1 = SPI.transfer(0xFF);
+  uint8_t r7[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+  uint8_t r1b = 0xFF;
+  if (r1 == 0x01) {  // idle: try CMD8 (SDv2 voltage check, echoes 0x1AA)
+    static const uint8_t kCmd8[] = {0x48, 0, 0, 0x01, 0xAA, 0x87};
+    for (uint8_t b : kCmd8) SPI.transfer(b);
+    for (int i = 0; i < 16 && (r1b & 0x80); i++) r1b = SPI.transfer(0xFF);
+    if (r1b == 0x01)
+      for (int i = 0; i < 4; i++) r7[i] = SPI.transfer(0xFF);
+  }
+  digitalWrite(SD_CS_PIN, HIGH);
+  SPI.transfer(0xFF);
+  SPI.endTransaction();
+  char buf[160];
+  snprintf(buf, sizeof(buf),
+           "{\"cmd0_r1\":\"0x%02X\",\"cmd8_r1\":\"0x%02X\","
+           "\"cmd8_echo\":\"%02X%02X%02X%02X\",\"verdict\":\"%s\"}",
+           r1, r1b, r7[0], r7[1], r7[2], r7[3],
+           r1 == 0xFF  ? "no response - card absent, unseated, or bad contact"
+           : r1 == 0x01 ? (r7[2] == 0x01 && r7[3] == 0xAA
+                               ? "card alive, SDv2, handshake ok"
+                               : "card alive but CMD8 odd")
+                        : "card answered abnormally");
+  Serial.printf("[SD] probe: %s\n", buf);
+  g_http.send(200, "application/json", buf);
 }
 
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.
@@ -776,9 +841,16 @@ void setup() {
     set_wave(kHighUs[saved]);  // resume before WiFi even exists
     Serial.printf("restored speed %d from nvs\n", saved);
   }
+  // SD stays OUT of the boot path: the controller comes fully online first,
+  // and the first mount attempt happens ~60 s later from loop(). A card that
+  // crashes the mount gets quarantined by the sentinel above -- no card can
+  // take fan control down with it.
+  g_sd_quarantined = (rtc_sd_sentinel == kSdSentinelMagic);
+  rtc_sd_sentinel = 0;
+  if (g_sd_quarantined)
+    Serial.println("[SD] previous boot died mid-mount -- card quarantined");
   Wire.begin();
   SPI.begin();
-  sd_mount();
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setHostname(FAN_HOSTNAME);
@@ -794,6 +866,7 @@ void setup() {
   g_http.on("/api/sensors", handle_sensors);
   g_http.on("/api/history", handle_history);
   g_http.on("/api/sdformat", handle_sd_format);
+  g_http.on("/api/sdtest", handle_sd_test);
   g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
   g_http.onNotFound(
       []() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
@@ -828,14 +901,18 @@ void loop() {
     auto_tick();
     batt_begin();
     batt_read();
-    // Late card insertion mounts without a power cycle -- every 5 min, and
-    // after 10 straight failures stop trying (an unmountable card must not
-    // stall the web server forever); /api/sdformat resets the count.
+    // First mount attempt ~60 s after boot, then every 5 min, 10-fail cap,
+    // and never while quarantined; /api/sdformat overrides all of it.
+    static bool sd_tried = false;
     static uint8_t sd_backoff = 0;
-    if (!g_sd_ok && g_sd_fails < 10 && ++sd_backoff >= 10) {
-      sd_backoff = 0;
-      sd_mount();
-      g_sd_fails = g_sd_ok ? 0 : g_sd_fails + 1;
+    if (!g_sd_ok && !g_sd_quarantined && g_sd_fails < 10) {
+      const bool due = sd_tried ? (++sd_backoff >= 10) : (millis() > 60000);
+      if (due) {
+        sd_tried = true;
+        sd_backoff = 0;
+        sd_mount_guarded();
+        g_sd_fails = g_sd_ok ? 0 : g_sd_fails + 1;
+      }
     }
   }
   if (!g_ever_healthy && !ota_rollback_image_confirmed() &&
