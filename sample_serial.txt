@@ -1,3 +1,0 @@
-ESP32 eInk Room Node boot
-Awake ms: 32000
-Sleeping for 7200s

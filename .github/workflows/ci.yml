@@ -17,207 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate-json:
-    name: Validate UI/geometry JSON
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements.txt
-
-      - name: Install test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-
-      - name: Run schema/bounds tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          pytest -q tests/test_ui_spec_schema.py tests/test_geometry_schema.py 2>&1 | tee json-validate.txt
-
-      - name: Upload validation logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: json-validation-logs
-          path: json-validate.txt
-          if-no-files-found: warn
-
-  generate:
-    name: Generate headers/icons and mock snapshot
-    runs-on: ubuntu-latest
-    needs: [validate-json]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements.txt
-
-      - name: Install generation deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pillow pyyaml cairosvg
-
-      - name: Generate UI headers and JS
-        run: python scripts/gen_ui.py
-
-      - name: Generate icons header
-        run: python scripts/convert_icons.py
-
-      - name: Produce mock display snapshot
-        run: python scripts/mock_display.py
-
-      - name: Upload generated artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: generated-assets
-          if-no-files-found: warn
-          path: |
-            firmware/arduino/src/display_layout.h
-            firmware/arduino/src/ui_generated.h
-            firmware/arduino/src/ui_generated.cpp
-            firmware/arduino/src/ui_ops_generated.h
-            firmware/arduino/src/ui_ops_generated.cpp
-            firmware/arduino/src/icons_generated.h
-            web/sim/ui_generated.js
-            out/display_mock.png
-            out/expected.png
-  tests-python:
-    name: Python tests (Pillow-only)
-    runs-on: ubuntu-latest
-    needs: [generate]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history so the SonarCloud step below can resolve new-code scope
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements.txt
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          # For icon conversion coverage
-          python -m pip install cairosvg
-          # Pinned deliberately: an unpinned install added here trips
-          # githubactions:S8544, and this is CI-only tooling.
-          python -m pip install "pytest-cov==7.1.0"
-
-      - name: Run unit tests (skip web-sim)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # -m "not slow" keeps browser-driven tests here out of this job, which has no Chromium.
-          # --cov writes coverage.xml for the SonarCloud step below. Collecting it
-          # from this run rather than a second one keeps the suite executing once.
-          pytest -q -k "not web_sim" -m "not slow" \
-            --cov=scripts --cov-report=xml 2>&1 | tee pytest-python.txt
-
-      # Scanning from inside this job means coverage.xml is already in the
-      # workspace: no artifact round-trip, and no second pytest run. always() so a
-      # failing test still gets measured instead of leaving the gate at 0%.
-      # Dependabot PRs cannot read SONAR_TOKEN, so the scan is skipped for them
-      # rather than reporting a misleading red check.
-      # Every action in this repo is pinned to a commit SHA, not a tag:
-      # githubactions:S7637 flags movable refs, since a tag can be repointed at
-      # new code. Dependabot still updates them by reading the version comment.
-      # v8 flipped skipSignatureVerification to false, so the scanner download
-      # is now OpenPGP-verified.
-      - name: SonarCloud Scan
-        if: ${{ always() && github.event.pull_request.user.login != 'dependabot[bot]' }}
-        uses: SonarSource/sonarqube-scan-action@59db25f34e16620e48ab4bb9e4a5dce155cb5432 # v8.0.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Upload test artifacts
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-tests-artifacts
-          if-no-files-found: ignore
-          path: |
-            out/*.png
-            out/*.json
-            pytest-python.txt
-            coverage.xml
-
-  tests-web:
-    name: Web simulator tests (Playwright/Chromium)
-    runs-on: ubuntu-latest
-    needs: [generate]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements-web.txt
-
-      - name: Install Python deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-web.txt numpy
-
-      - name: Install Playwright browsers
-        run: python -m playwright install --with-deps chromium
-
-      - name: Run web simulator tests
-        env:
-          # Set to 1 to always save screenshots/artifacts from layout tests
-          SAVE_SHOT: "1"
-        shell: bash
-        run: |
-          # pipefail so a pytest failure is not swallowed by tee, but deliberately
-          # no -e: both selections must run even when the first one fails, or a red
-          # web_sim suite would silently stop the "slow" browser tests from
-          # running at all. Failure is recorded and re-raised at the end instead.
-          set -uo pipefail
-          rc=0
-          # This job has Chromium, so it owns both the web_sim suite and the
-          # browser-driven tests marked "slow" (visual regression, debug panel).
-          pytest -q -k web_sim 2>&1 | tee pytest-web.txt || rc=1
-          pytest -q -m slow 2>&1 | tee -a pytest-web.txt || rc=1
-          exit $rc
-
-      - name: Upload web-sim artifacts
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: web-sim-artifacts
-          if-no-files-found: ignore
-          path: |
-            out/*_page.png
-            out/*_canvas.png
-            out/*_metrics.json
-            out/golden_web_sim_current.png
-            pytest-web.txt
-
   firmware-build:
     name: Firmware build (PlatformIO)
     runs-on: ubuntu-latest
-    needs: [generate]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -247,15 +49,15 @@ jobs:
       # pre-scripts never ran (their entry points only fired for __name__ ==
       # "__main__", which SCons never sets). Deleting the header first makes that
       # failure mode break this job instead of hiding behind the manual step.
-      - name: Build Arduino firmware from a clean checkout
+      - name: Build fan firmware from a clean checkout
         working-directory: firmware/arduino
         shell: bash
         run: |
           # pipefail matters: without it `tee` supplies the exit status and a
           # failed build would pass this step.
           set -euo pipefail
-          # Deleting the generated header first proves the PlatformIO pre-scripts
-          # really do regenerate it, so a clean checkout builds.
+          # Deleting the generated header first proves the PlatformIO pre-script
+          # really does regenerate it, so a clean checkout builds.
           rm -f src/generated_config.h
           pio run 2>&1 | tee build.log
           test -s src/generated_config.h
@@ -263,11 +65,6 @@ jobs:
       # The firmware build is warning-free; keep it that way. Anchored to ^src/
       # so this only covers our own sources -- a dependency that warns from
       # .pio/libdeps/<env>/<lib>/src/... must not fail an unrelated PR.
-      #
-      # This gate exists because logging.h and logging/logger.h once defined the
-      # same LOG_* macro names, producing 20 redefinition warnings on every build
-      # and letting include order decide which logging backend a file used.
-      # 20 warnings were easy to stop reading; one is not.
       - name: Check for firmware warnings in our sources
         working-directory: firmware/arduino
         shell: bash
@@ -288,14 +85,12 @@ jobs:
           if-no-files-found: warn
           path: |
             firmware/arduino/.pio/build/**/firmware*.bin
-            firmware/arduino/.pio/build/**/project.check.json
             firmware/arduino/.pio/build/**/*.elf
-            firmware/arduino/.pio/build/**/build.log
+            firmware/arduino/build.log
 
   tests-native:
     name: Native unit tests (Unity)
     runs-on: ubuntu-latest
-    needs: [generate]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -319,79 +114,68 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-firmware.txt
 
-      # 140+ host-side Unity tests across the native_* envs. These existed for
-      # months while CI only ran builds; a test suite that is not a gate is a
-      # habit, not a guarantee.
+      # Host-side Unity tests for the pure-header logic: the auto-mode
+      # thermostat and the OTA rollback decision. The script discovers every
+      # [env:native*] in platformio.ini, so adding an env is enough.
       - name: Run native test envs
         run: bash scripts/test-native.sh
 
-  mqtt-itest:
-    name: MQTT integration tests (Mosquitto)
+  tests-python:
+    name: Python tests
     runs-on: ubuntu-latest
-    needs: [generate]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the SonarCloud step below can resolve new-code scope
+          fetch-depth: 0
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
+          # Pinned deliberately: an unpinned install added here trips
+          # githubactions:S8544, and this is CI-only tooling.
+          python -m pip install "pytest-cov==7.1.0"
 
-      - name: Install mosquitto and clients
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mosquitto mosquitto-clients
-
-      - name: Start Mosquitto broker
-        shell: bash
-        run: |
-          mosquitto -c "$GITHUB_WORKSPACE/.github/mosquitto/mosquitto.conf" -v > mosquitto.log 2>&1 &
-          # Wait for port
-          timeout 20 bash -c 'until echo > /dev/tcp/127.0.0.1/1883; do sleep 0.2; done'
-
-      - name: Simulate HA birth
-        run: mosquitto_pub -h 127.0.0.1 -t homeassistant/status -m online
-
-      # The integration-marked pytest files (mqtt_birth, ha_automation
-      # alignment) need this broker; running them here keeps them a gate
-      # instead of a local-only skip.
-      - name: Run integration-marked pytests
-        run: python -m pytest tests -m integration -q
-
-      - name: Run MQTT integration script
-        env:
-          MQTT_HOST: 127.0.0.1
-          MQTT_PORT: 1883
+      - name: Run unit tests
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/test_mqtt_integration.py 2>&1 | tee mqtt_itest.log
+          # --cov writes coverage.xml for the SonarCloud step below. Collecting it
+          # from this run rather than a second one keeps the suite executing once.
+          pytest -q --cov=scripts --cov-report=xml 2>&1 | tee pytest-python.txt
 
-      - name: Run pytest birth/rediscovery + discovery contract tests
+      # Scanning from inside this job means coverage.xml is already in the
+      # workspace: no artifact round-trip, and no second pytest run. always() so a
+      # failing test still gets measured instead of leaving the gate at 0%.
+      # Dependabot PRs cannot read SONAR_TOKEN, so the scan is skipped for them
+      # rather than reporting a misleading red check.
+      # Every action in this repo is pinned to a commit SHA, not a tag:
+      # githubactions:S7637 flags movable refs, since a tag can be repointed at
+      # new code. Dependabot still updates them by reading the version comment.
+      - name: SonarCloud Scan
+        if: ${{ always() && github.event.pull_request.user.login != 'dependabot[bot]' }}
+        uses: SonarSource/sonarqube-scan-action@59db25f34e16620e48ab4bb9e4a5dce155cb5432 # v8.0.0
         env:
-          MQTT_HOST: 127.0.0.1
-          MQTT_PORT: 1883
-        shell: bash
-        run: |
-          set -euo pipefail
-          pytest -q tests/test_mqtt_birth.py tests/test_mqtt_discovery.py 2>&1 | tee mqtt_birth.log
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: Upload MQTT logs
+      - name: Upload test artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mqtt-logs
-          if-no-files-found: warn
+          name: python-tests-artifacts
+          if-no-files-found: ignore
           path: |
-            mosquitto.log
-            mqtt_itest.log
-            mqtt_birth.log
+            pytest-python.txt
+            coverage.xml
 
   lint:
     name: Lint (${{ matrix.tool }})
@@ -442,15 +226,11 @@ jobs:
               black --check . 2>&1 | tee black.txt
               ;;
             clang-format)
-              # Generated sources are excluded: the generators, not clang-format, own
-              # their formatting, so any run of gen_ui.py/gen_icons.py would undo it.
-              # Keep this list in sync with exclude_files in CPPLINT.cfg.
+              # generated_config.h is written by the PlatformIO pre-script, which
+              # owns its formatting; it is also gitignored, so it is normally
+              # absent here anyway.
               FILES=$(find firmware/arduino/src -type f \( -name "*.cpp" -o -name "*.h" \) \
-                ! -name 'icons_generated.h' \
-                ! -name 'ui_generated.*' \
-                ! -name 'ui_ops_generated.*' \
-                ! -name 'generated_config.h' \
-                ! -name 'display_layout.h')
+                ! -name 'generated_config.h')
               if [ -n "$FILES" ]; then
                 clang-format --version | tee clang-format-version.txt
                 clang-format -n --Werror $FILES 2>&1 | tee clang-format.txt
@@ -487,79 +267,3 @@ jobs:
 
       - name: Check for banned functions
         run: python3 scripts/check_banned_functions.py
-
-  native-tests:
-    name: PlatformIO native tests
-    runs-on: ubuntu-latest
-    needs: [generate]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements-firmware.txt
-
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-firmware.txt
-
-      # Every native env is listed explicitly. This job used to run only
-      # `pio test -e native`, whose test_filter is test_rounding -- so six of the
-      # eight native test suites were never executed by CI and had rotted: four
-      # could not compile at all, one asserted against a real bug in
-      # src/power.cpp, and one was written against an API that never existed.
-      #
-      # There is no "native_all" env to use instead: the suites need different
-      # build_src_filter settings (see the note in platformio.ini). When adding a
-      # native test env, add it here too.
-      - name: Run native unit tests
-        working-directory: firmware/arduino
-        run: |
-          pio test -v \
-            -e native \
-            -e native_config_merge \
-            -e native_mqtt_topics \
-            -e native_power \
-            -e native_smart_refresh \
-            -e native_state_manager \
-            -e native_system_manager \
-            -e native_app_controller
-
-  manager-build:
-    name: Device manager UI build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # npm ci runs repository-controlled install scripts and this job needs
-          # no authenticated git operations, so do not leave a usable token in
-          # .git/config for them to read.
-          persist-credentials: false
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: web/manager/package-lock.json
-
-      # Nothing exercised web/manager before this job, so the Dependabot npm
-      # PRs for it were passing on checks that never touched them. `npm ci`
-      # catches lockfile/peer breakage and `npm run build` catches missing
-      # modules and imports.
-      # --ignore-scripts so a dependency's postinstall cannot execute on the
-      # runner (githubactions:S6505). None of these packages need one: the build
-      # produces byte-identical output with and without it.
-      - name: Install dependencies
-        working-directory: web/manager
-        run: npm ci --ignore-scripts
-
-      - name: Build
-        working-directory: web/manager
-        run: npm run build

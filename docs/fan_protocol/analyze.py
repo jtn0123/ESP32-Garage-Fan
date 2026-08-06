@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Analyze a sigrok CSV dump: per-channel duty, edges, periods, pulse widths."""
+
+from collections import Counter
 import subprocess
 import sys
-from collections import Counter
 
 SR_FILE = sys.argv[1]
 SAMPLE_RATE = 1_000_000 if len(sys.argv) < 3 else int(sys.argv[2])
 
 out = subprocess.run(
     ["sigrok-cli", "-i", SR_FILE, "-O", "csv"],
-    capture_output=True, text=True, check=True,
+    capture_output=True,
+    text=True,
+    check=True,
 ).stdout
 
-lines = [l for l in out.splitlines() if l and not l.startswith(";")]
+lines = [ln for ln in out.splitlines() if ln and not ln.startswith(";")]
 header = lines[0].split(",")
 rows = lines[1:]
 n = len(rows)
@@ -41,8 +44,10 @@ for i, name in enumerate(header):
         periods = [b - a for a, b in zip(rising, rising[1:])]
         pc = Counter(periods).most_common(4)
         freq = SAMPLE_RATE / (sum(periods) / len(periods))
-        print(f"  approx freq={freq:.1f}Hz  common periods(us): "
-              + ", ".join(f"{p/SAMPLE_RATE*1e6:.1f}({c}x)" for p, c in pc))
+        print(
+            f"  approx freq={freq:.1f}Hz  common periods(us): "
+            + ", ".join(f"{p/SAMPLE_RATE*1e6:.1f}({c}x)" for p, c in pc)
+        )
     # pulse widths (high and low)
     for level, tag in ((1, "high"), (0, "low")):
         widths = []
@@ -55,5 +60,6 @@ for i, name in enumerate(header):
                 start = None
         if widths:
             wc = Counter(widths).most_common(4)
-            print(f"  {tag} widths(us): "
-                  + ", ".join(f"{w/SAMPLE_RATE*1e6:.1f}({c}x)" for w, c in wc))
+            print(
+                f"  {tag} widths(us): " + ", ".join(f"{w/SAMPLE_RATE*1e6:.1f}({c}x)" for w, c in wc)
+            )

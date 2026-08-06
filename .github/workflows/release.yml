@@ -5,9 +5,16 @@ on:
     tags:
       - 'v*.*.*'
 
+# The release job attaches binaries to a GitHub Release, which needs write
+# access to repository contents. Scoped at job level rather than workflow level.
+permissions:
+  contents: read
+
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,13 +43,19 @@ jobs:
           FW=${TAG#v}
           echo "fw_version=$FW" >> $GITHUB_OUTPUT
 
-      - name: Build firmware (display and headless)
+      - name: Build fan controller firmware
         env:
           FW_VERSION: ${{ steps.ver.outputs.fw_version }}
         run: |
           cd firmware/arduino
-          pio run -e feather_esp32s2_display_only -e feather_esp32s2_headless
+          pio run -e feather_esp32s2_fan_controller
 
+      # generated_config.h is deliberately NOT published here. It is the output
+      # of scripts/gen_device_header.py and carries WIFI_SSID / WIFI_PASS /
+      # MQTT_USER / MQTT_PASS inline; attaching it to a public release would
+      # hand out the credentials with the binary. It builds empty on CI (no
+      # .env in a clean checkout), but "empty today" is not a reason to ship the
+      # path.
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -50,7 +63,6 @@ jobs:
           path: |
             firmware/arduino/.pio/build/**/firmware*.bin
             firmware/arduino/.pio/build/**/firmware*.elf
-            firmware/arduino/src/generated_config.h
 
       # SHA-pinned per githubactions:S7637 — see the other third-party actions.
       - name: Create GitHub Release

@@ -30,8 +30,25 @@ fan cable. GPIO 18 (A0) carries the PWM through the shifter (the signal is
 Power the Feather from LiPo or USB wall power — the fan's 5 V export can't
 carry it. Full wiring and bring-up history in `docs/fan_protocol/`.
 
+## Build
+
+```
+make build          # build the fan controller firmware
+make flash          # build + flash over USB
+make deploy IP=...  # build + OTA + verify (defaults to garage-fan.local)
+make test           # native Unity tests + pytest
+```
+
+WiFi/MQTT credentials come from a gitignored `.env` at the repo root (copy
+`.env.example`), which `scripts/gen_device_header.py` turns into
+`src/generated_config.h` during the build. A clone without `.env` builds with
+empty credentials — `make deploy` refuses to ship such an image.
+
 ## Lineage
 
 Derived from [ESP32-Temp-Sensor](https://github.com/jtn0123/ESP32-Temp-Sensor)
-with full history; the projects share bones and will diverge. See `CLAUDE.md`
-for the repository-boundary rules.
+with full history. The inherited e-ink room-node subsystems (display firmware,
+UI-spec codegen, web simulator, device manager, weather/moon icon pipeline, CAD
+enclosure) were removed in the fan-only cleanup — this repo now contains just
+the fan controller. Recover any of it from history or from the upstream repo.
+See `CLAUDE.md` for the repository-boundary rules.

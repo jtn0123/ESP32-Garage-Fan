@@ -9,10 +9,6 @@ updates:
     schedule:
       interval: "weekly"
 
-  # web/manager is the only npm project in the repo. It was never declared here,
-  # yet PRs #14 and #15 arrived for it anyway, so its coverage was incidental
-  # rather than configured.
-  - package-ecosystem: "npm"
-    directory: "/web/manager"
-    schedule:
-      interval: "weekly"
+# There is no npm ecosystem entry: web/manager was the repo's only npm project
+# and it belonged to the inherited room-node tooling, removed in the fan-only
+# cleanup. Re-add one here if a JS project ever lands.

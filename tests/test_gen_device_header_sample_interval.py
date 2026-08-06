@@ -1,13 +1,11 @@
-"""Tests for the ALWAYS_ON sampling cadence resolved by gen_device_header.py.
+"""Tests for the sampling cadence resolved by gen_device_header.py.
 
 Imported and called in-process rather than run as a subprocess: coverage.py does
-not follow subprocesses, so the subprocess-based generator tests in
-test_config_codegen.py exercise this code without recording it. These also avoid
-touching the repo's generated_config.h, since resolve_sample_interval() is pure.
+not follow subprocesses. These also avoid touching the repo's
+generated_config.h, since resolve_sample_interval() is pure.
 
-The bounds mirror RC_MIN/MAX_SAMPLE_INTERVAL_SEC in
-firmware/arduino/src/runtime_config.h. Below the minimum the BME280 self-heats
-and reads high, which is why an out-of-range value is rejected rather than used.
+Below the minimum the BME280 self-heats and reads high, which is why an
+out-of-range value is rejected rather than used.
 """
 
 import os
@@ -67,12 +65,13 @@ class TestResolveSampleInterval:
         monkeypatch.delenv("SAMPLE_INTERVAL", raising=False)
         assert gdh.resolve_sample_interval({"sample_interval": "10m"}) == 600
 
-    def test_bounds_match_firmware_constants(self):
-        """The generator and runtime_config.h must agree, or a value accepted at
-        build time could still be rejected on the device."""
-        header = os.path.join(ROOT, "firmware", "arduino", "src", "runtime_config.h")
-        with open(header, "r") as f:
-            text = f.read()
-        assert f"#define RC_MIN_SAMPLE_INTERVAL_SEC {gdh.MIN_SAMPLE_INTERVAL_SEC}" in text
-        assert f"#define RC_MAX_SAMPLE_INTERVAL_SEC {gdh.MAX_SAMPLE_INTERVAL_SEC}" in text
-        assert f"#define RC_DEFAULT_SAMPLE_INTERVAL_SEC {gdh.DEFAULT_SAMPLE_INTERVAL_SEC}" in text
+    # There was a test_bounds_match_firmware_constants here asserting that these
+    # bounds matched RC_MIN/MAX_SAMPLE_INTERVAL_SEC in
+    # firmware/arduino/src/runtime_config.h. That header was room-node firmware
+    # and is gone; the fan controller reads no sampling-cadence define at all
+    # (it is always-on and drives the fan from garage/fan/set). The contract has
+    # no counterparty left to check, so the test was removed rather than
+    # repointed at a file that does not exist.
+    #
+    # If a future fan build starts consuming SAMPLE_INTERVAL_SEC, restore an
+    # equivalent check against whatever header then defines its bounds.

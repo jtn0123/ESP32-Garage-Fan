@@ -1,8 +1,0 @@
-pytest>=7.0
-pillow>=10,<13
-playwright>=1.45
-pytest-playwright>=0.5
--r requirements.txt
-playwright
-pytest-playwright
-
