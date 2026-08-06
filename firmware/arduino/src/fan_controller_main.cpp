@@ -33,6 +33,7 @@
 #include <ctime>
 
 #include "esp_ota_ops.h"
+#include "lwip/sockets.h"
 #include "esp_task_wdt.h"
 #include "fan_auto_logic.h"
 #include "generated_config.h"
@@ -65,7 +66,7 @@
 #define EPD_DC_PIN 10
 #endif
 
-static const char* kFwVersion = "1.11.0";
+static const char* kFwVersion = "1.11.1";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -914,15 +915,39 @@ static void state_json(char* out, size_t cap) {
       g_mqtt.connected() ? "true" : "false", millis() / 1000UL, WiFi.localIP().toString().c_str());
 }
 
+// Never block on an SSE peer. NetworkClient::write retries a 1 s select up
+// to 10 times per call, so one sleeping laptop with a full socket buffer
+// costs 10 s per print -- sse_push's three prints hit the 30 s task
+// watchdog and panic the board (proven live 2026-08-05: crash loop after
+// v1.11.0 with several dashboards open). Instead: zero-timeout select +
+// MSG_DONTWAIT send, and any peer that can't take the whole frame right
+// now is dropped -- the browser's EventSource auto-reconnects.
+static void sse_send(WiFiClient& c, const char* buf, int n) {
+  const int s = c.fd();
+  if (s < 0) {
+    c.stop();
+    return;
+  }
+  fd_set set;
+  timeval tv{0, 0};
+  FD_ZERO(&set);
+  FD_SET(s, &set);
+  if (select(s + 1, nullptr, &set, nullptr, &tv) <= 0 || !FD_ISSET(s, &set)) {
+    c.stop();
+    return;
+  }
+  if (send(s, buf, n, MSG_DONTWAIT) != n)
+    c.stop();
+}
+
 static void sse_push() {
   char st[672];
+  char frame[700];
   state_json(st, sizeof(st));
+  const int n = snprintf(frame, sizeof(frame), "data: %s\n\n", st);
   for (auto& c : g_sse) {
-    if (c && c.connected()) {
-      c.print("data: ");
-      c.print(st);
-      c.print("\n\n");
-    }
+    if (c && c.connected())
+      sse_send(c, frame, n);
   }
 }
 
@@ -933,15 +958,16 @@ static void sse_accept() {
   for (auto& c : g_sse) {
     if (!c || !c.connected()) {
       c = nc;
-      c.print(
-          "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
-          "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
-          "Connection: keep-alive\r\n\r\nretry: 3000\n\n");
+      c.setNoDelay(true);
       char st[672];
+      char frame[900];
       state_json(st, sizeof(st));
-      c.print("data: ");
-      c.print(st);
-      c.print("\n\n");
+      const int n = snprintf(frame, sizeof(frame),
+                             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                             "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
+                             "Connection: keep-alive\r\n\r\nretry: 3000\n\ndata: %s\n\n",
+                             st);
+      sse_send(c, frame, n);
       return;
     }
   }
