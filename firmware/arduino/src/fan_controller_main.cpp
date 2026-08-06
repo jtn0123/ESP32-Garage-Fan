@@ -66,7 +66,7 @@
 #define EPD_DC_PIN 10
 #endif
 
-static const char* kFwVersion = "1.11.1";
+static const char* kFwVersion = "1.12.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -117,6 +117,8 @@ RTC_DATA_ATTR static uint32_t rtc_sd_sentinel = 0;
 RTC_DATA_ATTR static char rtc_crumb[16] = {0};
 static bool g_sd_quarantined = false;
 static char g_last_death[48] = "none";
+static char g_prev_death[48] = "none";  // the boot before this one, from NVS
+static uint32_t g_boots = 0;            // lifetime boot count, NVS
 static constexpr uint32_t kSdSentinelMagic = 0x5DDEAD01;
 
 #define CRUMB(x) snprintf(rtc_crumb, sizeof(rtc_crumb), "%s", x)
@@ -895,24 +897,26 @@ static void state_json(char* out, size_t cap) {
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
-  snprintf(
-      out, cap,
-      "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
-      "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
-      "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
-      "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-      "\"unhealthy_boots\":%u,\"sensor\":%s,\"last_reset\":\"%s\","
-      "\"sd_q\":%s,"
-      "\"sd_total_mb\":%lu,"
-      "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
-      "\"uptime_s\":%lu,\"ip\":\"%s\"}",
-      g_speed, g_auto_on ? "true" : "false", g_auto_max, g_auto_min, g_auto_onf, g_auto_offf,
-      outside, is_charging() ? g_off_chg : g_off_idle, g_off_chg, g_off_idle, kFwVersion,
-      run ? run->label : "?", ota_rollback_image_confirmed() ? "true" : "false",
-      ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false", g_last_death,
-      g_sd_quarantined ? "true" : "false", g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
-      g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt, WiFi.RSSI(),
-      g_mqtt.connected() ? "true" : "false", millis() / 1000UL, WiFi.localIP().toString().c_str());
+  snprintf(out, cap,
+           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
+           "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
+           "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
+           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
+           "\"unhealthy_boots\":%u,\"sensor\":%s,\"last_reset\":\"%s\","
+           "\"boots\":%lu,\"prev_death\":\"%s\","
+           "\"sd_q\":%s,"
+           "\"sd_total_mb\":%lu,"
+           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
+           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
+           g_speed, g_auto_on ? "true" : "false", g_auto_max, g_auto_min, g_auto_onf, g_auto_offf,
+           outside, is_charging() ? g_off_chg : g_off_idle, g_off_chg, g_off_idle, kFwVersion,
+           run ? run->label : "?", ota_rollback_image_confirmed() ? "true" : "false",
+           ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false", g_last_death,
+           (unsigned long)g_boots, g_prev_death, g_sd_quarantined ? "true" : "false",
+           g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
+           g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt, WiFi.RSSI(),
+           g_mqtt.connected() ? "true" : "false", millis() / 1000UL,
+           WiFi.localIP().toString().c_str());
 }
 
 // Never block on an SSE peer. NetworkClient::write retries a 1 s select up
@@ -941,8 +945,8 @@ static void sse_send(WiFiClient& c, const char* buf, int n) {
 }
 
 static void sse_push() {
-  char st[672];
-  char frame[700];
+  char st[768];
+  char frame[832];
   state_json(st, sizeof(st));
   const int n = snprintf(frame, sizeof(frame), "data: %s\n\n", st);
   for (auto& c : g_sse) {
@@ -959,8 +963,8 @@ static void sse_accept() {
     if (!c || !c.connected()) {
       c = nc;
       c.setNoDelay(true);
-      char st[672];
-      char frame[900];
+      char st[768];
+      char frame[1024];
       state_json(st, sizeof(st));
       const int n = snprintf(frame, sizeof(frame),
                              "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
@@ -1047,6 +1051,56 @@ static void handle_stats() {
   g_http.send(200, "application/json", buf);
 }
 
+// Bounded raw send: WebServer's own writes go through NetworkClient::write,
+// which burns up to 10 s of 1 s selects PER CALL against a peer that stops
+// draining. The 21.8 KB page goes out in ~16 chunks, so one stalled browser
+// meant 160 s of stall -- the 30 s task watchdog panicked mid-serve (the
+// user-visible "clipped" truncated pages) and the board crash-looped. This
+// path never blocks more than 50 ms at a time, feeds the watchdog between
+// slices, and drops any peer that makes no progress for 4 s.
+static bool send_bounded(int s, const char* p, size_t n) {
+  uint32_t last_progress = millis();
+  size_t off = 0;
+  while (off < n) {
+    fd_set set;
+    timeval tv{0, 50000};
+    FD_ZERO(&set);
+    FD_SET(s, &set);
+    const int r = select(s + 1, nullptr, &set, nullptr, &tv);
+    esp_task_wdt_reset();
+    if (r < 0)
+      return false;
+    if (r > 0 && FD_ISSET(s, &set)) {
+      const int w = send(s, p + off, n - off, MSG_DONTWAIT);
+      if (w > 0) {
+        off += w;
+        last_progress = millis();
+        continue;
+      }
+      if (w < 0 && errno != EAGAIN)
+        return false;
+    }
+    if (millis() - last_progress > 4000)
+      return false;  // peer stalled: drop it, never stall loop()
+  }
+  return true;
+}
+
+static void send_big(const char* mime, const char* body, size_t len, const char* extra_hdr = "") {
+  WiFiClient c = g_http.client();
+  const int s = c.fd();
+  if (s < 0)
+    return;
+  char hdr[224];
+  const int hn = snprintf(hdr, sizeof(hdr),
+                          "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
+                          "%sConnection: close\r\n\r\n",
+                          mime, (unsigned)len, extra_hdr);
+  if (!send_bounded(s, hdr, hn) || !send_bounded(s, body, len)) {
+  }
+  c.stop();  // Connection: close either way; a stalled peer is already gone
+}
+
 static void handle_csv() {
   String out;
   out.reserve(g_ring_count * 44 + 64);
@@ -1058,8 +1112,8 @@ static void handle_csv() {
              g_ring_p[i], isnan(g_ring_o[i]) ? -999 : g_ring_o[i], (int)g_ring_s[i]);
     out += l;
   }
-  g_http.sendHeader("Content-Disposition", "attachment; filename=garage-fan-24h.csv");
-  g_http.send(200, "text/csv", out);
+  send_big("text/csv", out.c_str(), out.length(),
+           "Content-Disposition: attachment; filename=garage-fan-24h.csv\r\n");
 }
 
 static const char kManifest[] PROGMEM = R"json({
@@ -1078,7 +1132,7 @@ static const char kIcon[] PROGMEM =
 </g></svg>)svg";
 
 static void handle_state() {
-  char buf[672];
+  char buf[768];
   state_json(buf, sizeof(buf));
   g_http.send(200, "application/json", buf);
 }
@@ -1301,7 +1355,7 @@ static void handle_history() {
     append_series(out, "hpa", p, n, 1);
     out += '}';
   }
-  g_http.send(200, "application/json", out);
+  send_big("application/json", out.c_str(), out.length());
 }
 
 // Token-guarded one-shot: mount with format-on-failure, turning a fresh
@@ -1559,9 +1613,22 @@ void setup() {
   if (g_sd_quarantined)
     Serial.println("[SD] previous boot died in an SD op -- card quarantined");
   Serial.printf("last reset: %s\n", g_last_death);
+  // Longitudinal forensics: RTC evidence dies with power, NVS doesn't. Keep
+  // the prior boot's certificate and a lifetime boot counter so a reboot
+  // storm is visible from /api/state even after the fact.
+  {
+    String pd = g_prefs.getString("pdeath", "none");
+    snprintf(g_prev_death, sizeof(g_prev_death), "%s", pd.c_str());
+    g_prefs.putString("pdeath", g_last_death);
+    g_boots = g_prefs.getUInt("boots", 0) + 1;
+    g_prefs.putUInt("boots", g_boots);
+  }
   // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
   // in 30 s instead of hanging dark forever. The fan rides through on RMT.
-  esp_task_wdt_config_t wdt_cfg = {.timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
+  // 60 s: tolerates worst-case framework writes to one stalled peer (10 s
+  // per NetworkClient::write call) on the small JSON endpoints while still
+  // catching genuine hangs. Large payloads use send_bounded and never stall.
+  esp_task_wdt_config_t wdt_cfg = {.timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true};
   if (esp_task_wdt_init(&wdt_cfg) != ESP_OK)
     esp_task_wdt_reconfigure(&wdt_cfg);
   esp_task_wdt_add(NULL);
@@ -1579,7 +1646,7 @@ void setup() {
   configTime(0, 0, "pool.ntp.org");
   g_mqtt.setServer(MQTT_HOST, MQTT_PORT);
   g_mqtt.setCallback(on_message);
-  g_http.on("/", []() { g_http.send_P(200, "text/html", kPage); });
+  g_http.on("/", []() { send_big("text/html", kPage, sizeof(kPage) - 1); });
   g_http.on("/api/state", handle_state);
   g_http.on("/api/set", handle_set);
   g_http.on("/api/raw", handle_raw);
@@ -1588,8 +1655,9 @@ void setup() {
   g_http.on("/api/history", handle_history);
   g_http.on("/api/stats", handle_stats);
   g_http.on("/download.csv", handle_csv);
-  g_http.on("/manifest.json", []() { g_http.send_P(200, "application/json", kManifest); });
-  g_http.on("/icon.svg", []() { g_http.send_P(200, "image/svg+xml", kIcon); });
+  g_http.on("/manifest.json",
+            []() { send_big("application/json", kManifest, sizeof(kManifest) - 1); });
+  g_http.on("/icon.svg", []() { send_big("image/svg+xml", kIcon, sizeof(kIcon) - 1); });
   g_http.on("/api/sdformat", handle_sd_format);
   g_http.on("/api/battdebug", []() {
     char out[512];
