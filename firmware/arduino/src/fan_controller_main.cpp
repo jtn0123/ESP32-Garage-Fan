@@ -15,6 +15,8 @@
 //           retained on the broker; whichever answers first wins the tie.
 // OTA:      POST /update?token=...; A/B slots with ota_rollback confirm.
 #include <Adafruit_BME280.h>
+#include <Adafruit_EPD.h>
+#include <Adafruit_GFX.h>
 #include <Adafruit_LC709203F.h>
 #include <Adafruit_MAX1704X.h>
 #include <Arduino.h>
@@ -59,8 +61,11 @@
 #ifndef EPD_CS_PIN
 #define EPD_CS_PIN 9
 #endif
+#ifndef EPD_DC_PIN
+#define EPD_DC_PIN 10
+#endif
 
-static const char* kFwVersion = "1.8.1";
+static const char* kFwVersion = "1.9.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -86,6 +91,10 @@ static constexpr uint16_t kGraphMaxPts = 288;
 static WiFiClient g_net;
 static PubSubClient g_mqtt(g_net);
 static WebServer g_http(80);
+static WiFiServer g_sse_srv(8081);
+static WiFiClient g_sse[4];
+// 2.13" mono SSD1680 FeatherWing, landscape; no busy/rst pins wired.
+static Adafruit_SSD1680 g_epd(250, 122, EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
 static Adafruit_BME280 g_bme;
 static Adafruit_MAX17048 g_max;
 static Adafruit_LC709203F g_lc;
@@ -147,23 +156,43 @@ static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
 static uint32_t g_last_auto_ms = 0;
 static float g_ring_t[kRingLen], g_ring_h[kRingLen], g_ring_p[kRingLen];
+static float g_ring_o[kRingLen];  // outdoor F at sample time (NAN = none)
+static int8_t g_ring_s[kRingLen];  // fan speed at sample time
+static time_t g_ring_end_ts = 0;
 static uint16_t g_ring_count = 0;
+// Runtime odometer + energy estimate (cubic fan law, ~105 W flat out).
+static uint32_t g_run_total_s = 0, g_run_today_s = 0;
+static uint32_t g_today_ymd = 0;
+static float g_energy_wh = 0;
+static uint32_t g_last_count_ms = 0;
+static uint32_t g_last_nvs_ms = 0;
+static bool g_epd_ok = false;
+static uint32_t g_last_epd_ms = 0;
+static int g_epd_speed_shown = -99;
+static char g_token[40];
+static float g_auto_db = 0.3f, g_auto_span = 4.0f;
 
 static const char kPage[] PROGMEM = R"html(<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0e1116">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Garage fan</title><style>
 :root{--bg:#0e1116;--card:#171b21;--bd:#232a33;--tx:#e6e9ed;--mut:#8b94a1;--ac:#3b82f6;--ok:#22a06b}
 body{font-family:system-ui;background:var(--bg);color:var(--tx);margin:0;padding:20px 16px 28px;display:flex;justify-content:center}
 #wrap{width:100%;max-width:400px}
 header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-h1{font-size:1.05rem;font-weight:600;margin:0;letter-spacing:.02em}
+h1{font-size:1.05rem;font-weight:600;margin:0}
+#hdr{display:flex;gap:10px;align-items:center}
 #dot{width:9px;height:9px;border-radius:50%;background:#555}
 #dot.up{background:var(--ok)}
 #batt{display:flex;align-items:center;gap:5px;color:var(--mut);font-size:.72rem}
 #bshell{width:22px;height:11px;border:1px solid var(--mut);border-radius:3px;padding:1px;position:relative}
 #bshell:after{content:'';position:absolute;right:-4px;top:2px;width:2px;height:5px;background:var(--mut);border-radius:1px}
 #bfill{height:100%;background:var(--ok);border-radius:1px;width:0%}
+#gear{background:none;border:0;color:var(--mut);font-size:1.1rem;cursor:pointer;padding:2px 6px}
 #speedcard{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px 16px 14px;margin-top:10px}
 #speed{font-size:3.4rem;line-height:1;font-variant-numeric:tabular-nums;font-weight:600}
 #of{color:var(--mut);font-size:.8rem;margin-top:2px}
@@ -175,10 +204,16 @@ button.on{background:var(--ac);border-color:var(--ac);color:#fff}
 #off{grid-column:span 4;background:#241a1a;border-color:#3a2626;color:#e0a9a9}
 #off.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
 #autorow{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:14px}
-#autobtn{flex:1;display:flex;gap:8px;align-items:center;justify-content:center}
+#autobtn{flex:1}
 #autobtn.on{background:var(--ok);border-color:var(--ok);color:#fff}
-select{font-size:.95rem;padding:9px 10px;border-radius:10px;background:#1d232b;color:var(--tx);border:1px solid var(--bd)}
+select,input{font-size:.9rem;padding:8px 10px;border-radius:10px;background:#1d232b;color:var(--tx);border:1px solid var(--bd)}
 #outinfo{color:var(--mut);font-size:.75rem;white-space:nowrap}
+#settings{display:none;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-top:12px}
+#settings h2{font-size:.85rem;font-weight:600;margin:0 0 10px;color:var(--mut)}
+.srow{display:flex;justify-content:space-between;align-items:center;margin:8px 0;font-size:.85rem}
+.srow input{width:90px;text-align:right}
+#settings .sec{border-top:1px solid var(--bd);margin-top:12px;padding-top:10px}
+.sbtn{width:100%;margin-top:10px;background:var(--ac);border-color:var(--ac);color:#fff}
 #climate{display:none;margin-top:14px}
 #tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .tile{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 2px;text-align:center}
@@ -187,88 +222,165 @@ select{font-size:.95rem;padding:9px 10px;border-radius:10px;background:#1d232b;c
 #ranges{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:3px;margin-top:12px}
 #ranges button{flex:1;font-size:.78rem;padding:7px 0;border:0;background:none;color:var(--mut)}
 #ranges button.on{background:var(--ac);color:#fff;border-radius:8px}
-canvas{width:100%;height:140px;margin-top:10px;background:var(--card);border:1px solid var(--bd);border-radius:12px}
-#legend{font-size:.7rem;color:var(--mut);margin-top:6px;text-align:center}
-.chip{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:baseline}
+canvas{width:100%;height:170px;margin-top:10px;background:var(--card);border:1px solid var(--bd);border-radius:12px}
+#legend{font-size:.7rem;color:var(--mut);margin-top:6px;text-align:center;min-height:1.1em}
+.chip{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+#stats{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;margin-top:12px;font-size:.75rem;color:var(--mut);display:none;line-height:1.8}
+#stats b{color:var(--tx);font-weight:600}
 footer{color:var(--mut);font-size:.7rem;margin-top:16px;text-align:center;line-height:1.7}
+footer a{color:var(--mut)}
 </style></head><body><div id="wrap">
-<header><h1>Garage fan</h1><div style="display:flex;gap:10px;align-items:center">
+<header><h1>Garage fan</h1><div id="hdr">
 <div id="batt" style="display:none"><span id="bpct"></span><div id="bshell"><div id="bfill"></div></div></div>
-<div id="dot"></div></div></header>
-<div id="speedcard"><div id="speed">–</div><div id="of">of 12</div>
+<div id="dot"></div><button id="gear" onclick="tog('settings')">&#9881;</button></div></header>
+<div id="speedcard"><div id="speed">&ndash;</div><div id="of">of 12</div>
 <div id="bar"><div id="fill"></div></div>
 <div id="grid"><button id="off" onclick="go(0)">off</button></div>
 <div id="autorow"><button id="autobtn" onclick="toggleAuto()">auto</button>
-<select id="maxsel" onchange="setMax()"></select>
+<select id="maxsel" onchange="setCfg('max',this.value)"></select>
 <span id="outinfo"></span></div></div>
+<div id="settings"><h2>auto mode</h2>
+<div class="srow"><span>deadband &deg;C</span><input id="s_db" type="number" step="0.1" value="0.3"></div>
+<div class="srow"><span>full-speed span &deg;C</span><input id="s_span" type="number" step="0.5" value="4"></div>
+<h2 class="sec">temperature offsets &deg;C</h2>
+<div class="srow"><span>while charging</span><input id="s_offc" type="number" step="0.1"></div>
+<div class="srow"><span>idle</span><input id="s_offi" type="number" step="0.1"></div>
+<button class="sbtn" onclick="saveCfg()">save settings</button>
+<h2 class="sec">firmware update (OTA)</h2>
+<div class="srow"><input id="s_fw" type="file" style="width:100%"></div>
+<div class="srow"><span>token</span><input id="s_tok" type="password"></div>
+<button class="sbtn" style="background:#7f5a1d;border-color:#7f5a1d" onclick="doOta()">upload firmware</button>
+<div class="srow" style="margin-top:10px"><a href="/download.csv" style="color:var(--ac)">download 24 h CSV</a></div></div>
 <div id="climate"><div id="tiles">
-<div class="tile"><div class="tv" id="tO">–</div><div class="tl">OUTSIDE °F</div><div class="src">yard feed</div></div>
-<div class="tile"><div class="tv" id="tT">–</div><div class="tl">GARAGE °F</div><div class="src">this board</div></div>
-<div class="tile"><div class="tv" id="tH">–</div><div class="tl">HUMIDITY %</div><div class="src">this board</div></div>
-<div class="tile"><div class="tv" id="tP">–</div><div class="tl">PRESSURE MB</div><div class="src">this board</div></div>
+<div class="tile"><div class="tv" id="tO">&ndash;</div><div class="tl">OUTSIDE &deg;F</div><div class="src">yard feed</div></div>
+<div class="tile"><div class="tv" id="tT">&ndash;</div><div class="tl">GARAGE &deg;F</div><div class="src">this board</div></div>
+<div class="tile"><div class="tv" id="tH">&ndash;</div><div class="tl">HUMIDITY %</div><div class="src">this board</div></div>
+<div class="tile"><div class="tv" id="tP">&ndash;</div><div class="tl">PRESSURE MB</div><div class="src">this board</div></div>
 </div><div id="ranges"><button id="r1" class="on" onclick="range(1)">24 h</button>
 <button id="r7" onclick="range(7)">7 days</button>
 <button id="r30" onclick="range(30)">30 days</button></div>
-<canvas id="cv" width="736" height="280"></canvas>
-<div id="legend"><span class="chip" style="background:#e8834a"></span>temp&ensp;
-<span class="chip" style="background:#3b82f6"></span>humidity&ensp;
-<span class="chip" style="background:#22a06b"></span>pressure</div></div>
-<footer id="meta">–</footer>
+<canvas id="cv" width="736" height="340"></canvas>
+<div id="legend"></div>
+<div id="stats"></div></div>
+<footer id="meta">&ndash;</footer>
 </div><script>
-let days=1,auto=false,maxs=9;
-const g=document.getElementById('grid');
+let days=1,auto=false,maxs=9,lastH=null;
+const $=id=>document.getElementById(id);
+const g=$('grid');
 for(let i=1;i<=12;i++){const b=document.createElement('button');b.textContent=i;b.id='b'+i;b.onclick=()=>go(i);g.appendChild(b);}
-const ms=document.getElementById('maxsel');
+const ms=$('maxsel');
 for(let i=1;i<=12;i++){const o=document.createElement('option');o.value=i;o.textContent='max '+i;ms.appendChild(o);}
-async function go(n){await fetch('/api/set?speed='+n);poll();}
-async function toggleAuto(){await fetch('/api/config?auto='+(auto?0:1));poll();}
-async function setMax(){await fetch('/api/config?max='+ms.value);}
-async function poll(){try{const s=await(await fetch('/api/state')).json();
+function tog(id){const e=$(id);e.style.display=e.style.display==='block'?'none':'block';}
+async function go(n){await fetch('/api/set?speed='+n);}
+async function toggleAuto(){await fetch('/api/config?auto='+(auto?0:1));}
+async function setCfg(k,v){await fetch('/api/config?'+k+'='+v);}
+async function saveCfg(){await fetch('/api/config?db='+$('s_db').value+'&span='+$('s_span').value+'&offc='+$('s_offc').value+'&offi='+$('s_offi').value);tog('settings');}
+async function doOta(){const f=$('s_fw').files[0];if(!f){alert('pick firmware.bin');return;}
+const fd=new FormData();fd.append('firmware',f);
+const r=await fetch('/update?token='+encodeURIComponent($('s_tok').value),{method:'POST',body:fd});
+alert(await r.text());}
+function render(s){
 auto=s.auto;maxs=s.auto_max;ms.value=maxs;
-document.getElementById('speed').textContent=s.speed===0?'off':(s.speed<0?'raw':s.speed);
-document.getElementById('fill').style.width=(s.speed>0?s.speed/12*100:0)+'%';
-for(let i=1;i<=12;i++)document.getElementById('b'+i).className=i===s.speed?'on':'';
-document.getElementById('off').className=s.speed===0?'on':'';
-document.getElementById('dot').className=s.mqtt?'up':'';
-if(s.batt){document.getElementById('batt').style.display='flex';
-document.getElementById('bpct').textContent=(s.batt.chg?'⚡':'')+(s.batt.pct!==null?s.batt.pct+'%':s.batt.v.toFixed(2)+'V')+(s.batt.mvh!==null?' '+(s.batt.mvh>=0?'▲':'▼')+Math.abs(s.batt.mvh)+'mV/h':'');
-const bp=s.batt.pct!==null?s.batt.pct:Math.max(0,Math.min(100,(s.batt.v-3.2)/1.0*100));
-const bf=document.getElementById('bfill');bf.style.width=bp+'%';
-bf.style.background=s.batt.chg?'#3b82f6':(bp>40?'#22a06b':(bp>15?'#c9852a':'#c0392b'));}
-document.getElementById('autobtn').className=auto?'on':'';
-document.getElementById('autobtn').textContent=auto?'auto on':'auto off';
-document.getElementById('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
-document.getElementById('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
-let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+' / '+(s.sd_total_mb/1024).toFixed(1)+' GB'):(s.sd_q?'sd quarantined — crashed a boot':'no sd card');
-let bt=s.batt?(' · batt '+s.batt.v.toFixed(3)+'V'+(s.batt.mvh!==null?' ('+(s.batt.mvh>=0?'+':'')+s.batt.mvh+' mV/h)':'')+(s.batt.eta_h?(' · ~'+(s.batt.eta_h/24).toFixed(1)+'d left'):'')):'';
-document.getElementById('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+' dBm · '+sd+bt+'<br>home link '+(s.mqtt?'up':'down')+' (local mqtt, not HA) · up '+Math.floor(s.uptime_s/3600)+'h '+Math.floor(s.uptime_s%3600/60)+'m';
-}catch(e){document.getElementById('meta').textContent='unreachable';}}
-function line(ctx,vals,color,W,H){if(vals.length<2)return;
-let mn=Math.min(...vals),mx=Math.max(...vals);if(mx-mn<1e-6){mn-=1;mx+=1;}
-const pad=10;ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
-let lx,ly;vals.forEach((v,i)=>{const x=pad+i*(W-2*pad)/(vals.length-1);
-const y=H-pad-(v-mn)*(H-2*pad)/(mx-mn);i?ctx.lineTo(x,y):ctx.moveTo(x,y);lx=x;ly=y;});ctx.stroke();
-ctx.fillStyle=color;ctx.beginPath();ctx.arc(lx,ly,3.5,0,7);ctx.fill();}
-function range(d){days=d;[1,7,30].forEach(x=>document.getElementById('r'+x).className=x===d?'on':'');climate();}
+$('speed').textContent=s.speed===0?'off':(s.speed<0?'raw':s.speed);
+$('fill').style.width=(s.speed>0?s.speed/12*100:0)+'%';
+for(let i=1;i<=12;i++)$('b'+i).className=i===s.speed?'on':'';
+$('off').className=s.speed===0?'on':'';
+$('dot').className=s.mqtt?'up':'';
+$('autobtn').className=auto?'on':'';
+$('autobtn').textContent=auto?'auto on':'auto off';
+$('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
+$('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
+if(s.batt){$('batt').style.display='flex';
+$('bpct').textContent=(s.batt.chg?'⚡':'')+(s.batt.pct!==null?s.batt.pct+'%':s.batt.v.toFixed(2)+'V')+(s.batt.mvh!==null?' '+(s.batt.mvh>=0?'▲':'▼')+Math.abs(s.batt.mvh)+'mV/h':'');
+const bp=s.batt.pct!==null?s.batt.pct:Math.max(0,Math.min(100,(s.batt.v-3.2)*100));
+$('bfill').style.width=bp+'%';
+$('bfill').style.background=s.batt.chg?'#3b82f6':(bp>40?'#22a06b':(bp>15?'#c9852a':'#c0392b'));}
+if(!$('s_offc').value&&s.toff!==undefined){$('s_offc').value=-13.9;$('s_offi').value=-1.5;}
+let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+'/'+(s.sd_total_mb/1024).toFixed(1)+'GB'):(s.sd_q?'sd quarantined':'no sd');
+let bt=s.batt?(' · '+s.batt.v.toFixed(3)+'V'):'';
+$('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+'dBm · '+sd+bt+' · toff '+s.toff+'<br>link '+(s.mqtt?'up':'down')+' (local mqtt) · up '+Math.floor(s.uptime_s/3600)+'h'+Math.floor(s.uptime_s%3600/60)+'m';
+}
+function connectSSE(){
+try{const es=new EventSource('http://'+location.hostname+':8081/');
+es.onmessage=e=>{try{render(JSON.parse(e.data))}catch(_){}};
+}catch(_){}}
+async function poll(){try{render(await(await fetch('/api/state')).json());}catch(e){$('meta').textContent='unreachable';}}
+function mergeCache(h){
+if(days!==1||!h.end_ts)return h;
+let cache={};try{cache=JSON.parse(localStorage.gf24||'{}')}catch(_){}
+const n=h.temp_c.length;
+for(let i=0;i<n;i++){const ts=h.end_ts-(n-1-i)*h.interval_s;
+cache[ts]={t:h.temp_c[i],r:h.rh[i],p:h.hpa[i],o:h.out_f?h.out_f[i]:null,s:h.spd?h.spd[i]:0};}
+const cut=h.end_ts-86400;
+const keys=Object.keys(cache).map(Number).filter(t=>t>=cut).sort((a,b)=>a-b);
+const out={interval_s:h.interval_s,end_ts:keys[keys.length-1],temp_c:[],rh:[],hpa:[],out_f:[],spd:[]};
+keys.forEach(t=>{const c=cache[t];out.temp_c.push(c.t);out.rh.push(c.r);out.hpa.push(c.p);out.out_f.push(c.o);out.spd.push(c.s);});
+const store={};keys.forEach(t=>store[t]=cache[t]);
+try{localStorage.gf24=JSON.stringify(store)}catch(_){}
+return out;}
+function line(ctx,vals,color,W,Hh,mn,mx,dash){
+const pad=10;ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';
+if(dash)ctx.setLineDash([6,4]);
+ctx.beginPath();let started=false;
+vals.forEach((v,i)=>{if(v===null||isNaN(v))return;
+const x=pad+i*(W-2*pad)/(vals.length-1);
+const y=Hh-8-(v-mn)*(Hh-16)/((mx-mn)||1);
+started?ctx.lineTo(x,y):ctx.moveTo(x,y);started=true;});
+ctx.stroke();ctx.setLineDash([]);}
+function draw(h){
+const cv=$('cv'),ctx=cv.getContext('2d');
+ctx.clearRect(0,0,cv.width,cv.height);
+const W=cv.width,ribbon=26,chartH=cv.height-ribbon-18;
+ctx.strokeStyle='#20262e';ctx.lineWidth=1;
+for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(10,i*chartH/4);ctx.lineTo(W-10,i*chartH/4);ctx.stroke();}
+if(!h.temp_c||h.temp_c.length<2){ctx.fillStyle='#5a6472';ctx.font='15px system-ui';
+ctx.textAlign='center';ctx.fillText('waiting for data — one sample every 5 minutes',W/2,chartH/2);return;}
+const tf=h.temp_c.map(v=>v*9/5+32);
+const outs=(h.out_f||[]).map(v=>(v===null||v<=-100)?null:v);
+const allT=tf.concat(outs.filter(v=>v!==null));
+const tmn=Math.min.apply(null,allT),tmx=Math.max.apply(null,allT);
+line(ctx,tf,'#e8834a',W,chartH,tmn,tmx,false);
+line(ctx,outs,'#e8834a',W,chartH,tmn,tmx,true);
+line(ctx,h.rh,'#3b82f6',W,chartH,Math.min.apply(null,h.rh),Math.max.apply(null,h.rh),false);
+line(ctx,h.hpa,'#22a06b',W,chartH,Math.min.apply(null,h.hpa),Math.max.apply(null,h.hpa),false);
+if(h.spd){const n=h.spd.length,pad=10,bw=(W-2*pad)/n;
+ctx.fillStyle='#3b82f6';
+h.spd.forEach((v,i)=>{if(v>0){const bh=(v/12)*ribbon;
+ctx.globalAlpha=0.35+0.65*(v/12);
+ctx.fillRect(pad+i*bw,chartH+4+(ribbon-bh),Math.max(bw-0.5,1),bh);}});
+ctx.globalAlpha=1;}
+if(h.end_ts){ctx.fillStyle='#5a6472';ctx.font='12px system-ui';
+const span=(h.temp_c.length-1)*h.interval_s;
+const t0=new Date((h.end_ts-span)*1000),t1=new Date(h.end_ts*1000);
+const fmt=d=>days===1?d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'):(d.getMonth()+1)+'/'+d.getDate();
+ctx.textAlign='left';ctx.fillText(fmt(t0),10,cv.height-4);
+ctx.textAlign='right';ctx.fillText(fmt(t1),W-10,cv.height-4);}
+$('legend').innerHTML='<span class="chip" style="background:#e8834a"></span>temp (dash = outside)&ensp;<span class="chip" style="background:#3b82f6"></span>humidity&ensp;<span class="chip" style="background:#22a06b"></span>pressure&ensp;<span style="color:#3b82f6">&#9612;</span>fan';}
+function range(d){days=d;[1,7,30].forEach(x=>$('r'+x).className=x===d?'on':'');climate();}
 async function climate(){try{
 const c=await(await fetch('/api/sensors')).json();
-document.getElementById('climate').style.display='block';
-if(c.ok){
-document.getElementById('tT').textContent=(c.temp_c*9/5+32).toFixed(1);
-document.getElementById('tH').textContent=c.rh.toFixed(0);
-document.getElementById('tP').textContent=c.hpa.toFixed(1);}
-const h=await(await fetch('/api/history?days='+days)).json();
-const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
-ctx.clearRect(0,0,cv.width,cv.height);
-ctx.strokeStyle='#20262e';ctx.lineWidth=1;
-for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(10,i*cv.height/4);ctx.lineTo(cv.width-10,i*cv.height/4);ctx.stroke();}
-if(!h.temp_c||h.temp_c.length<2){ctx.fillStyle='#5a6472';ctx.font='15px system-ui';
-ctx.textAlign='center';ctx.fillText('waiting for data — one sample every 5 minutes',cv.width/2,cv.height/2);return;}
-line(ctx,h.temp_c,'#e8834a',cv.width,cv.height);
-line(ctx,h.rh,'#3b82f6',cv.width,cv.height);
-line(ctx,h.hpa,'#22a06b',cv.width,cv.height);
+$('climate').style.display='block';
+if(c.ok){$('tT').textContent=(c.temp_c*9/5+32).toFixed(1);
+$('tH').textContent=c.rh.toFixed(0);
+$('tP').textContent=c.hpa.toFixed(1);}
+let h=await(await fetch('/api/history?days='+days)).json();
+h=mergeCache(h);lastH=h;draw(h);
+const st=await(await fetch('/api/stats')).json();
+$('stats').style.display='block';
+$('stats').innerHTML='24h: <b>'+st.t_min_f.toFixed(0)+'–'+st.t_max_f.toFixed(0)+'°F</b> avg <b>'+st.t_avg_f.toFixed(0)+'</b> · fan today <b>'+(st.run_today_s/3600).toFixed(1)+'h</b> · lifetime <b>'+(st.run_total_s/3600).toFixed(0)+'h</b> · <b>'+(st.energy_wh/1000).toFixed(2)+' kWh</b> est · now <b>'+st.watts_now.toFixed(0)+' W</b>';
 }catch(e){}}
-setInterval(poll,2000);poll();
+$('cv').addEventListener('click',ev=>{
+if(!lastH||!lastH.temp_c)return;
+const r=$('cv').getBoundingClientRect();
+const i=Math.round((ev.clientX-r.left)/r.width*(lastH.temp_c.length-1));
+if(i<0||i>=lastH.temp_c.length)return;
+const ts=lastH.end_ts?new Date((lastH.end_ts-(lastH.temp_c.length-1-i)*lastH.interval_s)*1000):null;
+const o=lastH.out_f?lastH.out_f[i]:null;
+$('legend').innerHTML=(ts?ts.toLocaleString([],{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' · ':'')+
+(lastH.temp_c[i]*9/5+32).toFixed(1)+'°F · '+lastH.rh[i].toFixed(0)+'% · '+lastH.hpa[i].toFixed(1)+'mb'+
+((o!==null&&o>-100)?' · out '+o.toFixed(1)+'°F':'')+
+(lastH.spd?' · fan '+lastH.spd[i]:'');});
+connectSSE();poll();setInterval(poll,15000);
 setInterval(climate,60000);climate();
 </script></body></html>)html";
 
@@ -293,6 +405,14 @@ static void set_wave(uint16_t high_us) {
   }
   rmtWriteLooping(FAN_PWM_PIN, &g_wave, 1);
 }
+
+static float fan_watts(int speed) {
+  if (speed <= 0) return 0;
+  const float f = speed / 12.0f;
+  return 5.0f + 100.0f * f * f * f;  // cubic fan law, rough estimate
+}
+
+static void sse_push();
 
 static void publish_state() {
   if (!g_mqtt.connected()) return;
@@ -323,6 +443,7 @@ static void apply_speed(int v, const char* source) {
     g_mqtt.publish(kTopicSet, buf, true);
   }
   g_prefs.putInt("speed", v);  // survives power loss even broker-less
+  sse_push();
   Serial.printf("speed -> %d via %s\n", v, source);
 }
 
@@ -455,6 +576,8 @@ static void auto_tick() {
   }
   FanAutoCfg cfg = kFanAutoDefaults;
   cfg.max_speed = g_auto_max;
+  cfg.deadband_c = g_auto_db;
+  cfg.span_c = g_auto_span;
   const int next = fan_auto_decide(g_inside_c, outside_c_fresh(),
                                    g_speed < 0 ? 0 : g_speed, cfg);
   if (next != g_speed) apply_speed(next, "auto");
@@ -540,12 +663,18 @@ static void sample_climate() {
     memmove(g_ring_t, g_ring_t + 1, (kRingLen - 1) * sizeof(float));
     memmove(g_ring_h, g_ring_h + 1, (kRingLen - 1) * sizeof(float));
     memmove(g_ring_p, g_ring_p + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_o, g_ring_o + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_s, g_ring_s + 1, (kRingLen - 1) * sizeof(int8_t));
     g_ring_count--;
   }
   g_ring_t[g_ring_count] = t;
   g_ring_h[g_ring_count] = h;
   g_ring_p[g_ring_count] = p;
+  const float oc = outside_c_fresh();
+  g_ring_o[g_ring_count] = isnan(oc) ? NAN : oc * 9 / 5 + 32;
+  g_ring_s[g_ring_count] = (int8_t)(g_speed < 0 ? 0 : g_speed);
   g_ring_count++;
+  if (time_synced()) g_ring_end_ts = time(nullptr);
   batt_begin();
   batt_read();
   if (!isnan(g_batt_v)) {
@@ -616,6 +745,145 @@ static void state_json(char* out, size_t cap) {
            millis() / 1000UL, WiFi.localIP().toString().c_str());
 }
 
+static void sse_push() {
+  char st[560];
+  state_json(st, sizeof(st));
+  for (auto& c : g_sse) {
+    if (c && c.connected()) {
+      c.print("data: ");
+      c.print(st);
+      c.print("\n\n");
+    }
+  }
+}
+
+static void sse_accept() {
+  WiFiClient nc = g_sse_srv.accept();
+  if (!nc) return;
+  for (auto& c : g_sse) {
+    if (!c || !c.connected()) {
+      c = nc;
+      c.print(
+          "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+          "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
+          "Connection: keep-alive\r\n\r\nretry: 3000\n\n");
+      char st[560];
+      state_json(st, sizeof(st));
+      c.print("data: ");
+      c.print(st);
+      c.print("\n\n");
+      return;
+    }
+  }
+  nc.stop();  // table full
+}
+
+static void epd_render() {
+  if (!g_epd_ok) return;
+  CRUMB("epd");
+  g_epd.clearBuffer();
+  g_epd.fillScreen(EPD_WHITE);
+  g_epd.setTextColor(EPD_BLACK);
+  char b[32];
+  const float tin = g_ring_count ? g_ring_t[g_ring_count - 1] : NAN;
+  g_epd.setTextSize(4);
+  g_epd.setCursor(4, 18);
+  if (isnan(tin))
+    g_epd.print("--.-");
+  else
+    g_epd.printf("%.1f", tin * 9 / 5 + 32);
+  g_epd.setTextSize(1);
+  g_epd.setCursor(6, 54);
+  g_epd.print("GARAGE F");
+  const float rh = g_ring_count ? g_ring_h[g_ring_count - 1] : NAN;
+  g_epd.setCursor(70, 54);
+  if (!isnan(rh)) g_epd.printf("RH %.0f%%", rh);
+  g_epd.setTextSize(3);
+  g_epd.setCursor(158, 8);
+  if (g_speed <= 0)
+    g_epd.print("OFF");
+  else
+    g_epd.printf("F%d", g_speed);
+  g_epd.setTextSize(1);
+  g_epd.setCursor(158, 38);
+  g_epd.print(g_auto_on ? "AUTO ON" : "AUTO OFF");
+  const float oc = outside_c_fresh();
+  g_epd.setCursor(158, 52);
+  if (isnan(oc))
+    g_epd.print("OUT --");
+  else
+    g_epd.printf("OUT %.1fF", oc * 9 / 5 + 32);
+  g_epd.setCursor(158, 66);
+  if (!isnan(g_batt_v))
+    g_epd.printf("BAT %.2fV %.0f%%", g_batt_v, isnan(g_batt_pct) ? 0 : g_batt_pct);
+  g_epd.setCursor(6, 76);
+  g_epd.printf("run today %luh%02lum  total %luh",
+               (unsigned long)(g_run_today_s / 3600),
+               (unsigned long)(g_run_today_s % 3600 / 60),
+               (unsigned long)(g_run_total_s / 3600));
+  g_epd.setCursor(6, 106);
+  g_epd.printf("%s  fw %s", WiFi.localIP().toString().c_str(), kFwVersion);
+  g_epd.display();
+  CRUMB_CLEAR();
+  g_last_epd_ms = millis();
+  g_epd_speed_shown = g_speed;
+}
+
+static void handle_stats() {
+  float tmin = NAN, tmax = NAN, tsum = 0;
+  for (uint16_t i = 0; i < g_ring_count; i++) {
+    const float t = g_ring_t[i];
+    if (isnan(tmin) || t < tmin) tmin = t;
+    if (isnan(tmax) || t > tmax) tmax = t;
+    tsum += t;
+  }
+  char buf[288];
+  snprintf(buf, sizeof(buf),
+           "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,"
+           "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
+           "\"t_avg_f\":%.1f,\"samples\":%u}",
+           (unsigned long)g_run_today_s, (unsigned long)g_run_total_s,
+           g_energy_wh, fan_watts(g_speed < 0 ? 0 : g_speed),
+           isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
+           isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
+           g_ring_count ? (tsum / g_ring_count) * 9 / 5 + 32 : 0, g_ring_count);
+  g_http.send(200, "application/json", buf);
+}
+
+static void handle_csv() {
+  String out;
+  out.reserve(g_ring_count * 44 + 64);
+  out += "epoch,temp_c,rh,hpa,outside_f,speed\n";
+  for (uint16_t i = 0; i < g_ring_count; i++) {
+    char l[80];
+    const long ts =
+        g_ring_end_ts ? (long)g_ring_end_ts - (long)(g_ring_count - 1 - i) * 300
+                      : 0;
+    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, g_ring_t[i],
+             g_ring_h[i], g_ring_p[i], isnan(g_ring_o[i]) ? -999 : g_ring_o[i],
+             (int)g_ring_s[i]);
+    out += l;
+  }
+  g_http.sendHeader("Content-Disposition",
+                    "attachment; filename=garage-fan-24h.csv");
+  g_http.send(200, "text/csv", out);
+}
+
+static const char kManifest[] PROGMEM = R"json({
+"name":"Garage fan","short_name":"GarageFan","start_url":"/",
+"display":"standalone","background_color":"#0e1116","theme_color":"#0e1116",
+"icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]})json";
+
+static const char kIcon[] PROGMEM =
+    R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<rect width="100" height="100" rx="22" fill="#0e1116"/>
+<g fill="#3b82f6"><circle cx="50" cy="50" r="9"/>
+<path d="M50 14a10 10 0 0 1 10 10c0 8-6 12-8 18l-4-1c-2-9-8-13-8-19a10 10 0 0 1 10-8z"/>
+<path d="M50 86a10 10 0 0 1-10-10c0-8 6-12 8-18l4 1c2 9 8 13 8 19a10 10 0 0 1-10 8z"/>
+<path d="M14 50a10 10 0 0 1 10-10c8 0 12 6 18 8l-1 4c-9 2-13 8-19 8a10 10 0 0 1-8-10z"/>
+<path d="M86 50a10 10 0 0 1-10 10c-8 0-12-6-18-8l1-4c9-2 13-8 19-8a10 10 0 0 1 8 10z"/>
+</g></svg>)svg";
+
 static void handle_state() {
   char buf[560];
   state_json(buf, sizeof(buf));
@@ -649,6 +917,29 @@ static void handle_config() {
       g_prefs.putFloat("offi", v);
     }
   }
+  if (g_http.hasArg("db")) {
+    const float v = g_http.arg("db").toFloat();
+    if (v >= 0 && v <= 5) {
+      g_auto_db = v;
+      g_prefs.putFloat("db", v);
+    }
+  }
+  if (g_http.hasArg("span")) {
+    const float v = g_http.arg("span").toFloat();
+    if (v >= 0.5f && v <= 15) {
+      g_auto_span = v;
+      g_prefs.putFloat("span", v);
+    }
+  }
+  if (g_http.hasArg("newtoken") && g_http.arg("auth") == g_token) {
+    const String nt = g_http.arg("newtoken");
+    if (nt.length() >= 6 && nt.length() < 39) {
+      snprintf(g_token, sizeof(g_token), "%s", nt.c_str());
+      g_prefs.putString("token", g_token);
+      Serial.println("ota token changed");
+    }
+  }
+  sse_push();
   handle_state();
 }
 
@@ -752,13 +1043,25 @@ static void handle_history() {
   String out;
   out.reserve(10000);
   if (days <= 1 || !g_sd_ok || !time_synced()) {
-    out += "{\"interval_s\":300,";
+    char hd[64];
+    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,",
+             (long)g_ring_end_ts);
+    out += hd;
     append_series(out, "temp_c", g_ring_t, g_ring_count, 1);
     out += ',';
     append_series(out, "rh", g_ring_h, g_ring_count, 0);
     out += ',';
     append_series(out, "hpa", g_ring_p, g_ring_count, 1);
-    out += '}';
+    out += ',';
+    append_series(out, "out_f", g_ring_o, g_ring_count, 1);
+    out += ",\"spd\":[";
+    for (uint16_t i = 0; i < g_ring_count; i++) {
+      char n[6];
+      snprintf(n, sizeof(n), "%d", (int)g_ring_s[i]);
+      out += n;
+      if (i + 1 < g_ring_count) out += ',';
+    }
+    out += "]}";
   } else {
     static float t[kGraphMaxPts], h[kGraphMaxPts], p[kGraphMaxPts];
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
@@ -783,7 +1086,7 @@ static void handle_history() {
 // loop for the duration (can be minutes on big cards); the RMT peripheral
 // keeps the fan running throughout.
 static void handle_sd_format() {
-  if (g_http.arg("token") != FAN_OTA_TOKEN) {
+  if (g_http.arg("token") != g_token) {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
@@ -899,7 +1202,7 @@ static void handle_set() {
 static void handle_update_upload() {
   HTTPUpload& up = g_http.upload();
   if (up.status == UPLOAD_FILE_START) {
-    g_ota_authorized = g_http.arg("token") == FAN_OTA_TOKEN;
+    g_ota_authorized = g_http.arg("token") == g_token;
     if (!g_ota_authorized) {
       Serial.println("[OTA] rejected: bad token");
       return;
@@ -994,6 +1297,14 @@ void setup() {
   g_auto_max = g_prefs.getInt("max", 9);
   g_off_chg = g_prefs.getFloat("offc", -3.0f);
   g_off_idle = g_prefs.getFloat("offi", -1.0f);
+  g_auto_db = g_prefs.getFloat("db", 0.3f);
+  g_auto_span = g_prefs.getFloat("span", 4.0f);
+  g_run_total_s = g_prefs.getUInt("runs", 0);
+  g_run_today_s = g_prefs.getUInt("runt", 0);
+  g_today_ymd = g_prefs.getUInt("ymd", 0);
+  g_energy_wh = g_prefs.getFloat("ewh", 0);
+  String tk = g_prefs.getString("token", FAN_OTA_TOKEN);
+  snprintf(g_token, sizeof(g_token), "%s", tk.c_str());
   const int saved = g_prefs.getInt("speed", 0);
   if (saved > 0 && saved <= 12) {
     g_speed = saved;
@@ -1027,6 +1338,11 @@ void setup() {
   esp_task_wdt_add(NULL);
   Wire.begin();
   SPI.begin();
+  CRUMB("epd_init");
+  g_epd.begin();
+  g_epd.setRotation(1);
+  g_epd_ok = true;
+  CRUMB_CLEAR();
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setHostname(FAN_HOSTNAME);
@@ -1041,6 +1357,12 @@ void setup() {
   g_http.on("/api/config", handle_config);
   g_http.on("/api/sensors", handle_sensors);
   g_http.on("/api/history", handle_history);
+  g_http.on("/api/stats", handle_stats);
+  g_http.on("/download.csv", handle_csv);
+  g_http.on("/manifest.json",
+            []() { g_http.send_P(200, "application/json", kManifest); });
+  g_http.on("/icon.svg",
+            []() { g_http.send_P(200, "image/svg+xml", kIcon); });
   g_http.on("/api/sdformat", handle_sd_format);
   g_http.on("/api/battdebug", []() {
     char out[512];
@@ -1109,6 +1431,7 @@ void loop() {
         MDNS.begin(FAN_HOSTNAME);
         MDNS.addService("http", "tcp", 80);
         g_http.begin();
+        g_sse_srv.begin();
         Serial.printf("web ui: http://%s.local/\n", FAN_HOSTNAME);
       }
     }
@@ -1117,9 +1440,41 @@ void loop() {
   ensure_mqtt();
   g_mqtt.loop();
   g_http.handleClient();
+  sse_accept();
+  // Runtime odometer + energy integration, once per second.
+  if (millis() - g_last_count_ms >= 1000) {
+    g_last_count_ms = millis();
+    if (g_speed > 0) {
+      g_run_total_s++;
+      g_run_today_s++;
+      g_energy_wh += fan_watts(g_speed) / 3600.0f;
+    }
+    if (time_synced()) {
+      struct tm lt;
+      time_t now = time(nullptr);
+      gmtime_r(&now, &lt);
+      const uint32_t ymd =
+          (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+      if (g_today_ymd != 0 && ymd != g_today_ymd) g_run_today_s = 0;
+      g_today_ymd = ymd;
+    }
+  }
+  if (millis() - g_last_nvs_ms >= 15 * 60 * 1000) {
+    g_last_nvs_ms = millis();
+    g_prefs.putUInt("runs", g_run_total_s);
+    g_prefs.putUInt("runt", g_run_today_s);
+    g_prefs.putUInt("ymd", g_today_ymd);
+    g_prefs.putFloat("ewh", g_energy_wh);
+  }
+  // E-ink: refresh with each sample cycle, or 60 s after a speed change.
+  if (g_epd_ok && g_ring_count &&
+      ((millis() - g_last_epd_ms >= kSampleMs) ||
+       (g_speed != g_epd_speed_shown && millis() - g_last_epd_ms >= 60000)))
+    epd_render();
   if (g_last_sample_ms == 0 || millis() - g_last_sample_ms >= kSampleMs) {
     g_last_sample_ms = millis();
     sample_climate();
+    sse_push();
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
