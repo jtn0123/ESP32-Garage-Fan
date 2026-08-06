@@ -1,82 +1,122 @@
 // Copyright 2026 Justin
-// Native tests for fan_auto_logic.h -- the auto-mode differential thermostat.
+// Native tests for fan_auto_logic.h -- the hold-at-max hysteresis thermostat.
 #include <unity.h>
 
 #include "fan_auto_logic.h"
 
-static const FanAutoCfg kCfg = kFanAutoDefaults;  // min 1, max 9, 0.3C, 4C
+static const FanAutoCfg kCfg = kFanAutoDefaults;  // min 0, max 9, 2.5F/1.5F
 
 void setUp() {}
 void tearDown() {}
 
-static void test_outside_hotter_steps_down_to_min() {
+// Delta helpers: thresholds are in C internally; use deltas comfortably
+// beyond/inside them so float rounding can't flip a comparison.
+static constexpr float kAbove = 2.0f;    // > on_delta_c (1.39 C)
+static constexpr float kBetween = 1.1f;  // between off (0.83) and on (1.39)
+static constexpr float kBelow = 0.5f;    // < off_delta_c
+
+static void test_hot_garage_ramps_to_max_one_step_per_tick() {
+  bool high = false;
+  int s = 0;
+  s = fan_auto_decide(25.0f + kAbove, 25.0f, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(1, s);  // exactly one step, not a jump
+  TEST_ASSERT_TRUE(high);
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(25.0f + kAbove, 25.0f, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(kCfg.max_speed, s);  // full blast, never 10+
+}
+
+static void test_holds_max_between_thresholds() {
+  // The complaint that started this: garage still hotter, just less so.
+  // Once latched high, a shrinking-but-positive delta must NOT slow the fan.
+  bool high = true;
+  int s = kCfg.max_speed;
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(25.0f + kBetween, 25.0f, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(kCfg.max_speed, s);
+  TEST_ASSERT_TRUE(high);
+}
+
+static void test_releases_to_min_below_off_threshold() {
+  bool high = true;
+  int s = kCfg.max_speed;
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(25.0f + kBelow, 25.0f, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(kCfg.min_speed, s);  // default min 0 = off
+  TEST_ASSERT_FALSE(high);
+}
+
+static void test_outside_hotter_rests_at_min() {
+  bool high = true;
   int s = 9;
-  for (int i = 0; i < 20; i++) s = fan_auto_decide(30.0f, 35.0f, s, kCfg);
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(28.0f, 33.0f, s, &high, kCfg);
   TEST_ASSERT_EQUAL(kCfg.min_speed, s);
 }
 
-static void test_inside_much_hotter_ramps_to_max_one_step_per_tick() {
-  int s = 1;
-  s = fan_auto_decide(35.0f, 25.0f, s, kCfg);
-  TEST_ASSERT_EQUAL(2, s);  // exactly one step, not a jump
-  for (int i = 0; i < 20; i++) s = fan_auto_decide(35.0f, 25.0f, s, kCfg);
-  TEST_ASSERT_EQUAL(kCfg.max_speed, s);  // converges to the ceiling, never 10+
+static void test_low_state_holds_between_thresholds() {
+  // Rising back into the dead zone must not re-engage until >= on threshold.
+  bool high = false;
+  int s = kCfg.min_speed;
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(25.0f + kBetween, 25.0f, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(kCfg.min_speed, s);
+  TEST_ASSERT_FALSE(high);
 }
 
-static void test_max_speed_is_respected() {
+static void test_user_min_speed_is_the_rest_floor() {
   FanAutoCfg cfg = kCfg;
-  cfg.max_speed = 5;
-  int s = 1;
-  for (int i = 0; i < 20; i++) s = fan_auto_decide(40.0f, 20.0f, s, cfg);
-  TEST_ASSERT_EQUAL(5, s);
+  cfg.min_speed = 3;
+  bool high = true;
+  int s = cfg.max_speed;
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(25.0f + kBelow, 25.0f, s, &high, cfg);
+  TEST_ASSERT_EQUAL(3, s);
 }
 
-static void test_missing_data_holds_current_speed() {
-  TEST_ASSERT_EQUAL(7, fan_auto_decide(NAN, 25.0f, 7, kCfg));
-  TEST_ASSERT_EQUAL(7, fan_auto_decide(30.0f, NAN, 7, kCfg));
-  TEST_ASSERT_EQUAL(0, fan_auto_decide(NAN, NAN, 0, kCfg));
+static void test_user_max_speed_is_respected() {
+  FanAutoCfg cfg = kCfg;
+  cfg.max_speed = 3;  // the "3 to off" final-setup example
+  bool high = false;
+  int s = 0;
+  for (int i = 0; i < 20; i++) s = fan_auto_decide(40.0f, 20.0f, s, &high, cfg);
+  TEST_ASSERT_EQUAL(3, s);
 }
 
-static void test_equal_temperatures_idle_at_min() {
-  int s = 6;
-  for (int i = 0; i < 10; i++) s = fan_auto_decide(28.0f, 28.0f, s, kCfg);
+static void test_missing_data_holds_speed_and_latch() {
+  bool high = true;
+  TEST_ASSERT_EQUAL(7, fan_auto_decide(NAN, 25.0f, 7, &high, kCfg));
+  TEST_ASSERT_TRUE(high);
+  high = false;
+  TEST_ASSERT_EQUAL(7, fan_auto_decide(30.0f, NAN, 7, &high, kCfg));
+  TEST_ASSERT_FALSE(high);
+  TEST_ASSERT_EQUAL(0, fan_auto_decide(NAN, NAN, 0, &high, kCfg));
+}
+
+static void test_full_cycle_hot_afternoon_to_cool_evening() {
+  // Story test: garage bakes, fan holds max through the whole cooldown,
+  // drops to rest only near equilibrium, stays down in the dead zone.
+  bool high = false;
+  int s = 0;
+  const float out = 24.0f;
+  for (int i = 0; i < 15; i++) s = fan_auto_decide(out + 4.0f, out, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(kCfg.max_speed, s);
+  for (float d = 4.0f; d > 0.9f; d -= 0.2f) {  // cooling, still hot-ish
+    s = fan_auto_decide(out + d, out, s, &high, kCfg);
+    TEST_ASSERT_EQUAL(kCfg.max_speed, s);  // no premature slowdown, ever
+  }
+  for (int i = 0; i < 15; i++)  // near-equalized -> rest
+    s = fan_auto_decide(out + 0.4f, out, s, &high, kCfg);
   TEST_ASSERT_EQUAL(kCfg.min_speed, s);
-}
-
-static void test_converged_speed_is_stable_no_hunting() {
-  // A mid-range delta lands on one target; once reached, repeated ticks with
-  // the same readings must not oscillate.
-  int s = 1;
-  for (int i = 0; i < 20; i++) s = fan_auto_decide(30.0f, 28.0f, s, kCfg);
-  const int settled = s;
-  for (int i = 0; i < 10; i++) {
-    s = fan_auto_decide(30.0f, 28.0f, s, kCfg);
-    TEST_ASSERT_EQUAL(settled, s);
-  }
-  TEST_ASSERT_TRUE(settled > kCfg.min_speed && settled < kCfg.max_speed);
-}
-
-static void test_proportional_zone_is_monotonic() {
-  // Bigger delta must never produce a smaller settled speed.
-  int last = 0;
-  for (float delta = 0.5f; delta <= 6.0f; delta += 0.5f) {
-    int s = 1;
-    for (int i = 0; i < 30; i++)
-      s = fan_auto_decide(25.0f + delta, 25.0f, s, kCfg);
-    TEST_ASSERT_TRUE(s >= last);
-    last = s;
-  }
-  TEST_ASSERT_EQUAL(kCfg.max_speed, last);
+  for (int i = 0; i < 10; i++)  // dead zone after release: stays at rest
+    s = fan_auto_decide(out + kBetween, out, s, &high, kCfg);
+  TEST_ASSERT_EQUAL(kCfg.min_speed, s);
 }
 
 int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_outside_hotter_steps_down_to_min);
-  RUN_TEST(test_inside_much_hotter_ramps_to_max_one_step_per_tick);
-  RUN_TEST(test_max_speed_is_respected);
-  RUN_TEST(test_missing_data_holds_current_speed);
-  RUN_TEST(test_equal_temperatures_idle_at_min);
-  RUN_TEST(test_converged_speed_is_stable_no_hunting);
-  RUN_TEST(test_proportional_zone_is_monotonic);
+  RUN_TEST(test_hot_garage_ramps_to_max_one_step_per_tick);
+  RUN_TEST(test_holds_max_between_thresholds);
+  RUN_TEST(test_releases_to_min_below_off_threshold);
+  RUN_TEST(test_outside_hotter_rests_at_min);
+  RUN_TEST(test_low_state_holds_between_thresholds);
+  RUN_TEST(test_user_min_speed_is_the_rest_floor);
+  RUN_TEST(test_user_max_speed_is_respected);
+  RUN_TEST(test_missing_data_holds_speed_and_latch);
+  RUN_TEST(test_full_cycle_hot_afternoon_to_cool_evening);
   return UNITY_END();
 }

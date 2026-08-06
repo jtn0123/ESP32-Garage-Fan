@@ -65,15 +65,14 @@
 #define EPD_DC_PIN 10
 #endif
 
-static const char* kFwVersion = "1.9.0";
+static const char* kFwVersion = "1.10.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
 // after live fan testing showed this rig tracks the HIGH fraction (see
 // PROTOCOL.md). Off = solid LOW. /api/raw re-derives empirically if needed.
-static constexpr uint16_t kHighUs[13] = {0,    3477, 4072, 4868, 5066,
-                                         5661, 6159, 6754, 7251, 7847,
-                                         8344, 8940, 9437};
+static constexpr uint16_t kHighUs[13] = {0,    3477, 4072, 4868, 5066, 5661, 6159,
+                                         6754, 7251, 7847, 8344, 8940, 9437};
 
 static const char* kTopicSet = "garage/fan/set";
 static const char* kTopicState = "garage/fan/state";
@@ -105,6 +104,7 @@ static float g_batt_v = NAN, g_batt_pct = NAN;
 static float g_pct_hist[12];
 static float g_v_hist[12];
 static uint8_t g_pct_n = 0;  // 5-min cadence -> 1 h sliding window
+static bool g_chg = false;   // sticky charging verdict, NVS-persisted
 static bool g_sd_ok = false;
 static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
 // Crash forensics for the SD path: the sentinel holds a magic value only
@@ -123,15 +123,24 @@ static constexpr uint32_t kSdSentinelMagic = 0x5DDEAD01;
 
 static const char* reset_reason_str(esp_reset_reason_t r) {
   switch (r) {
-    case ESP_RST_POWERON: return "poweron";
-    case ESP_RST_SW: return "sw_reset";
-    case ESP_RST_PANIC: return "panic";
-    case ESP_RST_INT_WDT: return "int_wdt";
-    case ESP_RST_TASK_WDT: return "task_wdt";
-    case ESP_RST_WDT: return "wdt";
-    case ESP_RST_BROWNOUT: return "brownout";
-    case ESP_RST_DEEPSLEEP: return "deepsleep";
-    default: return "other";
+    case ESP_RST_POWERON:
+      return "poweron";
+    case ESP_RST_SW:
+      return "sw_reset";
+    case ESP_RST_PANIC:
+      return "panic";
+    case ESP_RST_INT_WDT:
+      return "int_wdt";
+    case ESP_RST_TASK_WDT:
+      return "task_wdt";
+    case ESP_RST_WDT:
+      return "wdt";
+    case ESP_RST_BROWNOUT:
+      return "brownout";
+    case ESP_RST_DEEPSLEEP:
+      return "deepsleep";
+    default:
+      return "other";
   }
 }
 static bool g_rmt_ready = false;
@@ -156,7 +165,7 @@ static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
 static uint32_t g_last_auto_ms = 0;
 static float g_ring_t[kRingLen], g_ring_h[kRingLen], g_ring_p[kRingLen];
-static float g_ring_o[kRingLen];  // outdoor F at sample time (NAN = none)
+static float g_ring_o[kRingLen];   // outdoor F at sample time (NAN = none)
 static int8_t g_ring_s[kRingLen];  // fan speed at sample time
 static time_t g_ring_end_ts = 0;
 static uint16_t g_ring_count = 0;
@@ -170,7 +179,9 @@ static bool g_epd_ok = false;
 static uint32_t g_last_epd_ms = 0;
 static int g_epd_speed_shown = -99;
 static char g_token[40];
-static float g_auto_db = 0.3f, g_auto_span = 4.0f;
+static int g_auto_min = 0;                           // rest speed once equalized (0 = off)
+static float g_auto_onf = 2.5f, g_auto_offf = 1.5f;  // engage/release, deg F
+static bool g_auto_high = false;                     // hysteresis latch for fan_auto_decide
 
 static const char kPage[] PROGMEM = R"html(<!doctype html>
 <html><head><meta charset="utf-8">
@@ -238,10 +249,11 @@ footer a{color:var(--mut)}
 <div id="grid"><button id="off" onclick="go(0)">off</button></div>
 <div id="autorow"><button id="autobtn" onclick="toggleAuto()">auto</button>
 <select id="maxsel" onchange="setCfg('max',this.value)"></select>
+<select id="minsel" onchange="setCfg('min',this.value)"></select>
 <span id="outinfo"></span></div></div>
 <div id="settings"><h2>auto mode</h2>
-<div class="srow"><span>deadband &deg;C</span><input id="s_db" type="number" step="0.1" value="0.3"></div>
-<div class="srow"><span>full-speed span &deg;C</span><input id="s_span" type="number" step="0.5" value="4"></div>
+<div class="srow"><span>hold max above &deg;F</span><input id="s_onf" type="number" step="0.5" min="0.5"></div>
+<div class="srow"><span>drop to low below &deg;F</span><input id="s_offf" type="number" step="0.5" min="0"></div>
 <h2 class="sec">temperature offsets &deg;C</h2>
 <div class="srow"><span>while charging</span><input id="s_offc" type="number" step="0.1"></div>
 <div class="srow"><span>idle</span><input id="s_offi" type="number" step="0.1"></div>
@@ -270,17 +282,20 @@ const g=$('grid');
 for(let i=1;i<=12;i++){const b=document.createElement('button');b.textContent=i;b.id='b'+i;b.onclick=()=>go(i);g.appendChild(b);}
 const ms=$('maxsel');
 for(let i=1;i<=12;i++){const o=document.createElement('option');o.value=i;o.textContent='max '+i;ms.appendChild(o);}
+const ns=$('minsel');
+for(let i=0;i<=12;i++){const o=document.createElement('option');o.value=i;o.textContent=i===0?'low off':'low '+i;ns.appendChild(o);}
 function tog(id){const e=$(id);e.style.display=e.style.display==='block'?'none':'block';}
 async function go(n){await fetch('/api/set?speed='+n);}
 async function toggleAuto(){await fetch('/api/config?auto='+(auto?0:1));}
 async function setCfg(k,v){await fetch('/api/config?'+k+'='+v);}
-async function saveCfg(){await fetch('/api/config?db='+$('s_db').value+'&span='+$('s_span').value+'&offc='+$('s_offc').value+'&offi='+$('s_offi').value);tog('settings');}
+async function saveCfg(){await fetch('/api/config?onf='+$('s_onf').value+'&offf='+$('s_offf').value+'&offc='+$('s_offc').value+'&offi='+$('s_offi').value);tog('settings');}
 async function doOta(){const f=$('s_fw').files[0];if(!f){alert('pick firmware.bin');return;}
 const fd=new FormData();fd.append('firmware',f);
 const r=await fetch('/update?token='+encodeURIComponent($('s_tok').value),{method:'POST',body:fd});
 alert(await r.text());}
 function render(s){
 auto=s.auto;maxs=s.auto_max;ms.value=maxs;
+if(s.auto_min!==undefined)ns.value=s.auto_min;
 $('speed').textContent=s.speed===0?'off':(s.speed<0?'raw':s.speed);
 $('fill').style.width=(s.speed>0?s.speed/12*100:0)+'%';
 for(let i=1;i<=12;i++)$('b'+i).className=i===s.speed?'on':'';
@@ -295,7 +310,8 @@ $('bpct').textContent=(s.batt.chg?'⚡':'')+(s.batt.pct!==null?s.batt.pct+'%':s.
 const bp=s.batt.pct!==null?s.batt.pct:Math.max(0,Math.min(100,(s.batt.v-3.2)*100));
 $('bfill').style.width=bp+'%';
 $('bfill').style.background=s.batt.chg?'#3b82f6':(bp>40?'#22a06b':(bp>15?'#c9852a':'#c0392b'));}
-if(!$('s_offc').value&&s.toff!==undefined){$('s_offc').value=-13.9;$('s_offi').value=-1.5;}
+if(!$('s_offc').value&&s.offc!==undefined){$('s_offc').value=s.offc;$('s_offi').value=s.offi;}
+if(!$('s_onf').value&&s.on_f!==undefined){$('s_onf').value=s.on_f;$('s_offf').value=s.off_f;}
 let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+'/'+(s.sd_total_mb/1024).toFixed(1)+'GB'):(s.sd_q?'sd quarantined':'no sd');
 let bt=s.batt?(' · '+s.batt.v.toFixed(3)+'V'):'';
 $('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+'dBm · '+sd+bt+' · toff '+s.toff+'<br>link '+(s.mqtt?'up':'down')+' (local mqtt) · up '+Math.floor(s.uptime_s/3600)+'h'+Math.floor(s.uptime_s%3600/60)+'m';
@@ -407,7 +423,8 @@ static void set_wave(uint16_t high_us) {
 }
 
 static float fan_watts(int speed) {
-  if (speed <= 0) return 0;
+  if (speed <= 0)
+    return 0;
   const float f = speed / 12.0f;
   return 5.0f + 100.0f * f * f * f;  // cubic fan law, rough estimate
 }
@@ -415,7 +432,8 @@ static float fan_watts(int speed) {
 static void sse_push();
 
 static void publish_state() {
-  if (!g_mqtt.connected()) return;
+  if (!g_mqtt.connected())
+    return;
   char buf[4];
   snprintf(buf, sizeof(buf), "%d", g_speed);
   g_mqtt.publish(kTopicState, buf, true);
@@ -425,10 +443,10 @@ static void publish_state() {
 // (the human explicitly grabbed the wheel); retained-replay right after the
 // broker connects does not count as manual.
 static void apply_speed(int v, const char* source) {
-  if (v < 0 || v > 12 || v == g_speed) return;
+  if (v < 0 || v > 12 || v == g_speed)
+    return;
   const bool manual = strcmp(source, "http") == 0 ||
-                      (strcmp(source, "mqtt") == 0 &&
-                       millis() - g_mqtt_up_ms > kMqttGraceMs);
+                      (strcmp(source, "mqtt") == 0 && millis() - g_mqtt_up_ms > kMqttGraceMs);
   if (manual && g_auto_on) {
     g_auto_on = false;
     g_prefs.putBool("auto", false);
@@ -471,11 +489,14 @@ static bool lc_write(uint8_t reg, uint16_t val) {
 static bool lc_read(uint8_t reg, uint16_t* out) {
   Wire.beginTransmission(0x0B);
   Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom((uint8_t)0x0B, (uint8_t)3) != 3) return false;
+  if (Wire.endTransmission(false) != 0)
+    return false;
+  if (Wire.requestFrom((uint8_t)0x0B, (uint8_t)3) != 3)
+    return false;
   const uint8_t lo = Wire.read(), hi = Wire.read(), crc = Wire.read();
   const uint8_t chk[5] = {0x16, reg, 0x17, lo, hi};
-  if (lc_crc(chk, 5) != crc) return false;
+  if (lc_crc(chk, 5) != crc)
+    return false;
   *out = ((uint16_t)hi << 8) | lo;
   return true;
 }
@@ -484,7 +505,8 @@ static bool lc_read(uint8_t reg, uint16_t* out) {
 // probe both libraries, then fall back to raw LC register access (memory:
 // LC709203F lives at 0x0B, MAX17048 at 0x36; scan before assuming).
 static void batt_begin() {
-  if (g_batt_kind) return;
+  if (g_batt_kind)
+    return;
   // Raw LC access FIRST: this board's chip reports IC version 0x2AFF -- a
   // variant the Adafruit library rejects at begin() despite fully working
   // registers (proven 2026-08-05 via /api/battdebug: 3776 mV, 29% RSOC,
@@ -510,57 +532,77 @@ static void batt_begin() {
 }
 
 static void batt_read() {
-  if (!g_batt_kind) return;
+  if (!g_batt_kind)
+    return;
   float v = NAN, p = NAN;
   if (g_batt_kind == 3) {
     uint16_t mv = 0, soc = 0;
-    if (lc_read(0x09, &mv)) v = mv / 1000.0f;
-    if (lc_read(0x0D, &soc) && soc <= 100) p = soc;
+    if (lc_read(0x09, &mv))
+      v = mv / 1000.0f;
+    if (lc_read(0x0D, &soc) && soc <= 100)
+      p = soc;
   } else {
     v = g_batt_kind == 1 ? g_max.cellVoltage() : g_lc.cellVoltage();
     p = g_batt_kind == 1 ? g_max.cellPercent() : g_lc.cellPercent();
   }
   if (v > 2.0f && v < 5.0f) {
     g_batt_v = v;
-    if (!isnan(p)) g_batt_pct = p > 100 ? 100 : p;
+    if (!isnan(p))
+      g_batt_pct = p > 100 ? 100 : p;
+  }
+}
+
+// Sticky charging verdict, updated once per 5-min battery sample: enter on a
+// clearly rising voltage slope, leave only on a clearly falling one. In the
+// plateau between (trickle charge, jitter) the last verdict stands -- a
+// flapping detector swings the temperature offset by ~12 C and poisons every
+// consumer of garage temp (tiles, ring, auto mode). Persisted so a reboot
+// mid-charge keeps the right offset.
+static void chg_update() {
+  if (g_pct_n < 3)
+    return;  // not enough history to judge; hold
+  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
+  const float mvh = (g_batt_v - g_v_hist[0]) * 1000.0f / hours;
+  const float dpct = g_pct_hist[0] - g_pct_hist[g_pct_n - 1];  // + = draining
+  // +5 mV/h is unmistakably inbound power on a big pack; 4.17 V is float.
+  bool next = g_chg;
+  if (mvh >= 5.0f || g_batt_v >= 4.17f || dpct < -0.3f)
+    next = true;
+  else if (mvh <= -5.0f || dpct > 0.3f)
+    next = false;
+  if (next != g_chg) {
+    g_chg = next;
+    g_prefs.putBool("chg", g_chg);
+    Serial.printf("charging: %s\n", g_chg ? "yes" : "no");
   }
 }
 
 // Discharge slope over the last hour of 5-min points -> hours remaining.
 // Rising charge or a flat line means no meaningful ETA.
 static void batt_eta(bool* charging, float* eta_h) {
-  *charging = g_batt_v >= 4.17f;
+  *charging = g_chg;
   *eta_h = NAN;
-  if (g_pct_n < 3) return;
+  if (g_pct_n < 6 || *charging)
+    return;
   const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
-  // Voltage slope is the sensitive signal: a big pack trickle-charging never
-  // moves whole RSOC percents, but +5 mV/h is unmistakably inbound power.
-  if ((g_batt_v - g_v_hist[0]) * 1000.0f / hours >= 5.0f) *charging = true;
-  if (g_pct_n < 6) return;
   const float delta = g_pct_hist[0] - g_pct_hist[g_pct_n - 1];  // + = draining
-  if (delta < -0.3f) *charging = true;
-  if (delta > 0.2f && !*charging) *eta_h = g_batt_pct / (delta / hours);
+  if (delta > 0.2f)
+    *eta_h = g_batt_pct / (delta / hours);
 }
 
 static bool time_synced();
 
-static bool is_charging() {
-  bool chg = false;
-  float eta = NAN;
-  batt_eta(&chg, &eta);
-  return chg;
-}
+static bool is_charging() { return g_chg; }
 
-static float temp_corrected(float raw) {
-  return raw + (is_charging() ? g_off_chg : g_off_idle);
-}
+static float temp_corrected(float raw) { return raw + (is_charging() ? g_off_chg : g_off_idle); }
 
 static float outside_c_fresh() {
   // A bridge that publishes its own epoch timestamp gives real freshness --
   // retained redelivery of an old snapshot reads as stale, as it should.
   // Feeds without a ts topic fall back to receipt-time freshness.
   if (g_outdoor_epoch > 0) {
-    if (!time_synced() || time(nullptr) - g_outdoor_epoch > 1800) return NAN;
+    if (!time_synced() || time(nullptr) - g_outdoor_epoch > 1800)
+      return NAN;
     return g_outside_c;
   }
   if (g_outside_ms == 0 || millis() - g_outside_ms > kOutdoorStaleMs)
@@ -569,18 +611,22 @@ static float outside_c_fresh() {
 }
 
 static void auto_tick() {
-  if (!g_auto_on) return;
+  if (!g_auto_on)
+    return;
   if (g_bme_ok) {
     const float t = g_bme.readTemperature();
-    if (!isnan(t)) g_inside_c = temp_corrected(t);
+    if (!isnan(t))
+      g_inside_c = temp_corrected(t);
   }
   FanAutoCfg cfg = kFanAutoDefaults;
+  cfg.min_speed = g_auto_min;
   cfg.max_speed = g_auto_max;
-  cfg.deadband_c = g_auto_db;
-  cfg.span_c = g_auto_span;
-  const int next = fan_auto_decide(g_inside_c, outside_c_fresh(),
-                                   g_speed < 0 ? 0 : g_speed, cfg);
-  if (next != g_speed) apply_speed(next, "auto");
+  cfg.on_delta_c = g_auto_onf * 5 / 9;  // user thinks in F; logic runs in C
+  cfg.off_delta_c = g_auto_offf * 5 / 9;
+  const int next =
+      fan_auto_decide(g_inside_c, outside_c_fresh(), g_speed < 0 ? 0 : g_speed, &g_auto_high, cfg);
+  if (next != g_speed)
+    apply_speed(next, "auto");
 }
 
 static bool time_synced() { return time(nullptr) > 1700000000; }
@@ -605,9 +651,8 @@ static void sd_mount() {
     digitalWrite(EPD_CS_PIN, HIGH);
     if (SD.begin(SD_CS_PIN, SPI, kFreqs[i])) {
       g_sd_ok = true;
-      Serial.printf("sd mounted at %lu Hz: %.1f/%.1f MB used\n",
-                    (unsigned long)kFreqs[i], SD.usedBytes() / 1048576.0,
-                    SD.totalBytes() / 1048576.0);
+      Serial.printf("sd mounted at %lu Hz: %.1f/%.1f MB used\n", (unsigned long)kFreqs[i],
+                    SD.usedBytes() / 1048576.0, SD.totalBytes() / 1048576.0);
       return;
     }
   }
@@ -622,12 +667,12 @@ static void sd_mount_guarded() {
 }
 
 static void sd_log_sample(time_t now, float t, float h, float p) {
-  if (!g_sd_ok) return;
+  if (!g_sd_ok)
+    return;
   struct tm tm_now;
   gmtime_r(&now, &tm_now);
   char path[24];
-  snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tm_now.tm_year + 1900,
-           tm_now.tm_mon + 1);
+  snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tm_now.tm_year + 1900, tm_now.tm_mon + 1);
   CRUMB("sd_write");
   File f = SD.open(path, FILE_APPEND);
   if (!f) {
@@ -637,8 +682,8 @@ static void sd_log_sample(time_t now, float t, float h, float p) {
   }
   const float out = outside_c_fresh();
   char line[96];
-  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d\n",
-                   (long)now, t, h, p, isnan(out) ? -999.0f : out, g_speed);
+  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d\n", (long)now, t, h, p,
+                   isnan(out) ? -999.0f : out, g_speed);
   f.write((const uint8_t*)line, n);
   f.close();
   CRUMB_CLEAR();
@@ -647,7 +692,8 @@ static void sd_log_sample(time_t now, float t, float h, float p) {
 static void sample_climate() {
   if (!g_bme_ok) {
     g_bme_ok = g_bme.begin(0x77, &Wire) || g_bme.begin(0x76, &Wire);
-    if (!g_bme_ok) return;
+    if (!g_bme_ok)
+      return;
     Serial.println("bme280 detected");
   }
   const float t_raw = g_bme.readTemperature();
@@ -674,7 +720,8 @@ static void sample_climate() {
   g_ring_o[g_ring_count] = isnan(oc) ? NAN : oc * 9 / 5 + 32;
   g_ring_s[g_ring_count] = (int8_t)(g_speed < 0 ? 0 : g_speed);
   g_ring_count++;
-  if (time_synced()) g_ring_end_ts = time(nullptr);
+  if (time_synced())
+    g_ring_end_ts = time(nullptr);
   batt_begin();
   batt_read();
   if (!isnan(g_batt_v)) {
@@ -686,12 +733,13 @@ static void sample_climate() {
     g_pct_hist[g_pct_n] = isnan(g_batt_pct) ? 0 : g_batt_pct;
     g_v_hist[g_pct_n] = g_batt_v;
     g_pct_n++;
+    chg_update();
   }
-  if (time_synced()) sd_log_sample(time(nullptr), t, h, p);
+  if (time_synced())
+    sd_log_sample(time(nullptr), t, h, p);
   if (g_mqtt.connected()) {
     char buf[96];
-    snprintf(buf, sizeof(buf), "{\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t,
-             h, p);
+    snprintf(buf, sizeof(buf), "{\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
     g_mqtt.publish(kTopicClimate, buf, true);
   }
 }
@@ -712,41 +760,41 @@ static void state_json(char* out, size_t cap) {
     char mvh[16] = "null";
     if (g_pct_n >= 3) {
       const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
-      snprintf(mvh, sizeof(mvh), "%.0f",
-               (g_batt_v - g_v_hist[0]) * 1000.0f / hours);
+      snprintf(mvh, sizeof(mvh), "%.0f", (g_batt_v - g_v_hist[0]) * 1000.0f / hours);
     }
     char etas[16] = "null";
-    if (!isnan(eta)) snprintf(etas, sizeof(etas), "%.1f", eta);
+    if (!isnan(eta))
+      snprintf(etas, sizeof(etas), "%.1f", eta);
     char pcts[16] = "null";
-    if (!isnan(g_batt_pct)) snprintf(pcts, sizeof(pcts), "%.0f", g_batt_pct);
-    snprintf(batt, sizeof(batt),
-             "{\"v\":%.3f,\"pct\":%s,\"chg\":%s,\"eta_h\":%s,\"mvh\":%s}",
+    if (!isnan(g_batt_pct))
+      snprintf(pcts, sizeof(pcts), "%.0f", g_batt_pct);
+    snprintf(batt, sizeof(batt), "{\"v\":%.3f,\"pct\":%s,\"chg\":%s,\"eta_h\":%s,\"mvh\":%s}",
              g_batt_v, pcts, chg ? "true" : "false", etas, mvh);
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
-  snprintf(out, cap,
-           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"outside_f\":%s,"
-           "\"toff\":%.1f,"
-           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%u,\"sensor\":%s,\"last_reset\":\"%s\","
-           "\"sd_q\":%s,"
-           "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
-           g_speed, g_auto_on ? "true" : "false", g_auto_max, outside,
-           is_charging() ? g_off_chg : g_off_idle, kFwVersion, run ? run->label : "?",
-           ota_rollback_image_confirmed() ? "true" : "false",
-           ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false",
-           g_last_death, g_sd_quarantined ? "true" : "false",
-           g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
-           g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt,
-           WiFi.RSSI(), g_mqtt.connected() ? "true" : "false",
-           millis() / 1000UL, WiFi.localIP().toString().c_str());
+  snprintf(
+      out, cap,
+      "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
+      "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
+      "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
+      "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
+      "\"unhealthy_boots\":%u,\"sensor\":%s,\"last_reset\":\"%s\","
+      "\"sd_q\":%s,"
+      "\"sd_total_mb\":%lu,"
+      "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
+      "\"uptime_s\":%lu,\"ip\":\"%s\"}",
+      g_speed, g_auto_on ? "true" : "false", g_auto_max, g_auto_min, g_auto_onf, g_auto_offf,
+      outside, is_charging() ? g_off_chg : g_off_idle, g_off_chg, g_off_idle, kFwVersion,
+      run ? run->label : "?", ota_rollback_image_confirmed() ? "true" : "false",
+      ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false", g_last_death,
+      g_sd_quarantined ? "true" : "false", g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
+      g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt, WiFi.RSSI(),
+      g_mqtt.connected() ? "true" : "false", millis() / 1000UL, WiFi.localIP().toString().c_str());
 }
 
 static void sse_push() {
-  char st[560];
+  char st[672];
   state_json(st, sizeof(st));
   for (auto& c : g_sse) {
     if (c && c.connected()) {
@@ -759,7 +807,8 @@ static void sse_push() {
 
 static void sse_accept() {
   WiFiClient nc = g_sse_srv.accept();
-  if (!nc) return;
+  if (!nc)
+    return;
   for (auto& c : g_sse) {
     if (!c || !c.connected()) {
       c = nc;
@@ -767,7 +816,7 @@ static void sse_accept() {
           "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
           "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
           "Connection: keep-alive\r\n\r\nretry: 3000\n\n");
-      char st[560];
+      char st[672];
       state_json(st, sizeof(st));
       c.print("data: ");
       c.print(st);
@@ -779,7 +828,8 @@ static void sse_accept() {
 }
 
 static void epd_render() {
-  if (!g_epd_ok) return;
+  if (!g_epd_ok)
+    return;
   CRUMB("epd");
   g_epd.clearBuffer();
   g_epd.fillScreen(EPD_WHITE);
@@ -797,7 +847,8 @@ static void epd_render() {
   g_epd.print("GARAGE F");
   const float rh = g_ring_count ? g_ring_h[g_ring_count - 1] : NAN;
   g_epd.setCursor(70, 54);
-  if (!isnan(rh)) g_epd.printf("RH %.0f%%", rh);
+  if (!isnan(rh))
+    g_epd.printf("RH %.0f%%", rh);
   g_epd.setTextSize(3);
   g_epd.setCursor(158, 8);
   if (g_speed <= 0)
@@ -817,10 +868,8 @@ static void epd_render() {
   if (!isnan(g_batt_v))
     g_epd.printf("BAT %.2fV %.0f%%", g_batt_v, isnan(g_batt_pct) ? 0 : g_batt_pct);
   g_epd.setCursor(6, 76);
-  g_epd.printf("run today %luh%02lum  total %luh",
-               (unsigned long)(g_run_today_s / 3600),
-               (unsigned long)(g_run_today_s % 3600 / 60),
-               (unsigned long)(g_run_total_s / 3600));
+  g_epd.printf("run today %luh%02lum  total %luh", (unsigned long)(g_run_today_s / 3600),
+               (unsigned long)(g_run_today_s % 3600 / 60), (unsigned long)(g_run_total_s / 3600));
   g_epd.setCursor(6, 106);
   g_epd.printf("%s  fw %s", WiFi.localIP().toString().c_str(), kFwVersion);
   g_epd.display();
@@ -833,8 +882,10 @@ static void handle_stats() {
   float tmin = NAN, tmax = NAN, tsum = 0;
   for (uint16_t i = 0; i < g_ring_count; i++) {
     const float t = g_ring_t[i];
-    if (isnan(tmin) || t < tmin) tmin = t;
-    if (isnan(tmax) || t > tmax) tmax = t;
+    if (isnan(tmin) || t < tmin)
+      tmin = t;
+    if (isnan(tmax) || t > tmax)
+      tmax = t;
     tsum += t;
   }
   char buf[288];
@@ -842,9 +893,8 @@ static void handle_stats() {
            "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,"
            "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
            "\"t_avg_f\":%.1f,\"samples\":%u}",
-           (unsigned long)g_run_today_s, (unsigned long)g_run_total_s,
-           g_energy_wh, fan_watts(g_speed < 0 ? 0 : g_speed),
-           isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
+           (unsigned long)g_run_today_s, (unsigned long)g_run_total_s, g_energy_wh,
+           fan_watts(g_speed < 0 ? 0 : g_speed), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
            isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
            g_ring_count ? (tsum / g_ring_count) * 9 / 5 + 32 : 0, g_ring_count);
   g_http.send(200, "application/json", buf);
@@ -856,16 +906,12 @@ static void handle_csv() {
   out += "epoch,temp_c,rh,hpa,outside_f,speed\n";
   for (uint16_t i = 0; i < g_ring_count; i++) {
     char l[80];
-    const long ts =
-        g_ring_end_ts ? (long)g_ring_end_ts - (long)(g_ring_count - 1 - i) * 300
-                      : 0;
-    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, g_ring_t[i],
-             g_ring_h[i], g_ring_p[i], isnan(g_ring_o[i]) ? -999 : g_ring_o[i],
-             (int)g_ring_s[i]);
+    const long ts = g_ring_end_ts ? (long)g_ring_end_ts - (long)(g_ring_count - 1 - i) * 300 : 0;
+    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, g_ring_t[i], g_ring_h[i],
+             g_ring_p[i], isnan(g_ring_o[i]) ? -999 : g_ring_o[i], (int)g_ring_s[i]);
     out += l;
   }
-  g_http.sendHeader("Content-Disposition",
-                    "attachment; filename=garage-fan-24h.csv");
+  g_http.sendHeader("Content-Disposition", "attachment; filename=garage-fan-24h.csv");
   g_http.send(200, "text/csv", out);
 }
 
@@ -885,7 +931,7 @@ static const char kIcon[] PROGMEM =
 </g></svg>)svg";
 
 static void handle_state() {
-  char buf[560];
+  char buf[672];
   state_json(buf, sizeof(buf));
   g_http.send(200, "application/json", buf);
 }
@@ -917,19 +963,31 @@ static void handle_config() {
       g_prefs.putFloat("offi", v);
     }
   }
-  if (g_http.hasArg("db")) {
-    const float v = g_http.arg("db").toFloat();
-    if (v >= 0 && v <= 5) {
-      g_auto_db = v;
-      g_prefs.putFloat("db", v);
+  if (g_http.hasArg("min")) {
+    const int m = g_http.arg("min").toInt();
+    if (m >= 0 && m <= 12) {
+      g_auto_min = m;
+      g_prefs.putInt("amin", m);
     }
   }
-  if (g_http.hasArg("span")) {
-    const float v = g_http.arg("span").toFloat();
-    if (v >= 0.5f && v <= 15) {
-      g_auto_span = v;
-      g_prefs.putFloat("span", v);
+  if (g_http.hasArg("onf")) {
+    const float v = g_http.arg("onf").toFloat();
+    if (v >= 0.5f && v <= 20) {
+      g_auto_onf = v;
+      g_prefs.putFloat("onf", v);
     }
+  }
+  if (g_http.hasArg("offf")) {
+    const float v = g_http.arg("offf").toFloat();
+    if (v >= 0 && v <= 20) {
+      g_auto_offf = v;
+      g_prefs.putFloat("offf", v);
+    }
+  }
+  // Hysteresis needs release strictly below engage or the latch flaps.
+  if (g_auto_offf >= g_auto_onf) {
+    g_auto_offf = g_auto_onf > 0.5f ? g_auto_onf - 0.5f : 0;
+    g_prefs.putFloat("offf", g_auto_offf);
   }
   if (g_http.hasArg("newtoken") && g_http.arg("auth") == g_token) {
     const String nt = g_http.arg("newtoken");
@@ -950,30 +1008,35 @@ static void handle_sensors() {
   }
   char buf[128];
   const uint16_t i = g_ring_count - 1;
-  snprintf(buf, sizeof(buf),
-           "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}",
-           g_ring_t[i], g_ring_h[i], g_ring_p[i]);
+  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", g_ring_t[i],
+           g_ring_h[i], g_ring_p[i]);
   g_http.send(200, "application/json", buf);
 }
 
-static void append_series(String& out, const char* name, const float* v,
-                          uint16_t n, uint8_t decimals) {
+static void append_series(String& out, const char* name, const float* v, uint16_t n,
+                          uint8_t decimals) {
   out += '"';
   out += name;
   out += "\":[";
   char num[16];
   for (uint16_t i = 0; i < n; i++) {
-    dtostrf(v[i], 0, decimals, num);
-    out += num;
-    if (i + 1 < n) out += ',';
+    if (isnan(v[i])) {
+      // A literal "nan" is not JSON -- one bad sample would make the
+      // browser's parser reject the entire history payload (blank graph).
+      out += "null";
+    } else {
+      dtostrf(v[i], 0, decimals, num);
+      out += num;
+    }
+    if (i + 1 < n)
+      out += ',';
   }
   out += ']';
 }
 
 // Stream the month files covering [cutoff, now], decimating by stride into
 // the caller's arrays. Two passes: count, then collect every (count/max)th.
-static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p,
-                              uint16_t max_pts) {
+static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pts) {
   CRUMB("sd_read");
   time_t now = time(nullptr);
   char paths[2][24];
@@ -982,11 +1045,11 @@ static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p,
     struct tm tmv;
     gmtime_r(&at, &tmv);
     char path[24];
-    snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tmv.tm_year + 1900,
-             tmv.tm_mon + 1);
+    snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tmv.tm_year + 1900, tmv.tm_mon + 1);
     if (npaths == 0 || strcmp(path, paths[0]) != 0)
       snprintf(paths[npaths++], 24, "%s", path);
-    if (at == now) break;
+    if (at == now)
+      break;
   }
   uint32_t rows = 0;
   for (int pass = 0; pass < 2; pass++) {
@@ -995,26 +1058,31 @@ static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p,
     uint16_t kept = 0;
     for (int i = 0; i < npaths; i++) {
       File f = SD.open(paths[i], FILE_READ);
-      if (!f) continue;
+      if (!f)
+        continue;
       // Line-buffered scan; lines are short and epoch-prefixed.
       char line[96];
       size_t ll = 0;
       while (f.available()) {
         const char c = (char)f.read();
         if (c != '\n') {
-          if (ll < sizeof(line) - 1) line[ll++] = c;
+          if (ll < sizeof(line) - 1)
+            line[ll++] = c;
           continue;
         }
         line[ll] = '\0';
         ll = 0;
         const long epoch = strtol(line, nullptr, 10);
-        if (epoch < cutoff) continue;
+        if (epoch < cutoff)
+          continue;
         if (pass == 0) {
           rows++;
           continue;
         }
-        if (seen++ % stride) continue;
-        if (kept >= max_pts) break;
+        if (seen++ % stride)
+          continue;
+        if (kept >= max_pts)
+          break;
         float tv, hv, pv;
         if (sscanf(line, "%*ld,%f,%f,%f", &tv, &hv, &pv) == 3) {
           t[kept] = tv;
@@ -1044,8 +1112,7 @@ static void handle_history() {
   out.reserve(10000);
   if (days <= 1 || !g_sd_ok || !time_synced()) {
     char hd[64];
-    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,",
-             (long)g_ring_end_ts);
+    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,", (long)g_ring_end_ts);
     out += hd;
     append_series(out, "temp_c", g_ring_t, g_ring_count, 1);
     out += ',';
@@ -1059,7 +1126,8 @@ static void handle_history() {
       char n[6];
       snprintf(n, sizeof(n), "%d", (int)g_ring_s[i]);
       out += n;
-      if (i + 1 < g_ring_count) out += ',';
+      if (i + 1 < g_ring_count)
+        out += ',';
     }
     out += "]}";
   } else {
@@ -1067,8 +1135,7 @@ static void handle_history() {
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
     const uint16_t n = sd_read_range(cutoff, t, h, p, kGraphMaxPts);
     char head[48];
-    snprintf(head, sizeof(head), "{\"interval_s\":%ld,",
-             n > 1 ? (long)(days * 86400L / n) : 300L);
+    snprintf(head, sizeof(head), "{\"interval_s\":%ld,", n > 1 ? (long)(days * 86400L / n) : 300L);
     out += head;
     append_series(out, "temp_c", t, n, 1);
     out += ',';
@@ -1092,7 +1159,7 @@ static void handle_sd_format() {
   }
   Serial.println("[SD] format requested");
   esp_task_wdt_delete(NULL);  // a big-card format legitimately takes minutes
-  g_sd_quarantined = false;  // manual override un-quarantines
+  g_sd_quarantined = false;   // manual override un-quarantines
   rtc_sd_sentinel = kSdSentinelMagic;
   CRUMB("sd_format");
   SD.end();
@@ -1112,8 +1179,7 @@ static void handle_sd_format() {
   g_sd_ok = ok;
   g_sd_fails = 0;
   char buf[80];
-  snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}",
-           ok ? "true" : "false",
+  snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}", ok ? "true" : "false",
            ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0);
   Serial.printf("[SD] format result: %s\n", buf);
   g_http.send(ok ? 200 : 500, "application/json", buf);
@@ -1157,10 +1223,9 @@ static void handle_sd_test() {
            "{\"cmd0_r1\":\"0x%02X\",\"cmd8_r1\":\"0x%02X\","
            "\"cmd8_echo\":\"%02X%02X%02X%02X\",\"verdict\":\"%s\"}",
            r1, r1b, r7[0], r7[1], r7[2], r7[3],
-           r1 == 0xFF  ? "no response - card absent, unseated, or bad contact"
-           : r1 == 0x01 ? (r7[2] == 0x01 && r7[3] == 0xAA
-                               ? "card alive, SDv2, handshake ok"
-                               : "card alive but CMD8 odd")
+           r1 == 0xFF   ? "no response - card absent, unseated, or bad contact"
+           : r1 == 0x01 ? (r7[2] == 0x01 && r7[3] == 0xAA ? "card alive, SDv2, handshake ok"
+                                                          : "card alive but CMD8 odd")
                         : "card answered abnormally");
   Serial.printf("[SD] probe: %s\n", buf);
   g_http.send(200, "application/json", buf);
@@ -1194,7 +1259,8 @@ static void handle_set() {
     g_http.send(400, "application/json", "{\"error\":\"0-12 only\"}");
     return;
   }
-  if (g_speed == -1 && v == 0) g_speed = -2;  // force off to re-apply after raw
+  if (g_speed == -1 && v == 0)
+    g_speed = -2;  // force off to re-apply after raw
   apply_speed(v, "http");
   handle_state();
 }
@@ -1208,7 +1274,8 @@ static void handle_update_upload() {
       return;
     }
     Serial.printf("[OTA] receiving %s\n", up.filename.c_str());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+      Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE && g_ota_authorized) {
     if (Update.write(up.buf, up.currentSize) != up.currentSize)
       Update.printError(Serial);
@@ -1229,21 +1296,22 @@ static void handle_update_done() {
     g_http.send(500, "application/json", "{\"error\":\"update failed\"}");
     return;
   }
-  g_http.send(200, "application/json",
-              "{\"ok\":true,\"note\":\"rebooting into new slot\"}");
+  g_http.send(200, "application/json", "{\"ok\":true,\"note\":\"rebooting into new slot\"}");
   delay(300);
   esp_restart();
 }
 
 static void on_message(char* topic, uint8_t* payload, unsigned int len) {
   char buf[16];
-  if (len >= sizeof(buf)) return;
+  if (len >= sizeof(buf))
+    return;
   memcpy(buf, payload, len);
   buf[len] = '\0';
   if (strstr(topic, "/ts") != nullptr &&
       strncmp(topic, MQTT_SUB_BASE, strlen(MQTT_SUB_BASE)) == 0) {
     const long e = strtol(buf, nullptr, 10);
-    if (e > 1700000000) g_outdoor_epoch = e;
+    if (e > 1700000000)
+      g_outdoor_epoch = e;
     return;
   }
   if (strcmp(topic, kTopicOutdoor) == 0) {
@@ -1255,22 +1323,25 @@ static void on_message(char* topic, uint8_t* payload, unsigned int len) {
     }
     return;
   }
-  if (strcmp(topic, kTopicSet) != 0 || len == 0 || len > 2) return;
+  if (strcmp(topic, kTopicSet) != 0 || len == 0 || len > 2)
+    return;
   char* end = nullptr;
   long v = strtol(buf, &end, 10);
-  if (end == buf || *end != '\0') return;
+  if (end == buf || *end != '\0')
+    return;
   apply_speed(static_cast<int>(v), "mqtt");
   publish_state();
 }
 
 static void ensure_mqtt() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (g_mqtt.connected() || millis() - g_last_reconnect_ms < 3000) return;
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+  if (g_mqtt.connected() || millis() - g_last_reconnect_ms < 3000)
+    return;
   g_last_reconnect_ms = millis();
   char id[24];
   snprintf(id, sizeof(id), "garage-fan-%06llx", ESP.getEfuseMac() & 0xffffff);
-  if (g_mqtt.connect(id, MQTT_USER, MQTT_PASS, kTopicAvail, 0, true,
-                     "offline")) {
+  if (g_mqtt.connect(id, MQTT_USER, MQTT_PASS, kTopicAvail, 0, true, "offline")) {
     Serial.println("mqtt connected");
     g_mqtt_up_ms = millis();
     g_ever_healthy = true;
@@ -1297,8 +1368,10 @@ void setup() {
   g_auto_max = g_prefs.getInt("max", 9);
   g_off_chg = g_prefs.getFloat("offc", -3.0f);
   g_off_idle = g_prefs.getFloat("offi", -1.0f);
-  g_auto_db = g_prefs.getFloat("db", 0.3f);
-  g_auto_span = g_prefs.getFloat("span", 4.0f);
+  g_auto_min = g_prefs.getInt("amin", 0);
+  g_auto_onf = g_prefs.getFloat("onf", 2.5f);
+  g_auto_offf = g_prefs.getFloat("offf", 1.5f);
+  g_chg = g_prefs.getBool("chg", false);
   g_run_total_s = g_prefs.getUInt("runs", 0);
   g_run_today_s = g_prefs.getUInt("runt", 0);
   g_today_ymd = g_prefs.getUInt("ymd", 0);
@@ -1316,15 +1389,14 @@ void setup() {
   // crashes the mount gets quarantined by the sentinel above -- no card can
   // take fan control down with it.
   const esp_reset_reason_t rr = esp_reset_reason();
-  const bool abnormal = rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT ||
-                        rr == ESP_RST_TASK_WDT || rr == ESP_RST_WDT ||
-                        rr == ESP_RST_BROWNOUT;
+  const bool abnormal = rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT || rr == ESP_RST_TASK_WDT ||
+                        rr == ESP_RST_WDT || rr == ESP_RST_BROWNOUT;
   snprintf(g_last_death, sizeof(g_last_death), "%s%s%s", reset_reason_str(rr),
            rtc_crumb[0] ? " during " : "", rtc_crumb[0] ? rtc_crumb : "");
   // Quarantine on a mount sentinel from any reset, or any abnormal death
   // while an SD op was in flight.
-  g_sd_quarantined = (rtc_sd_sentinel == kSdSentinelMagic) ||
-                     (abnormal && strncmp(rtc_crumb, "sd", 2) == 0);
+  g_sd_quarantined =
+      (rtc_sd_sentinel == kSdSentinelMagic) || (abnormal && strncmp(rtc_crumb, "sd", 2) == 0);
   rtc_sd_sentinel = 0;
   CRUMB_CLEAR();
   if (g_sd_quarantined)
@@ -1332,9 +1404,9 @@ void setup() {
   Serial.printf("last reset: %s\n", g_last_death);
   // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
   // in 30 s instead of hanging dark forever. The fan rides through on RMT.
-  esp_task_wdt_config_t wdt_cfg = {
-      .timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
-  if (esp_task_wdt_init(&wdt_cfg) != ESP_OK) esp_task_wdt_reconfigure(&wdt_cfg);
+  esp_task_wdt_config_t wdt_cfg = {.timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true};
+  if (esp_task_wdt_init(&wdt_cfg) != ESP_OK)
+    esp_task_wdt_reconfigure(&wdt_cfg);
   esp_task_wdt_add(NULL);
   Wire.begin();
   SPI.begin();
@@ -1359,10 +1431,8 @@ void setup() {
   g_http.on("/api/history", handle_history);
   g_http.on("/api/stats", handle_stats);
   g_http.on("/download.csv", handle_csv);
-  g_http.on("/manifest.json",
-            []() { g_http.send_P(200, "application/json", kManifest); });
-  g_http.on("/icon.svg",
-            []() { g_http.send_P(200, "image/svg+xml", kIcon); });
+  g_http.on("/manifest.json", []() { g_http.send_P(200, "application/json", kManifest); });
+  g_http.on("/icon.svg", []() { g_http.send_P(200, "image/svg+xml", kIcon); });
   g_http.on("/api/sdformat", handle_sd_format);
   g_http.on("/api/battdebug", []() {
     char out[512];
@@ -1391,8 +1461,8 @@ void setup() {
         r += e;
       }
     }
-    snprintf(out, sizeof(out), "{\"w15\":%s,\"w0b\":%s,\"reads\":[",
-             w15 ? "true" : "false", w0b ? "true" : "false");
+    snprintf(out, sizeof(out), "{\"w15\":%s,\"w0b\":%s,\"reads\":[", w15 ? "true" : "false",
+             w0b ? "true" : "false");
     String full = String(out) + r.substring(0, r.length() - 1) + "]}";
     g_http.send(200, "application/json", full);
   });
@@ -1402,7 +1472,8 @@ void setup() {
     for (uint8_t a = 1; a < 127; a++) {
       Wire.beginTransmission(a);
       if (Wire.endTransmission() == 0) {
-        if (!first) out += ',';
+        if (!first)
+          out += ',';
         char b[8];
         snprintf(b, sizeof(b), "\"0x%02X\"", a);
         out += b;
@@ -1414,8 +1485,7 @@ void setup() {
   });
   g_http.on("/api/sdtest", handle_sd_test);
   g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
-  g_http.onNotFound(
-      []() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
+  g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
   Serial.printf("garage fan controller %s: waiting for wifi\n", kFwVersion);
 }
 
@@ -1453,9 +1523,9 @@ void loop() {
       struct tm lt;
       time_t now = time(nullptr);
       gmtime_r(&now, &lt);
-      const uint32_t ymd =
-          (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
-      if (g_today_ymd != 0 && ymd != g_today_ymd) g_run_today_s = 0;
+      const uint32_t ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+      if (g_today_ymd != 0 && ymd != g_today_ymd)
+        g_run_today_s = 0;
       g_today_ymd = ymd;
     }
   }
@@ -1495,8 +1565,7 @@ void loop() {
       }
     }
   }
-  if (!g_ever_healthy && !ota_rollback_image_confirmed() &&
-      millis() > kUnconfirmedDeadlineMs) {
+  if (!g_ever_healthy && !ota_rollback_image_confirmed() && millis() > kUnconfirmedDeadlineMs) {
     Serial.println("[OTA] unconfirmed image never reached broker; restarting");
     Serial.flush();
     esp_restart();
