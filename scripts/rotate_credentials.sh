@@ -1,75 +1,62 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Credential rotation checklist.
+#
+# This script deliberately contains NO real values. The version it replaces
+# printed the actual WiFi SSID, the broker host and username, and the first
+# characters of both the WiFi and MQTT passwords -- in a public repository. A
+# helper written to respond to an exposure must not itself be one, and a
+# password prefix is a material head start for an attacker.
+#
+# It reports only WHICH keys are present in .env, never their values.
+set -uo pipefail
 
-# Script to safely rotate credentials after potential exposure
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENV_FILE="$ROOT/.env"
 
-echo "🔐 Credential Rotation Helper"
+echo "Credential rotation checklist"
 echo "============================="
-echo ""
-echo "⚠️  SECURITY ALERT: Your credentials may have been exposed!"
-echo ""
-echo "Credentials found in config/device.yaml:"
-echo "  - WiFi SSID: ***REDACTED-SSID***"
-echo "  - WiFi Password: ***REDACTED-WIFI-PASS-PREFIX*** (hidden)"
-echo "  - MQTT User: mqtt-client"
-echo "  - MQTT Password: ***REDACTED-MQTT-PASS-PREFIX*** (hidden)"
-echo "  - MQTT Host: ***REDACTED-BROKER-HOST***"
-echo ""
-echo "IMMEDIATE ACTIONS REQUIRED:"
-echo "1. Change your WiFi password immediately"
-echo "2. Change your MQTT broker password"
-echo "3. Update any other services using these credentials"
-echo ""
-echo "AFTER CHANGING PASSWORDS:"
-echo ""
-echo "1. Create a .env file (never commit this!):"
-echo "   cp .env.example .env"
-echo "   nano .env"
-echo ""
-echo "2. Add your NEW credentials to .env:"
-echo "   WIFI_SSID=***REDACTED-SSID***"
-echo "   WIFI_PASSWORD=your_new_wifi_password"
-echo "   MQTT_USER=mqtt-client"
-echo "   MQTT_PASSWORD=your_new_mqtt_password"
-echo ""
-echo "3. Remove the exposed device.yaml:"
-echo "   rm config/device.yaml"
-echo "   cp config/device.sample.yaml config/device.yaml"
-echo ""
-echo "4. Edit config/device.yaml and remove ALL passwords"
-echo "   (they'll come from .env instead)"
-echo ""
-echo "5. Regenerate config:"
-echo "   python3 scripts/gen_device_header.py"
-echo ""
-echo "6. If you ever committed passwords to git, clean history:"
-echo "   git filter-branch --force --index-filter \\"
-echo "     'git rm --cached --ignore-unmatch config/device.yaml' \\"
-echo "     --prune-empty --tag-name-filter cat -- --all"
-echo ""
-echo "7. Force push to update remote (if needed):"
-echo "   git push --force --all"
-echo "   git push --force --tags"
-echo ""
-echo "Press Enter to acknowledge you've read this..."
-read
+echo
 
-# Backup current config
-if [ -f "config/device.yaml" ]; then
-    echo "Backing up current device.yaml to device.yaml.backup.INSECURE"
-    cp config/device.yaml config/device.yaml.backup.INSECURE
-    echo "⚠️  This backup contains passwords - delete after migration!"
+if [ -f "$ENV_FILE" ]; then
+  echo "Keys currently defined in .env (values not shown):"
+  # Print key names only. Never echo the right-hand side.
+  grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null \
+    | tr -d '=' | sed 's/^/  - /' | sort
+else
+  echo "No .env at repo root. Copy .env.example and fill it in:"
+  echo "  cp .env.example .env"
 fi
 
-# Create safe device.yaml from sample
-echo ""
-echo "Creating safe device.yaml from sample..."
-cp config/device.sample.yaml config/device.yaml.new
-echo "✅ Created config/device.yaml.new (without passwords)"
-echo ""
-echo "Next steps:"
-echo "1. Review config/device.yaml.new"
-echo "2. Create .env with your NEW passwords"
-echo "3. mv config/device.yaml.new config/device.yaml"
-echo "4. rm config/device.yaml.backup.INSECURE (after confirming .env works)"
-echo ""
-echo "Remember: NEVER commit .env or any file with real passwords!"
+cat <<'EOF'
+
+Rotate at the source first
+--------------------------
+  1. Change the password on the MQTT broker itself.
+  2. Change the WiFi password if it may have been exposed.
+     Rotating only the copies in this repo changes nothing: the credential is
+     whatever the broker and the access point will still accept.
+
+Then update every consumer
+--------------------------
+  3. This repo's .env
+  4. Any sibling checkout's .env (worktrees do not inherit it)
+  5. ~/.local/garage-fan/env  (the launchd helpers in docs/fan_protocol/mac/)
+  6. Home Assistant, and any other MQTT client on the network
+  7. Rebuild and redeploy the firmware so the device carries the new value:
+       make build && make deploy IP=<device>
+     The build regenerates src/generated_config.h from .env; that file is
+     gitignored and must never be committed or attached to a release.
+
+If a credential ever reached a commit
+-------------------------------------
+  8. Rotation is the fix. History rewriting is secondary and incomplete:
+     GitHub keeps a permanent refs/pull/<n>/head for every pull request ever
+     opened, and those refs survive a force-push and a branch deletion. They
+     can only be removed by GitHub Support or by deleting the repository.
+     Assume any value that was pushed publicly is permanently disclosed and
+     rotate it; treat a rewrite as tidying, not remediation.
+
+  9. Verify the value is gone from the working tree and from history:
+       git grep -n '<value>' HEAD
+       git log --all --oneline -S'<value>'
+EOF
