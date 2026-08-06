@@ -60,7 +60,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.7.2";
+static const char* kFwVersion = "1.8.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -136,6 +136,12 @@ static int g_speed = 0;
 static float g_inside_c = NAN;
 static float g_outside_c = NAN;
 static uint32_t g_outside_ms = 0;
+static time_t g_outdoor_epoch = 0;  // bridge's own timestamp topic, if any
+// Board self-heating correction: charging current warms the board-mounted
+// BME280 far more than idle operation does. User-tunable via
+// /api/config?offc=&offi= (Celsius, added to the raw reading).
+static float g_off_chg = -3.0f;
+static float g_off_idle = -1.0f;
 static uint32_t g_last_reconnect_ms = 0;
 static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
@@ -364,7 +370,7 @@ static void batt_begin() {
   // valid CRCs; requires repeated-start reads). The library path stays as
   // fallback for boards with recognized parts.
   uint16_t v = 0;
-  if (lc_write(0x15, 0x0001) && lc_write(0x0B, 0x0056) &&
+  if (lc_write(0x15, 0x0001) && lc_write(0x0B, 0x0055) &&  // 2x3200 = 6400 mAh
       lc_read(0x09, &v) && v > 2500 && v < 4600) {
     g_batt_kind = 3;
     Serial.printf("fuel gauge: LC709203F-variant via raw access (%u mV)\n", v);
@@ -411,7 +417,27 @@ static void batt_eta(bool* charging, float* eta_h) {
   if (delta > 0.2f && !*charging) *eta_h = g_batt_pct / (delta / hours);
 }
 
+static bool time_synced();
+
+static bool is_charging() {
+  bool chg = false;
+  float eta = NAN;
+  batt_eta(&chg, &eta);
+  return chg;
+}
+
+static float temp_corrected(float raw) {
+  return raw + (is_charging() ? g_off_chg : g_off_idle);
+}
+
 static float outside_c_fresh() {
+  // A bridge that publishes its own epoch timestamp gives real freshness --
+  // retained redelivery of an old snapshot reads as stale, as it should.
+  // Feeds without a ts topic fall back to receipt-time freshness.
+  if (g_outdoor_epoch > 0) {
+    if (!time_synced() || time(nullptr) - g_outdoor_epoch > 1800) return NAN;
+    return g_outside_c;
+  }
   if (g_outside_ms == 0 || millis() - g_outside_ms > kOutdoorStaleMs)
     return NAN;
   return g_outside_c;
@@ -421,7 +447,7 @@ static void auto_tick() {
   if (!g_auto_on) return;
   if (g_bme_ok) {
     const float t = g_bme.readTemperature();
-    if (!isnan(t)) g_inside_c = t;
+    if (!isnan(t)) g_inside_c = temp_corrected(t);
   }
   FanAutoCfg cfg = kFanAutoDefaults;
   cfg.max_speed = g_auto_max;
@@ -497,13 +523,14 @@ static void sample_climate() {
     if (!g_bme_ok) return;
     Serial.println("bme280 detected");
   }
-  const float t = g_bme.readTemperature();
+  const float t_raw = g_bme.readTemperature();
   const float h = g_bme.readHumidity();
   const float p = g_bme.readPressure() / 100.0f;
-  if (isnan(t) || isnan(h) || isnan(p)) {
+  if (isnan(t_raw) || isnan(h) || isnan(p)) {
     g_bme_ok = false;
     return;
   }
+  const float t = temp_corrected(t_raw);
   g_inside_c = t;
   if (g_ring_count == kRingLen) {
     memmove(g_ring_t, g_ring_t + 1, (kRingLen - 1) * sizeof(float));
@@ -567,6 +594,7 @@ static void state_json(char* out, size_t cap) {
   }
   snprintf(out, cap,
            "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"outside_f\":%s,"
+           "\"toff\":%.1f,"
            "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
            "\"unhealthy_boots\":%u,\"sensor\":%s,\"last_reset\":\"%s\","
            "\"sd_q\":%s,"
@@ -574,7 +602,7 @@ static void state_json(char* out, size_t cap) {
            "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\"}",
            g_speed, g_auto_on ? "true" : "false", g_auto_max, outside,
-           kFwVersion, run ? run->label : "?",
+           is_charging() ? g_off_chg : g_off_idle, kFwVersion, run ? run->label : "?",
            ota_rollback_image_confirmed() ? "true" : "false",
            ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false",
            g_last_death, g_sd_quarantined ? "true" : "false",
@@ -601,6 +629,20 @@ static void handle_config() {
     if (m >= 1 && m <= 12) {
       g_auto_max = m;
       g_prefs.putInt("max", m);
+    }
+  }
+  if (g_http.hasArg("offc")) {
+    const float v = g_http.arg("offc").toFloat();
+    if (v >= -15 && v <= 15) {
+      g_off_chg = v;
+      g_prefs.putFloat("offc", v);
+    }
+  }
+  if (g_http.hasArg("offi")) {
+    const float v = g_http.arg("offi").toFloat();
+    if (v >= -15 && v <= 15) {
+      g_off_idle = v;
+      g_prefs.putFloat("offi", v);
     }
   }
   handle_state();
@@ -891,6 +933,12 @@ static void on_message(char* topic, uint8_t* payload, unsigned int len) {
   if (len >= sizeof(buf)) return;
   memcpy(buf, payload, len);
   buf[len] = '\0';
+  if (strstr(topic, "/ts") != nullptr &&
+      strncmp(topic, MQTT_SUB_BASE, strlen(MQTT_SUB_BASE)) == 0) {
+    const long e = strtol(buf, nullptr, 10);
+    if (e > 1700000000) g_outdoor_epoch = e;
+    return;
+  }
   if (strcmp(topic, kTopicOutdoor) == 0) {
     char* end = nullptr;
     const float f = strtof(buf, &end);
@@ -924,6 +972,7 @@ static void ensure_mqtt() {
     publish_state();
     g_mqtt.subscribe(kTopicSet);
     g_mqtt.subscribe(kTopicOutdoor);
+    g_mqtt.subscribe(MQTT_SUB_BASE "/ts");
   } else {
     Serial.printf("mqtt connect failed rc=%d\n", g_mqtt.state());
   }
@@ -939,6 +988,8 @@ void setup() {
   g_prefs.begin("fanctl", false);
   g_auto_on = g_prefs.getBool("auto", false);
   g_auto_max = g_prefs.getInt("max", 9);
+  g_off_chg = g_prefs.getFloat("offc", -3.0f);
+  g_off_idle = g_prefs.getFloat("offi", -1.0f);
   const int saved = g_prefs.getInt("speed", 0);
   if (saved > 0 && saved <= 12) {
     g_speed = saved;
