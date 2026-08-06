@@ -60,7 +60,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.8.0";
+static const char* kFwVersion = "1.8.1";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -408,11 +408,15 @@ static void batt_read() {
 // Discharge slope over the last hour of 5-min points -> hours remaining.
 // Rising charge or a flat line means no meaningful ETA.
 static void batt_eta(bool* charging, float* eta_h) {
-  *charging = g_batt_v >= 4.18f;
+  *charging = g_batt_v >= 4.17f;
   *eta_h = NAN;
+  if (g_pct_n < 3) return;
+  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
+  // Voltage slope is the sensitive signal: a big pack trickle-charging never
+  // moves whole RSOC percents, but +5 mV/h is unmistakably inbound power.
+  if ((g_batt_v - g_v_hist[0]) * 1000.0f / hours >= 5.0f) *charging = true;
   if (g_pct_n < 6) return;
   const float delta = g_pct_hist[0] - g_pct_hist[g_pct_n - 1];  // + = draining
-  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
   if (delta < -0.3f) *charging = true;
   if (delta > 0.2f && !*charging) *eta_h = g_batt_pct / (delta / hours);
 }
