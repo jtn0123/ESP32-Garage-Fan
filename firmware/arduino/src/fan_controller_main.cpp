@@ -60,7 +60,7 @@
 #define EPD_CS_PIN 9
 #endif
 
-static const char* kFwVersion = "1.6.4";
+static const char* kFwVersion = "1.7.2";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -91,9 +91,10 @@ static Adafruit_MAX17048 g_max;
 static Adafruit_LC709203F g_lc;
 static Preferences g_prefs;
 static bool g_bme_ok = false;
-static uint8_t g_batt_kind = 0;  // 0 none, 1 MAX17048, 2 LC709203F
+static uint8_t g_batt_kind = 0;  // 0 none, 1 MAX17048, 2 LC709203F, 3 raw LC
 static float g_batt_v = NAN, g_batt_pct = NAN;
 static float g_pct_hist[12];
+static float g_v_hist[12];
 static uint8_t g_pct_n = 0;  // 5-min cadence -> 1 h sliding window
 static bool g_sd_ok = false;
 static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
@@ -224,15 +225,16 @@ for(let i=1;i<=12;i++)document.getElementById('b'+i).className=i===s.speed?'on':
 document.getElementById('off').className=s.speed===0?'on':'';
 document.getElementById('dot').className=s.mqtt?'up':'';
 if(s.batt){document.getElementById('batt').style.display='flex';
-document.getElementById('bpct').textContent=(s.batt.chg?'⚡':'')+s.batt.pct+'%';
-const bf=document.getElementById('bfill');bf.style.width=s.batt.pct+'%';
-bf.style.background=s.batt.chg?'#3b82f6':(s.batt.pct>40?'#22a06b':(s.batt.pct>15?'#c9852a':'#c0392b'));}
+document.getElementById('bpct').textContent=(s.batt.chg?'⚡':'')+(s.batt.pct!==null?s.batt.pct+'%':s.batt.v.toFixed(2)+'V')+(s.batt.mvh!==null?' '+(s.batt.mvh>=0?'▲':'▼')+Math.abs(s.batt.mvh)+'mV/h':'');
+const bp=s.batt.pct!==null?s.batt.pct:Math.max(0,Math.min(100,(s.batt.v-3.2)/1.0*100));
+const bf=document.getElementById('bfill');bf.style.width=bp+'%';
+bf.style.background=s.batt.chg?'#3b82f6':(bp>40?'#22a06b':(bp>15?'#c9852a':'#c0392b'));}
 document.getElementById('autobtn').className=auto?'on':'';
 document.getElementById('autobtn').textContent=auto?'auto on':'auto off';
 document.getElementById('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
 document.getElementById('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
 let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+' / '+(s.sd_total_mb/1024).toFixed(1)+' GB'):(s.sd_q?'sd quarantined — crashed a boot':'no sd card');
-let bt=s.batt?(' · batt '+s.batt.v.toFixed(2)+'V'+(s.batt.eta_h?(' · ~'+(s.batt.eta_h/24).toFixed(1)+'d left'):'')):'';
+let bt=s.batt?(' · batt '+s.batt.v.toFixed(3)+'V'+(s.batt.mvh!==null?' ('+(s.batt.mvh>=0?'+':'')+s.batt.mvh+' mV/h)':'')+(s.batt.eta_h?(' · ~'+(s.batt.eta_h/24).toFixed(1)+'d left'):'')):'';
 document.getElementById('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+' dBm · '+sd+bt+'<br>home link '+(s.mqtt?'up':'down')+' (local mqtt, not HA) · up '+Math.floor(s.uptime_s/3600)+'h '+Math.floor(s.uptime_s%3600/60)+'m';
 }catch(e){document.getElementById('meta').textContent='unreachable';}}
 function line(ctx,vals,color,W,H){if(vals.length<2)return;
@@ -318,14 +320,62 @@ static void apply_speed(int v, const char* source) {
   Serial.printf("speed -> %d via %s\n", v, source);
 }
 
+// Raw LC709203F access, bypassing the Adafruit library's begin() (whose IC
+// version check fails on this board's chip even though it ACKs). CRC-8/ATM
+// over the full I2C frame, per datasheet.
+static uint8_t lc_crc(const uint8_t* d, size_t n) {
+  uint8_t crc = 0;
+  for (size_t i = 0; i < n; i++) {
+    crc ^= d[i];
+    for (int b = 0; b < 8; b++)
+      crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
+  }
+  return crc;
+}
+
+static bool lc_write(uint8_t reg, uint16_t val) {
+  uint8_t f[5] = {0x16, reg, (uint8_t)(val & 0xFF), (uint8_t)(val >> 8), 0};
+  f[4] = lc_crc(f, 4);
+  Wire.beginTransmission(0x0B);
+  Wire.write(&f[1], 4);
+  return Wire.endTransmission() == 0;
+}
+
+static bool lc_read(uint8_t reg, uint16_t* out) {
+  Wire.beginTransmission(0x0B);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((uint8_t)0x0B, (uint8_t)3) != 3) return false;
+  const uint8_t lo = Wire.read(), hi = Wire.read(), crc = Wire.read();
+  const uint8_t chk[5] = {0x16, reg, 0x17, lo, hi};
+  if (lc_crc(chk, 5) != crc) return false;
+  *out = ((uint16_t)hi << 8) | lo;
+  return true;
+}
+
 // Boards in this project carry either fuel gauge depending on Feather rev --
-// probe both (see memory: LC709203F lives at 0x0B, MAX17048 at 0x36).
+// probe both libraries, then fall back to raw LC register access (memory:
+// LC709203F lives at 0x0B, MAX17048 at 0x36; scan before assuming).
 static void batt_begin() {
   if (g_batt_kind) return;
+  // Raw LC access FIRST: this board's chip reports IC version 0x2AFF -- a
+  // variant the Adafruit library rejects at begin() despite fully working
+  // registers (proven 2026-08-05 via /api/battdebug: 3776 mV, 29% RSOC,
+  // valid CRCs; requires repeated-start reads). The library path stays as
+  // fallback for boards with recognized parts.
+  uint16_t v = 0;
+  if (lc_write(0x15, 0x0001) && lc_write(0x0B, 0x0056) &&
+      lc_read(0x09, &v) && v > 2500 && v < 4600) {
+    g_batt_kind = 3;
+    Serial.printf("fuel gauge: LC709203F-variant via raw access (%u mV)\n", v);
+    return;
+  }
   if (g_max.begin(&Wire)) {
     g_batt_kind = 1;
     Serial.println("fuel gauge: MAX17048");
-  } else if (g_lc.begin(&Wire)) {
+    return;
+  }
+  if (g_lc.begin(&Wire)) {
     g_lc.setPackAPA(0x56);  // dual-18650 6600 mAh pack, per the sensor node
     g_batt_kind = 2;
     Serial.println("fuel gauge: LC709203F");
@@ -334,11 +384,18 @@ static void batt_begin() {
 
 static void batt_read() {
   if (!g_batt_kind) return;
-  const float v = g_batt_kind == 1 ? g_max.cellVoltage() : g_lc.cellVoltage();
-  const float p = g_batt_kind == 1 ? g_max.cellPercent() : g_lc.cellPercent();
+  float v = NAN, p = NAN;
+  if (g_batt_kind == 3) {
+    uint16_t mv = 0, soc = 0;
+    if (lc_read(0x09, &mv)) v = mv / 1000.0f;
+    if (lc_read(0x0D, &soc) && soc <= 100) p = soc;
+  } else {
+    v = g_batt_kind == 1 ? g_max.cellVoltage() : g_lc.cellVoltage();
+    p = g_batt_kind == 1 ? g_max.cellPercent() : g_lc.cellPercent();
+  }
   if (v > 2.0f && v < 5.0f) {
     g_batt_v = v;
-    g_batt_pct = p > 100 ? 100 : p;
+    if (!isnan(p)) g_batt_pct = p > 100 ? 100 : p;
   }
 }
 
@@ -460,12 +517,15 @@ static void sample_climate() {
   g_ring_count++;
   batt_begin();
   batt_read();
-  if (!isnan(g_batt_pct)) {
+  if (!isnan(g_batt_v)) {
     if (g_pct_n == 12) {
       memmove(g_pct_hist, g_pct_hist + 1, 11 * sizeof(float));
+      memmove(g_v_hist, g_v_hist + 1, 11 * sizeof(float));
       g_pct_n--;
     }
-    g_pct_hist[g_pct_n++] = g_batt_pct;
+    g_pct_hist[g_pct_n] = isnan(g_batt_pct) ? 0 : g_batt_pct;
+    g_v_hist[g_pct_n] = g_batt_v;
+    g_pct_n++;
   }
   if (time_synced()) sd_log_sample(time(nullptr), t, h, p);
   if (g_mqtt.connected()) {
@@ -489,14 +549,19 @@ static void state_json(char* out, size_t cap) {
   batt_eta(&chg, &eta);
   char batt[96];
   if (g_batt_kind && !isnan(g_batt_v)) {
-    if (isnan(eta))
-      snprintf(batt, sizeof(batt),
-               "{\"v\":%.2f,\"pct\":%.0f,\"chg\":%s,\"eta_h\":null}",
-               g_batt_v, g_batt_pct, chg ? "true" : "false");
-    else
-      snprintf(batt, sizeof(batt),
-               "{\"v\":%.2f,\"pct\":%.0f,\"chg\":%s,\"eta_h\":%.1f}",
-               g_batt_v, g_batt_pct, chg ? "true" : "false", eta);
+    char mvh[16] = "null";
+    if (g_pct_n >= 3) {
+      const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
+      snprintf(mvh, sizeof(mvh), "%.0f",
+               (g_batt_v - g_v_hist[0]) * 1000.0f / hours);
+    }
+    char etas[16] = "null";
+    if (!isnan(eta)) snprintf(etas, sizeof(etas), "%.1f", eta);
+    char pcts[16] = "null";
+    if (!isnan(g_batt_pct)) snprintf(pcts, sizeof(pcts), "%.0f", g_batt_pct);
+    snprintf(batt, sizeof(batt),
+             "{\"v\":%.3f,\"pct\":%s,\"chg\":%s,\"eta_h\":%s,\"mvh\":%s}",
+             g_batt_v, pcts, chg ? "true" : "false", etas, mvh);
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
@@ -922,6 +987,54 @@ void setup() {
   g_http.on("/api/sensors", handle_sensors);
   g_http.on("/api/history", handle_history);
   g_http.on("/api/sdformat", handle_sd_format);
+  g_http.on("/api/battdebug", []() {
+    char out[512];
+    const bool w15 = lc_write(0x15, 0x0001);
+    const bool w0b = lc_write(0x0B, 0x0056);
+    String r;
+    for (int variant = 0; variant < 2; variant++) {
+      for (uint8_t reg : {(uint8_t)0x09, (uint8_t)0x0D, (uint8_t)0x11}) {
+        Wire.beginTransmission(0x0B);
+        Wire.write(reg);
+        const int wtx = Wire.endTransmission(variant == 1);
+        int got = 0;
+        uint8_t raw[3] = {0, 0, 0};
+        if (wtx == 0) {
+          got = Wire.requestFrom((uint8_t)0x0B, (uint8_t)3);
+          for (int i = 0; i < got && i < 3; i++) raw[i] = Wire.read();
+        }
+        const uint8_t chk[5] = {0x16, reg, 0x17, raw[0], raw[1]};
+        char e[96];
+        snprintf(e, sizeof(e),
+                 "{\"reg\":\"0x%02X\",\"stop\":%d,\"wtx\":%d,\"got\":%d,"
+                 "\"bytes\":\"%02X%02X%02X\",\"val\":%u,\"crc_ok\":%s},",
+                 reg, variant, wtx, got, raw[0], raw[1], raw[2],
+                 (unsigned)(((uint16_t)raw[1] << 8) | raw[0]),
+                 lc_crc(chk, 5) == raw[2] ? "true" : "false");
+        r += e;
+      }
+    }
+    snprintf(out, sizeof(out), "{\"w15\":%s,\"w0b\":%s,\"reads\":[",
+             w15 ? "true" : "false", w0b ? "true" : "false");
+    String full = String(out) + r.substring(0, r.length() - 1) + "]}";
+    g_http.send(200, "application/json", full);
+  });
+  g_http.on("/api/i2cscan", []() {
+    String out = "{\"found\":[";
+    bool first = true;
+    for (uint8_t a = 1; a < 127; a++) {
+      Wire.beginTransmission(a);
+      if (Wire.endTransmission() == 0) {
+        if (!first) out += ',';
+        char b[8];
+        snprintf(b, sizeof(b), "\"0x%02X\"", a);
+        out += b;
+        first = false;
+      }
+    }
+    out += "]}";
+    g_http.send(200, "application/json", out);
+  });
   g_http.on("/api/sdtest", handle_sd_test);
   g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
   g_http.onNotFound(
