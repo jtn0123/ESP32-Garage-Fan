@@ -65,7 +65,7 @@
 #define EPD_DC_PIN 10
 #endif
 
-static const char* kFwVersion = "1.10.0";
+static const char* kFwVersion = "1.11.0";
 
 static constexpr uint16_t kPeriodUs = 9934;
 // HIGH width per setting 0..12, mirrored from the wall-controller captures
@@ -167,6 +167,8 @@ static uint32_t g_last_auto_ms = 0;
 static float g_ring_t[kRingLen], g_ring_h[kRingLen], g_ring_p[kRingLen];
 static float g_ring_o[kRingLen];   // outdoor F at sample time (NAN = none)
 static int8_t g_ring_s[kRingLen];  // fan speed at sample time
+static float g_ring_bv[kRingLen];  // battery volts at sample time (NAN = none)
+static int8_t g_ring_c[kRingLen];  // charging verdict (1/0, -1 = no battery)
 static time_t g_ring_end_ts = 0;
 static uint16_t g_ring_count = 0;
 // Runtime odometer + energy estimate (cubic fan law, ~105 W flat out).
@@ -191,12 +193,17 @@ static const char kPage[] PROGMEM = R"html(<!doctype html>
 <link rel="icon" href="/icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Garage fan</title><style>
-:root{--bg:#0e1116;--card:#171b21;--bd:#232a33;--tx:#e6e9ed;--mut:#8b94a1;--ac:#3b82f6;--ok:#22a06b}
-body{font-family:system-ui;background:var(--bg);color:var(--tx);margin:0;padding:20px 16px 28px;display:flex;justify-content:center}
-#wrap{width:100%;max-width:400px}
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+:root{--bg:#0e1116;--card:#171b21;--bd:#232a33;--tx:#e6e9ed;--mut:#8b94a1;--dim:#5a6472;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add}
+*{box-sizing:border-box}
+body{font-family:system-ui;background:var(--bg);color:var(--tx);margin:0;padding:0 18px 28px}
+#wrap{max-width:1180px;margin:0 auto}
+header{position:sticky;top:0;z-index:9;background:var(--bg);display:flex;align-items:center;gap:10px;padding:12px 0 10px;border-bottom:1px solid var(--bd);margin-bottom:14px}
+#fanic{color:var(--ac);animation:spin 2s linear infinite;animation-play-state:paused}
+@keyframes spin{to{transform:rotate(360deg)}}
 h1{font-size:1.05rem;font-weight:600;margin:0}
-#hdr{display:flex;gap:10px;align-items:center}
+#fwtag{color:var(--dim);font-size:.7rem}
+#hdr{display:flex;gap:12px;align-items:center;margin-left:auto}
+#hspeed{font-size:.8rem;color:var(--mut)}
 #dot{width:9px;height:9px;border-radius:50%;background:#555}
 #dot.up{background:var(--ok)}
 #batt{display:flex;align-items:center;gap:5px;color:var(--mut);font-size:.72rem}
@@ -204,54 +211,70 @@ h1{font-size:1.05rem;font-weight:600;margin:0}
 #bshell:after{content:'';position:absolute;right:-4px;top:2px;width:2px;height:5px;background:var(--mut);border-radius:1px}
 #bfill{height:100%;background:var(--ok);border-radius:1px;width:0%}
 #gear{background:none;border:0;color:var(--mut);font-size:1.1rem;cursor:pointer;padding:2px 6px}
-#speedcard{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px 16px 14px;margin-top:10px}
-#speed{font-size:3.4rem;line-height:1;font-variant-numeric:tabular-nums;font-weight:600}
+#main{display:grid;grid-template-columns:330px 1fr;gap:14px;align-items:start}
+@media(max-width:880px){#main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px}
+#speed{font-size:3.2rem;line-height:1;font-variant-numeric:tabular-nums;font-weight:600}
 #of{color:var(--mut);font-size:.8rem;margin-top:2px}
-#bar{height:6px;border-radius:3px;background:#232a33;margin:12px 0 16px;overflow:hidden}
+#bar{height:6px;border-radius:3px;background:#232a33;margin:12px 0 14px;overflow:hidden}
 #fill{height:100%;width:0%;background:var(--ac);border-radius:3px;transition:width .4s}
 #grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-button{font-size:1rem;padding:11px 0;border:1px solid var(--bd);border-radius:10px;background:#1d232b;color:var(--tx);cursor:pointer}
+button{font-size:1rem;padding:10px 0;border:1px solid var(--bd);border-radius:10px;background:#1d232b;color:var(--tx);cursor:pointer}
 button.on{background:var(--ac);border-color:var(--ac);color:#fff}
 #off{grid-column:span 4;background:#241a1a;border-color:#3a2626;color:#e0a9a9}
 #off.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
-#autorow{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:14px}
+#autorow{display:flex;gap:8px;align-items:center;margin-top:12px}
 #autobtn{flex:1}
 #autobtn.on{background:var(--ok);border-color:var(--ok);color:#fff}
-select,input{font-size:.9rem;padding:8px 10px;border-radius:10px;background:#1d232b;color:var(--tx);border:1px solid var(--bd)}
-#outinfo{color:var(--mut);font-size:.75rem;white-space:nowrap}
-#settings{display:none;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-top:12px}
+select,input{font-size:.85rem;padding:8px 8px;border-radius:10px;background:#1d232b;color:var(--tx);border:1px solid var(--bd)}
+#outinfo{color:var(--mut);font-size:.72rem;margin-top:8px}
+#settings{display:none;margin-top:12px}
 #settings h2{font-size:.85rem;font-weight:600;margin:0 0 10px;color:var(--mut)}
 .srow{display:flex;justify-content:space-between;align-items:center;margin:8px 0;font-size:.85rem}
 .srow input{width:90px;text-align:right}
 #settings .sec{border-top:1px solid var(--bd);margin-top:12px;padding-top:10px}
 .sbtn{width:100%;margin-top:10px;background:var(--ac);border-color:var(--ac);color:#fff}
-#climate{display:none;margin-top:14px}
-#tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.tile{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 2px;text-align:center}
-.tv{font-size:1.15rem;font-weight:600}.tl{font-size:.62rem;color:var(--mut);margin-top:3px;letter-spacing:.04em}
-.src{font-size:.55rem;color:#5a6472;margin-top:2px}
-#ranges{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:3px;margin-top:12px}
-#ranges button{flex:1;font-size:.78rem;padding:7px 0;border:0;background:none;color:var(--mut)}
-#ranges button.on{background:var(--ac);color:#fff;border-radius:8px}
-canvas{width:100%;height:170px;margin-top:10px;background:var(--card);border:1px solid var(--bd);border-radius:12px}
-#legend{font-size:.7rem;color:var(--mut);margin-top:6px;text-align:center;min-height:1.1em}
-.chip{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
-#stats{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;margin-top:12px;font-size:.75rem;color:var(--mut);display:none;line-height:1.8}
+#tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.tile{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px 10px 8px;text-align:center}
+.tv{font-size:1.5rem;font-weight:600}.tl{font-size:.62rem;color:var(--mut);margin-top:3px;letter-spacing:.04em}
+.src{font-size:.55rem;color:var(--dim);margin-top:2px}
+.spark{width:100%;height:26px;margin-top:6px}
+#stats{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;margin-top:10px;font-size:.78rem;color:var(--mut);display:none;line-height:1.9}
 #stats b{color:var(--tx);font-weight:600}
-footer{color:var(--mut);font-size:.7rem;margin-top:16px;text-align:center;line-height:1.7}
-footer a{color:var(--mut)}
+#chartsec{grid-column:1/-1;display:none}
+#crow{display:flex;align-items:center;margin:2px 0 8px}
+#ranges{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:3px}
+#ranges button{font-size:.78rem;padding:6px 14px;border:0;background:none;color:var(--mut)}
+#ranges button.on{background:var(--ac);color:#fff;border-radius:8px}
+#xtime{margin-left:auto;font-size:.78rem;color:var(--mut);font-variant-numeric:tabular-nums}
+.chart{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:8px 10px 4px;margin-bottom:8px}
+.crow2{display:flex;align-items:baseline;gap:10px;font-size:.72rem;color:var(--mut)}
+.crow2 .ct{font-weight:600;letter-spacing:.04em}
+.crow2 .lg{color:var(--dim)}
+.crow2 .ro{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--tx)}
+.chart canvas{display:block;width:100%}
+#cv_t{height:200px}#cv_s{height:110px}#cv_h{height:96px}#cv_p{height:96px}#cv_b{height:110px}
+#tax{height:24px;width:100%;display:block}
+footer{color:var(--mut);font-size:.7rem;margin-top:14px;text-align:center;line-height:1.7}
 </style></head><body><div id="wrap">
-<header><h1>Garage fan</h1><div id="hdr">
+<header>
+<svg id="fanic" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><circle cx="12" cy="12" r="2.4"/><g><path d="M12 10.2c-.4-3.6-2-6-4.6-5.6-2 .3-2.6 3.4-.8 5 1.3 1.2 3.2 1.4 5.4.6z"/><path d="M13.6 12.9c3.3 1.5 6.1 1.1 6.9-1.4.6-1.9-2-3.7-4.2-2.8-1.6.6-2.6 2.2-2.7 4.2z"/><path d="M10.4 13c-2.9 2.1-3.9 4.8-2.2 6.8 1.4 1.6 4.2.3 4.7-2 .3-1.7-.7-3.4-2.5-4.8z"/></g></svg>
+<div><h1>Garage fan</h1><div id="fwtag">&ndash;</div></div>
+<div id="hdr">
+<span id="hspeed"></span>
 <div id="batt" style="display:none"><span id="bpct"></span><div id="bshell"><div id="bfill"></div></div></div>
-<div id="dot"></div><button id="gear" onclick="tog('settings')">&#9881;</button></div></header>
-<div id="speedcard"><div id="speed">&ndash;</div><div id="of">of 12</div>
+<div id="dot"></div><button id="gear" onclick="tog('settings')">&#9881;</button></div>
+</header>
+<div id="main">
+<div>
+<div class="card"><div id="speed">&ndash;</div><div id="of">of 12</div>
 <div id="bar"><div id="fill"></div></div>
 <div id="grid"><button id="off" onclick="go(0)">off</button></div>
 <div id="autorow"><button id="autobtn" onclick="toggleAuto()">auto</button>
 <select id="maxsel" onchange="setCfg('max',this.value)"></select>
-<select id="minsel" onchange="setCfg('min',this.value)"></select>
-<span id="outinfo"></span></div></div>
-<div id="settings"><h2>auto mode</h2>
+<select id="minsel" onchange="setCfg('min',this.value)"></select></div>
+<div id="outinfo"></div></div>
+<div id="settings" class="card"><h2>auto mode</h2>
 <div class="srow"><span>hold max above &deg;F</span><input id="s_onf" type="number" step="0.5" min="0.5"></div>
 <div class="srow"><span>drop to low below &deg;F</span><input id="s_offf" type="number" step="0.5" min="0"></div>
 <h2 class="sec">temperature offsets &deg;C</h2>
@@ -263,20 +286,32 @@ footer a{color:var(--mut)}
 <div class="srow"><span>token</span><input id="s_tok" type="password"></div>
 <button class="sbtn" style="background:#7f5a1d;border-color:#7f5a1d" onclick="doOta()">upload firmware</button>
 <div class="srow" style="margin-top:10px"><a href="/download.csv" style="color:var(--ac)">download 24 h CSV</a></div></div>
-<div id="climate"><div id="tiles">
-<div class="tile"><div class="tv" id="tO">&ndash;</div><div class="tl">OUTSIDE &deg;F</div><div class="src">yard feed</div></div>
-<div class="tile"><div class="tv" id="tT">&ndash;</div><div class="tl">GARAGE &deg;F</div><div class="src">this board</div></div>
-<div class="tile"><div class="tv" id="tH">&ndash;</div><div class="tl">HUMIDITY %</div><div class="src">this board</div></div>
-<div class="tile"><div class="tv" id="tP">&ndash;</div><div class="tl">PRESSURE MB</div><div class="src">this board</div></div>
-</div><div id="ranges"><button id="r1" class="on" onclick="range(1)">24 h</button>
+</div>
+<div>
+<div id="tiles">
+<div class="tile"><div class="tv" id="tO">&ndash;</div><div class="tl">OUTSIDE &deg;F</div><div class="src">yard feed</div><canvas class="spark" id="sp_o"></canvas></div>
+<div class="tile"><div class="tv" id="tT">&ndash;</div><div class="tl">GARAGE &deg;F</div><div class="src">this board</div><canvas class="spark" id="sp_t"></canvas></div>
+<div class="tile"><div class="tv" id="tH">&ndash;</div><div class="tl">HUMIDITY %</div><div class="src">this board</div><canvas class="spark" id="sp_h"></canvas></div>
+<div class="tile"><div class="tv" id="tP">&ndash;</div><div class="tl">PRESSURE MB</div><div class="src">this board</div><canvas class="spark" id="sp_p"></canvas></div>
+</div>
+<div id="stats"></div>
+</div>
+<div id="chartsec">
+<div id="crow"><div id="ranges"><button id="r1" class="on" onclick="range(1)">24 h</button>
 <button id="r7" onclick="range(7)">7 days</button>
 <button id="r30" onclick="range(30)">30 days</button></div>
-<canvas id="cv" width="736" height="340"></canvas>
-<div id="legend"></div>
-<div id="stats"></div></div>
+<span id="xtime"></span></div>
+<div class="chart"><div class="crow2"><span class="ct">TEMPERATURE &deg;F</span><span class="lg">garage solid &middot; outside dashed &middot; orange band = garage hotter</span><span class="ro" id="ro_t"></span></div><canvas id="cv_t"></canvas></div>
+<div class="chart"><div class="crow2"><span class="ct">FAN SPEED</span><span class="lg">0&ndash;12</span><span class="ro" id="ro_s"></span></div><canvas id="cv_s"></canvas></div>
+<div class="chart"><div class="crow2"><span class="ct">HUMIDITY %</span><span class="ro" id="ro_h"></span></div><canvas id="cv_h"></canvas></div>
+<div class="chart"><div class="crow2"><span class="ct">PRESSURE MB</span><span class="ro" id="ro_p"></span></div><canvas id="cv_p"></canvas></div>
+<div class="chart" id="ch_b" style="display:none"><div class="crow2"><span class="ct">BATTERY V</span><span class="lg">blue band = charging</span><span class="ro" id="ro_b"></span></div><canvas id="cv_b"></canvas></div>
+<canvas id="tax"></canvas>
+</div>
+</div>
 <footer id="meta">&ndash;</footer>
 </div><script>
-let days=1,auto=false,maxs=9,lastH=null;
+let days=1,auto=false,maxs=9,lastH=null,S=null,xi=-1;
 const $=id=>document.getElementById(id);
 const g=$('grid');
 for(let i=1;i<=12;i++){const b=document.createElement('button');b.textContent=i;b.id='b'+i;b.onclick=()=>go(i);g.appendChild(b);}
@@ -296,14 +331,19 @@ alert(await r.text());}
 function render(s){
 auto=s.auto;maxs=s.auto_max;ms.value=maxs;
 if(s.auto_min!==undefined)ns.value=s.auto_min;
-$('speed').textContent=s.speed===0?'off':(s.speed<0?'raw':s.speed);
-$('fill').style.width=(s.speed>0?s.speed/12*100:0)+'%';
-for(let i=1;i<=12;i++)$('b'+i).className=i===s.speed?'on':'';
-$('off').className=s.speed===0?'on':'';
+const sp=s.speed;
+$('speed').textContent=sp===0?'off':(sp<0?'raw':sp);
+$('hspeed').textContent=sp>0?('fan '+sp):'fan off';
+$('fanic').style.animationPlayState=sp>0?'running':'paused';
+if(sp>0)$('fanic').style.animationDuration=Math.max(.25,3.3-.25*sp)+'s';
+$('fill').style.width=(sp>0?sp/12*100:0)+'%';
+for(let i=1;i<=12;i++)$('b'+i).className=i===sp?'on':'';
+$('off').className=sp===0?'on':'';
 $('dot').className=s.mqtt?'up':'';
 $('autobtn').className=auto?'on':'';
 $('autobtn').textContent=auto?'auto on':'auto off';
-$('outinfo').textContent=s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'°');
+$('fwtag').textContent='fw '+s.fw+' · '+s.slot;
+$('outinfo').textContent=(s.outside_f===null?'no outdoor feed':('outside '+s.outside_f.toFixed(1)+'° right now'))+(auto?' · holds max above +'+s.on_f+'°F, low below +'+s.off_f+'°F':'');
 $('tO').textContent=s.outside_f===null?'–':s.outside_f.toFixed(1);
 if(s.batt){$('batt').style.display='flex';
 $('bpct').textContent=(s.batt.chg?'⚡':'')+(s.batt.pct!==null?s.batt.pct+'%':s.batt.v.toFixed(2)+'V')+(s.batt.mvh!==null?' '+(s.batt.mvh>=0?'▲':'▼')+Math.abs(s.batt.mvh)+'mV/h':'');
@@ -314,7 +354,7 @@ if(!$('s_offc').value&&s.offc!==undefined){$('s_offc').value=s.offc;$('s_offi').
 if(!$('s_onf').value&&s.on_f!==undefined){$('s_onf').value=s.on_f;$('s_offf').value=s.off_f;}
 let sd=s.sd_total_mb?('sd '+(s.sd_used_mb/1024).toFixed(2)+'/'+(s.sd_total_mb/1024).toFixed(1)+'GB'):(s.sd_q?'sd quarantined':'no sd');
 let bt=s.batt?(' · '+s.batt.v.toFixed(3)+'V'):'';
-$('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+'dBm · '+sd+bt+' · toff '+s.toff+'<br>link '+(s.mqtt?'up':'down')+' (local mqtt) · up '+Math.floor(s.uptime_s/3600)+'h'+Math.floor(s.uptime_s%3600/60)+'m';
+$('meta').innerHTML='fw '+s.fw+' · '+s.slot+' · '+s.rssi+'dBm · '+sd+bt+' · toff '+s.toff+' · link '+(s.mqtt?'up':'down')+' · up '+Math.floor(s.uptime_s/3600)+'h'+Math.floor(s.uptime_s%3600/60)+'m';
 }
 function connectSSE(){
 try{const es=new EventSource('http://'+location.hostname+':8081/');
@@ -326,76 +366,151 @@ if(days!==1||!h.end_ts)return h;
 let cache={};try{cache=JSON.parse(localStorage.gf24||'{}')}catch(_){}
 const n=h.temp_c.length;
 for(let i=0;i<n;i++){const ts=h.end_ts-(n-1-i)*h.interval_s;
-cache[ts]={t:h.temp_c[i],r:h.rh[i],p:h.hpa[i],o:h.out_f?h.out_f[i]:null,s:h.spd?h.spd[i]:0};}
+cache[ts]={t:h.temp_c[i],r:h.rh[i],p:h.hpa[i],o:h.out_f?h.out_f[i]:null,s:h.spd?h.spd[i]:0,
+b:h.batt_v?h.batt_v[i]:null,c:h.chg?h.chg[i]:-1};}
 const cut=h.end_ts-86400;
 const keys=Object.keys(cache).map(Number).filter(t=>t>=cut).sort((a,b)=>a-b);
-const out={interval_s:h.interval_s,end_ts:keys[keys.length-1],temp_c:[],rh:[],hpa:[],out_f:[],spd:[]};
-keys.forEach(t=>{const c=cache[t];out.temp_c.push(c.t);out.rh.push(c.r);out.hpa.push(c.p);out.out_f.push(c.o);out.spd.push(c.s);});
+const out={interval_s:h.interval_s,end_ts:keys[keys.length-1],temp_c:[],rh:[],hpa:[],out_f:[],spd:[],batt_v:[],chg:[]};
+keys.forEach(t=>{const c=cache[t];out.temp_c.push(c.t);out.rh.push(c.r);out.hpa.push(c.p);out.out_f.push(c.o);out.spd.push(c.s);out.batt_v.push(c.b===undefined?null:c.b);out.chg.push(c.c===undefined?-1:c.c);});
 const store={};keys.forEach(t=>store[t]=cache[t]);
 try{localStorage.gf24=JSON.stringify(store)}catch(_){}
 return out;}
-function line(ctx,vals,color,W,Hh,mn,mx,dash){
-const pad=10;ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';
-if(dash)ctx.setLineDash([6,4]);
-ctx.beginPath();let started=false;
-vals.forEach((v,i)=>{if(v===null||isNaN(v))return;
-const x=pad+i*(W-2*pad)/(vals.length-1);
-const y=Hh-8-(v-mn)*(Hh-16)/((mx-mn)||1);
-started?ctx.lineTo(x,y):ctx.moveTo(x,y);started=true;});
-ctx.stroke();ctx.setLineDash([]);}
-function draw(h){
-const cv=$('cv'),ctx=cv.getContext('2d');
-ctx.clearRect(0,0,cv.width,cv.height);
-const W=cv.width,ribbon=26,chartH=cv.height-ribbon-18;
-ctx.strokeStyle='#20262e';ctx.lineWidth=1;
-for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(10,i*chartH/4);ctx.lineTo(W-10,i*chartH/4);ctx.stroke();}
-if(!h.temp_c||h.temp_c.length<2){ctx.fillStyle='#5a6472';ctx.font='15px system-ui';
-ctx.textAlign='center';ctx.fillText('waiting for data — one sample every 5 minutes',W/2,chartH/2);return;}
-const tf=h.temp_c.map(v=>v*9/5+32);
-const outs=(h.out_f||[]).map(v=>(v===null||v<=-100)?null:v);
-const allT=tf.concat(outs.filter(v=>v!==null));
-const tmn=Math.min.apply(null,allT),tmx=Math.max.apply(null,allT);
-line(ctx,tf,'#e8834a',W,chartH,tmn,tmx,false);
-line(ctx,outs,'#e8834a',W,chartH,tmn,tmx,true);
-line(ctx,h.rh,'#3b82f6',W,chartH,Math.min.apply(null,h.rh),Math.max.apply(null,h.rh),false);
-line(ctx,h.hpa,'#22a06b',W,chartH,Math.min.apply(null,h.hpa),Math.max.apply(null,h.hpa),false);
-if(h.spd){const n=h.spd.length,pad=10,bw=(W-2*pad)/n;
-ctx.fillStyle='#3b82f6';
-h.spd.forEach((v,i)=>{if(v>0){const bh=(v/12)*ribbon;
-ctx.globalAlpha=0.35+0.65*(v/12);
-ctx.fillRect(pad+i*bw,chartH+4+(ribbon-bh),Math.max(bw-0.5,1),bh);}});
-ctx.globalAlpha=1;}
-if(h.end_ts){ctx.fillStyle='#5a6472';ctx.font='12px system-ui';
-const span=(h.temp_c.length-1)*h.interval_s;
-const t0=new Date((h.end_ts-span)*1000),t1=new Date(h.end_ts*1000);
-const fmt=d=>days===1?d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'):(d.getMonth()+1)+'/'+d.getDate();
-ctx.textAlign='left';ctx.fillText(fmt(t0),10,cv.height-4);
-ctx.textAlign='right';ctx.fillText(fmt(t1),W-10,cv.height-4);}
-$('legend').innerHTML='<span class="chip" style="background:#e8834a"></span>temp (dash = outside)&ensp;<span class="chip" style="background:#3b82f6"></span>humidity&ensp;<span class="chip" style="background:#22a06b"></span>pressure&ensp;<span style="color:#3b82f6">&#9612;</span>fan';}
+// ---- chart engine ----
+const L=46,R=12;
+function build(h){
+const n=h.temp_c?h.temp_c.length:0;
+const ts=i=>h.end_ts?h.end_ts-(n-1-i)*h.interval_s:null;
+const night=[];for(let i=0;i<n;i++){const t=ts(i);if(t===null){night.push(false);continue;}
+const hr=new Date(t*1000).getHours();night.push(hr>=20||hr<6);}
+return {n,ts,night,
+tf:(h.temp_c||[]).map(v=>v==null?null:v*9/5+32),
+of:(h.out_f||[]).map(v=>(v==null||v<=-100)?null:v),
+rh:h.rh||[],hpa:h.hpa||[],spd:h.spd||[],
+bv:(h.batt_v||[]).map(v=>v==null?null:v),
+chg:h.chg||[]};}
+function cvctx(cv){const w=cv.offsetWidth,hh=cv.offsetHeight,d=window.devicePixelRatio||1;
+if(cv.width!==Math.round(w*d)||cv.height!==Math.round(hh*d)){cv.width=Math.round(w*d);cv.height=Math.round(hh*d);}
+const c=cv.getContext('2d');c.setTransform(d,0,0,d,0,0);c.clearRect(0,0,w,hh);return{c,W:w,H:hh};}
+function lim(vals){let mn=1e9,mx=-1e9;vals.forEach(v=>{if(v==null||isNaN(v))return;if(v<mn)mn=v;if(v>mx)mx=v;});
+if(mn>mx)return null;if(mn===mx){mn-=1;mx+=1}const p=(mx-mn)*.12;return[mn-p,mx+p];}
+function frame(c,W,H,st,yl,fmt){
+const X=i=>L+i*(W-L-R)/Math.max(st.n-1,1);
+if(days===1){c.fillStyle='rgba(255,255,255,.035)';let i=0;while(i<st.n){if(st.night[i]){let j=i;while(j<st.n&&st.night[j])j++;c.fillRect(X(i),0,X(j-1)-X(i)||1,H-2);i=j;}else i++;}}
+c.strokeStyle='#20262e';c.lineWidth=1;c.fillStyle='#5a6472';c.font='10px system-ui';c.textAlign='right';
+yl.forEach(v=>{const y=H-6-(v-yl.mn)*(H-16)/(yl.mx-yl.mn);
+c.beginPath();c.moveTo(L,y);c.lineTo(W-R,y);c.stroke();c.fillText(fmt(v),L-5,y+3);});
+return X;}
+function ylv(mn,mx){const a=[mn,(mn+mx)/2,mx];a.mn=mn;a.mx=mx;return a;}
+function plot(c,H,X,vals,mn,mx,col,dash,fillTo){
+c.strokeStyle=col;c.lineWidth=1.8;c.lineJoin='round';if(dash)c.setLineDash([5,4]);
+const Y=v=>H-6-(v-mn)*(H-16)/(mx-mn);
+c.beginPath();let st=false;
+vals.forEach((v,i)=>{if(v==null||isNaN(v)){st=false;return;}st?c.lineTo(X(i),Y(v)):c.moveTo(X(i),Y(v));st=true;});
+c.stroke();c.setLineDash([]);return Y;}
+function xhair(c,H,X,i){if(i<0)return;c.strokeStyle='rgba(230,233,237,.45)';c.lineWidth=1;
+c.beginPath();c.moveTo(X(i),0);c.lineTo(X(i),H-2);c.stroke();}
+function nodata(c,W,H,msg){c.fillStyle='#5a6472';c.font='13px system-ui';c.textAlign='center';c.fillText(msg,W/2,H/2);}
+function drawTemp(){
+const {c,W,H}=cvctx($('cv_t'));
+if(S.n<2){nodata(c,W,H,'waiting for data — one sample every 5 minutes');return;}
+const lm=lim(S.tf.concat(S.of.filter(v=>v!=null)));if(!lm){nodata(c,W,H,'no data');return;}
+const yl=ylv(lm[0],lm[1]);const X=frame(c,W,H,S,yl,v=>v.toFixed(0)+'°');
+const Y=v=>H-6-(v-yl.mn)*(H-16)/(yl.mx-yl.mn);
+for(let i=0;i+1<S.n;i++){const a=S.tf[i],b=S.tf[i+1],oa=S.of[i],ob=S.of[i+1];
+if(a==null||b==null||oa==null||ob==null)continue;
+c.beginPath();c.moveTo(X(i),Y(a));c.lineTo(X(i+1),Y(b));c.lineTo(X(i+1),Y(ob));c.lineTo(X(i),Y(oa));c.closePath();
+c.fillStyle=(a+b)/2>=(oa+ob)/2?'rgba(232,131,74,.16)':'rgba(59,130,246,.13)';c.fill();}
+plot(c,H,X,S.of,yl.mn,yl.mx,'#8fa3b8',true);
+plot(c,H,X,S.tf,yl.mn,yl.mx,'#e8834a',false);
+let mni=-1,mxi=-1;S.tf.forEach((v,i)=>{if(v==null)return;if(mni<0||v<S.tf[mni])mni=i;if(mxi<0||v>S.tf[mxi])mxi=i;});
+c.font='10px system-ui';
+[[mxi,'#e8834a'],[mni,'#8fa3b8']].forEach(([i,col])=>{if(i<0)return;const v=S.tf[i];
+c.fillStyle=col;c.beginPath();c.arc(X(i),Y(v),3,0,7);c.fill();
+c.textAlign=X(i)>W-60?'right':'left';c.fillText(v.toFixed(1)+'°',X(i)+(X(i)>W-60?-6:6),Y(v)+(i===mxi?-4:10));});
+xhair(c,H,X,xi);}
+function drawSpeed(){
+const {c,W,H}=cvctx($('cv_s'));
+if(S.n<2||!S.spd.length){nodata(c,W,H,'no data');return;}
+const yl=ylv(0,12);const X=frame(c,W,H,S,yl,v=>v.toFixed(0));
+const Y=v=>H-6-v*(H-16)/12;
+c.fillStyle='rgba(59,130,246,.35)';c.strokeStyle='#3b82f6';c.lineWidth=1.6;
+c.beginPath();c.moveTo(X(0),Y(0));
+for(let i=0;i<S.n;i++){const v=S.spd[i]||0;c.lineTo(X(i),Y(v));if(i+1<S.n)c.lineTo(X(i+1),Y(v));}
+c.lineTo(X(S.n-1),Y(0));c.closePath();c.fill();
+c.beginPath();let pv=S.spd[0]||0;c.moveTo(X(0),Y(pv));
+for(let i=1;i<S.n;i++){const v=S.spd[i]||0;c.lineTo(X(i),Y(pv));c.lineTo(X(i),Y(v));pv=v;}
+c.stroke();xhair(c,H,X,xi);}
+function drawSimple(id,vals,col,fmt){
+const {c,W,H}=cvctx($(id));
+const vs=vals.filter(v=>v!=null&&!isNaN(v));
+if(S.n<2||!vs.length){nodata(c,W,H,'no data');return;}
+const lm=lim(vals);const yl=ylv(lm[0],lm[1]);
+const X=frame(c,W,H,S,yl,fmt);
+plot(c,H,X,vals,yl.mn,yl.mx,col,false);xhair(c,H,X,xi);}
+function drawBatt(){
+const has=S.bv.some(v=>v!=null);
+$('ch_b').style.display=has?'block':'none';if(!has)return;
+const {c,W,H}=cvctx($('cv_b'));
+const lm=lim(S.bv);const yl=ylv(lm[0],lm[1]);
+const X=i=>L+i*(W-L-R)/Math.max(S.n-1,1);
+c.fillStyle='rgba(59,130,246,.14)';
+let i=0;while(i<S.n){if(S.chg[i]===1){let j=i;while(j<S.n&&S.chg[j]===1)j++;c.fillRect(X(i),0,X(j-1)-X(i)||1,H-2);i=j;}else i++;}
+frame(c,W,H,S,yl,v=>v.toFixed(2));
+plot(c,H,X,S.bv,yl.mn,yl.mx,'#b98add',false);xhair(c,H,X,xi);}
+function drawAxis(){
+const {c,W,H}=cvctx($('tax'));
+if(S.n<2||!lastH.end_ts)return;
+c.fillStyle='#5a6472';c.font='11px system-ui';c.textAlign='center';
+const X=i=>L+i*(W-L-R)/Math.max(S.n-1,1);
+const step=Math.max(1,Math.round(S.n/7));
+for(let i=0;i<S.n;i+=step){const t=S.ts(i);if(t===null)continue;const d=new Date(t*1000);
+const lb=days===1?d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'):(d.getMonth()+1)+'/'+d.getDate()+' '+d.getHours()+'h';
+c.fillText(lb,Math.min(Math.max(X(i),24),W-28),15);}}
+function drawAll(){if(!S)return;drawTemp();drawSpeed();
+drawSimple('cv_h',S.rh,'#3b82f6',v=>v.toFixed(0));
+drawSimple('cv_p',S.hpa,'#22a06b',v=>v.toFixed(1));
+drawBatt();drawAxis();readout();}
+function readout(){
+if(!S||S.n<1)return;const i=xi>=0?xi:S.n-1;
+const t=S.ts(i);
+$('xtime').textContent=(xi>=0&&t)?new Date(t*1000).toLocaleString([],{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+$('ro_t').textContent=(S.tf[i]!=null?S.tf[i].toFixed(1)+'°':'–')+(S.of[i]!=null?' / out '+S.of[i].toFixed(1)+'°':'');
+$('ro_s').textContent=S.spd.length?(S.spd[i]>0?'fan '+S.spd[i]:'off'):'';
+$('ro_h').textContent=S.rh[i]!=null?S.rh[i].toFixed(0)+'%':'';
+$('ro_p').textContent=S.hpa[i]!=null?S.hpa[i].toFixed(1)+' mb':'';
+$('ro_b').textContent=S.bv[i]!=null?S.bv[i].toFixed(2)+' V'+(S.chg[i]===1?' ⚡':''):'';}
+function spark(id,vals,col){
+const cv=$(id),{c,W,H}=cvctx(cv);
+const lm=lim(vals);if(!lm||S.n<2)return;
+c.strokeStyle=col;c.lineWidth=1.4;c.lineJoin='round';
+const Y=v=>H-2-(v-lm[0])*(H-4)/(lm[1]-lm[0]);
+c.beginPath();let st=false;
+vals.forEach((v,i)=>{if(v==null||isNaN(v)){st=false;return;}
+const x=i*W/(vals.length-1);st?c.lineTo(x,Y(v)):c.moveTo(x,Y(v));st=true;});
+c.stroke();}
+const cs=$('chartsec');
+cs.addEventListener('mousemove',ev=>{
+if(!S||S.n<2)return;const cv=$('cv_t'),r=cv.getBoundingClientRect();
+const fx=(ev.clientX-r.left-L)/(r.width-L-R);
+const i=Math.round(fx*(S.n-1));
+xi=(i<0||i>=S.n||fx<-.02||fx>1.02)?-1:i;drawAll();});
+cs.addEventListener('mouseleave',()=>{xi=-1;drawAll();});
+window.addEventListener('resize',()=>drawAll());
 function range(d){days=d;[1,7,30].forEach(x=>$('r'+x).className=x===d?'on':'');climate();}
 async function climate(){try{
 const c=await(await fetch('/api/sensors')).json();
-$('climate').style.display='block';
+$('chartsec').style.display='block';
 if(c.ok){$('tT').textContent=(c.temp_c*9/5+32).toFixed(1);
 $('tH').textContent=c.rh.toFixed(0);
 $('tP').textContent=c.hpa.toFixed(1);}
 let h=await(await fetch('/api/history?days='+days)).json();
-h=mergeCache(h);lastH=h;draw(h);
+h=mergeCache(h);lastH=h;S=build(h);xi=-1;drawAll();
+spark('sp_o',S.of,'#8fa3b8');spark('sp_t',S.tf,'#e8834a');
+spark('sp_h',S.rh,'#3b82f6');spark('sp_p',S.hpa,'#22a06b');
 const st=await(await fetch('/api/stats')).json();
 $('stats').style.display='block';
 $('stats').innerHTML='24h: <b>'+st.t_min_f.toFixed(0)+'–'+st.t_max_f.toFixed(0)+'°F</b> avg <b>'+st.t_avg_f.toFixed(0)+'</b> · fan today <b>'+(st.run_today_s/3600).toFixed(1)+'h</b> · lifetime <b>'+(st.run_total_s/3600).toFixed(0)+'h</b> · <b>'+(st.energy_wh/1000).toFixed(2)+' kWh</b> est · now <b>'+st.watts_now.toFixed(0)+' W</b>';
 }catch(e){}}
-$('cv').addEventListener('click',ev=>{
-if(!lastH||!lastH.temp_c)return;
-const r=$('cv').getBoundingClientRect();
-const i=Math.round((ev.clientX-r.left)/r.width*(lastH.temp_c.length-1));
-if(i<0||i>=lastH.temp_c.length)return;
-const ts=lastH.end_ts?new Date((lastH.end_ts-(lastH.temp_c.length-1-i)*lastH.interval_s)*1000):null;
-const o=lastH.out_f?lastH.out_f[i]:null;
-$('legend').innerHTML=(ts?ts.toLocaleString([],{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' · ':'')+
-(lastH.temp_c[i]*9/5+32).toFixed(1)+'°F · '+lastH.rh[i].toFixed(0)+'% · '+lastH.hpa[i].toFixed(1)+'mb'+
-((o!==null&&o>-100)?' · out '+o.toFixed(1)+'°F':'')+
-(lastH.spd?' · fan '+lastH.spd[i]:'');});
 connectSSE();poll();setInterval(poll,15000);
 setInterval(climate,60000);climate();
 </script></body></html>)html";
@@ -705,23 +820,8 @@ static void sample_climate() {
   }
   const float t = temp_corrected(t_raw);
   g_inside_c = t;
-  if (g_ring_count == kRingLen) {
-    memmove(g_ring_t, g_ring_t + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_h, g_ring_h + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_p, g_ring_p + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_o, g_ring_o + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_s, g_ring_s + 1, (kRingLen - 1) * sizeof(int8_t));
-    g_ring_count--;
-  }
-  g_ring_t[g_ring_count] = t;
-  g_ring_h[g_ring_count] = h;
-  g_ring_p[g_ring_count] = p;
-  const float oc = outside_c_fresh();
-  g_ring_o[g_ring_count] = isnan(oc) ? NAN : oc * 9 / 5 + 32;
-  g_ring_s[g_ring_count] = (int8_t)(g_speed < 0 ? 0 : g_speed);
-  g_ring_count++;
-  if (time_synced())
-    g_ring_end_ts = time(nullptr);
+  // Battery first so this sample's ring row records the fresh reading and
+  // the charging verdict it produced, not the 5-minute-old one.
   batt_begin();
   batt_read();
   if (!isnan(g_batt_v)) {
@@ -735,6 +835,27 @@ static void sample_climate() {
     g_pct_n++;
     chg_update();
   }
+  if (g_ring_count == kRingLen) {
+    memmove(g_ring_t, g_ring_t + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_h, g_ring_h + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_p, g_ring_p + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_o, g_ring_o + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_s, g_ring_s + 1, (kRingLen - 1) * sizeof(int8_t));
+    memmove(g_ring_bv, g_ring_bv + 1, (kRingLen - 1) * sizeof(float));
+    memmove(g_ring_c, g_ring_c + 1, (kRingLen - 1) * sizeof(int8_t));
+    g_ring_count--;
+  }
+  g_ring_t[g_ring_count] = t;
+  g_ring_h[g_ring_count] = h;
+  g_ring_p[g_ring_count] = p;
+  const float oc = outside_c_fresh();
+  g_ring_o[g_ring_count] = isnan(oc) ? NAN : oc * 9 / 5 + 32;
+  g_ring_s[g_ring_count] = (int8_t)(g_speed < 0 ? 0 : g_speed);
+  g_ring_bv[g_ring_count] = g_batt_kind ? g_batt_v : NAN;
+  g_ring_c[g_ring_count] = g_batt_kind ? (g_chg ? 1 : 0) : -1;
+  g_ring_count++;
+  if (time_synced())
+    g_ring_end_ts = time(nullptr);
   if (time_synced())
     sd_log_sample(time(nullptr), t, h, p);
   if (g_mqtt.connected()) {
@@ -1109,7 +1230,7 @@ static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p, uint1
 static void handle_history() {
   const int days = g_http.hasArg("days") ? g_http.arg("days").toInt() : 1;
   String out;
-  out.reserve(10000);
+  out.reserve(13000);
   if (days <= 1 || !g_sd_ok || !time_synced()) {
     char hd[64];
     snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,", (long)g_ring_end_ts);
@@ -1121,10 +1242,20 @@ static void handle_history() {
     append_series(out, "hpa", g_ring_p, g_ring_count, 1);
     out += ',';
     append_series(out, "out_f", g_ring_o, g_ring_count, 1);
+    out += ',';
+    append_series(out, "batt_v", g_ring_bv, g_ring_count, 2);
     out += ",\"spd\":[";
     for (uint16_t i = 0; i < g_ring_count; i++) {
       char n[6];
       snprintf(n, sizeof(n), "%d", (int)g_ring_s[i]);
+      out += n;
+      if (i + 1 < g_ring_count)
+        out += ',';
+    }
+    out += "],\"chg\":[";
+    for (uint16_t i = 0; i < g_ring_count; i++) {
+      char n[6];
+      snprintf(n, sizeof(n), "%d", (int)g_ring_c[i]);
       out += n;
       if (i + 1 < g_ring_count)
         out += ',';
