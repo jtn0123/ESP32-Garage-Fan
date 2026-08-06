@@ -8,12 +8,6 @@
       "port": 8080
     },
     {
-      "name": "fan-page-mock",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["/private/tmp/claude-501/-Users-justin-Documents-Github-ESP32-Temp-Sensor--claude-worktrees-microsd-setup-ota-fdaff9/435f20e3-694c-4821-9f24-f5914f18c726/scratchpad/mock_server.py"],
-      "port": 8791
-    },
-    {
       "name": "sim",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8144", "--bind", "127.0.0.1", "--directory", "web/sim"],
