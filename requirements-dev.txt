@@ -10,4 +10,4 @@ types-pyyaml
 types-pyserial
 
 # Code coverage (optional)
-pytest-cov>=4.0
+pytest-cov>=7.1.0
