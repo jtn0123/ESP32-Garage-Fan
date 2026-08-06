@@ -74,7 +74,6 @@ tests/visual_baselines/
 tests/visual_output/
 
 # Claude.md project-specific instructions
-CLAUDE.md
 
 # Device Manager artifacts
 screenshots/
