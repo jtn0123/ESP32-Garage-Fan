@@ -8,6 +8,12 @@ on:
   schedule:
     - cron: '0 6 * * 1'
 
+# Default-deny for the whole workflow; the analyze job re-grants exactly what
+# CodeQL needs below. Without this, jobs inherit the repository default, which
+# can be read/write.
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

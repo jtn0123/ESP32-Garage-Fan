@@ -9,10 +9,20 @@ on:
     # Run weekly security scan
     - cron: '0 0 * * 0'
 
+# Default-deny for the whole workflow; jobs that upload SARIF re-grant
+# security-events: write below. Without this, jobs inherit the repository
+# default, which can be read/write.
+permissions:
+  contents: read
+
 jobs:
   gitleaks:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Upload SARIF report step below writes to the code scanning API.
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,6 +102,10 @@ jobs:
   dependency-check:
     name: Dependency Security Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Upload Trivy results step below writes to the code scanning API.
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
