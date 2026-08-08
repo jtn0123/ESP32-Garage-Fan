@@ -38,6 +38,9 @@
 #include "config.h"
 #include "system/crashlog.h"
 #include "fan/control.h"
+#include "storage/history.h"
+#include "storage/sdcard.h"
+#include "system/odometer.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
 #include "system/timeutil.h"
@@ -52,9 +55,6 @@ static WiFiClient g_sse[4];
 // 2.13" mono SSD1680 FeatherWing, landscape; no busy/rst pins wired.
 static Adafruit_SSD1680 g_epd(250, 122, EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
 static Preferences g_prefs;
-static bool g_sd_ok = false;
-static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
-static bool g_sd_quarantined = false;
 static char g_last_death[48] = "none";
 static char g_prev_death[48] = "none";  // the boot before this one, from NVS
 static uint32_t g_boots = 0;            // lifetime boot count, NVS
@@ -66,19 +66,6 @@ static uint32_t g_last_reconnect_ms = 0;
 static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
 static uint32_t g_last_auto_ms = 0;
-static float g_ring_t[kRingLen], g_ring_h[kRingLen], g_ring_p[kRingLen];
-static float g_ring_o[kRingLen];   // outdoor F at sample time (NAN = none)
-static int8_t g_ring_s[kRingLen];  // fan speed at sample time
-static float g_ring_bv[kRingLen];  // battery volts at sample time (NAN = none)
-static int8_t g_ring_c[kRingLen];  // charging verdict (1/0, -1 = no battery)
-static time_t g_ring_end_ts = 0;
-static uint16_t g_ring_count = 0;
-// Runtime odometer + energy estimate (cubic fan law, ~105 W flat out).
-static uint32_t g_run_total_s = 0, g_run_today_s = 0;
-static uint32_t g_today_ymd = 0;
-static float g_energy_wh = 0;
-static uint32_t g_last_count_ms = 0;
-static uint32_t g_last_nvs_ms = 0;
 static bool g_epd_ok = false;
 static uint32_t g_last_epd_ms = 0;
 static int g_epd_speed_shown = -99;
@@ -104,64 +91,6 @@ static void publish_state() {
   g_mqtt.publish(kTopicState, buf, true);
 }
 
-static void sd_mount() {
-  // Full teardown between attempts, per storage.cpp: a card interrupted
-  // mid-transaction by a reset stops answering until the bus restarts from
-  // silence. Called at boot and retried from loop() until a card appears.
-  static const uint32_t kFreqs[] = {4000000, 1000000, 400000};
-  for (size_t i = 0; i < 3; i++) {
-    if (i > 0) {
-      SD.end();
-      SPI.end();
-      delay(50);
-      SPI.begin();
-    }
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
-    pinMode(SRAM_CS_PIN, OUTPUT);
-    digitalWrite(SRAM_CS_PIN, HIGH);
-    pinMode(EPD_CS_PIN, OUTPUT);
-    digitalWrite(EPD_CS_PIN, HIGH);
-    if (SD.begin(SD_CS_PIN, SPI, kFreqs[i])) {
-      g_sd_ok = true;
-      Serial.printf("sd mounted at %lu Hz: %.1f/%.1f MB used\n", (unsigned long)kFreqs[i],
-                    SD.usedBytes() / 1048576.0, SD.totalBytes() / 1048576.0);
-      return;
-    }
-  }
-}
-
-static void sd_mount_guarded() {
-  crashlog::rtc_sd_sentinel = crashlog::kSdSentinelMagic;
-  CRUMB("sd_mount");
-  sd_mount();
-  CRUMB_CLEAR();
-  crashlog::rtc_sd_sentinel = 0;
-}
-
-static void sd_log_sample(time_t now, float t, float h, float p) {
-  if (!g_sd_ok)
-    return;
-  struct tm tm_now;
-  gmtime_r(&now, &tm_now);
-  char path[36];  // worst-case int expansion of the two %d fields, not 4+2
-  snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tm_now.tm_year + 1900, tm_now.tm_mon + 1);
-  CRUMB("sd_write");
-  File f = SD.open(path, FILE_APPEND);
-  if (!f) {
-    CRUMB_CLEAR();
-    g_sd_ok = false;  // card yanked; re-detect on reboot
-    return;
-  }
-  const float out = climate::outside_c_fresh();
-  char line[96];
-  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d\n", (long)now, t, h, p,
-                   isnan(out) ? -999.0f : out, fan::speed());
-  f.write((const uint8_t*)line, n);
-  f.close();
-  CRUMB_CLEAR();
-}
-
 static void sample_climate() {
   float t, h, p;
   if (!climate::sample(&t, &h, &p))
@@ -169,29 +98,18 @@ static void sample_climate() {
   // Battery first so this sample's ring row records the fresh reading and
   // the charging verdict it produced, not the 5-minute-old one.
   battery::sample();
-  if (g_ring_count == kRingLen) {
-    memmove(g_ring_t, g_ring_t + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_h, g_ring_h + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_p, g_ring_p + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_o, g_ring_o + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_s, g_ring_s + 1, (kRingLen - 1) * sizeof(int8_t));
-    memmove(g_ring_bv, g_ring_bv + 1, (kRingLen - 1) * sizeof(float));
-    memmove(g_ring_c, g_ring_c + 1, (kRingLen - 1) * sizeof(int8_t));
-    g_ring_count--;
-  }
-  g_ring_t[g_ring_count] = t;
-  g_ring_h[g_ring_count] = h;
-  g_ring_p[g_ring_count] = p;
   const float oc = climate::outside_c_fresh();
-  g_ring_o[g_ring_count] = isnan(oc) ? NAN : oc * 9 / 5 + 32;
-  g_ring_s[g_ring_count] = (int8_t)(fan::speed() < 0 ? 0 : fan::speed());
-  g_ring_bv[g_ring_count] = battery::kind() ? battery::volts() : NAN;
-  g_ring_c[g_ring_count] = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
-  g_ring_count++;
+  history::Sample row;
+  row.t = t;
+  row.h = h;
+  row.p = p;
+  row.out_f = isnan(oc) ? NAN : oc * 9 / 5 + 32;
+  row.speed = (int8_t)(fan::speed() < 0 ? 0 : fan::speed());
+  row.batt_v = battery::kind() ? battery::volts() : NAN;
+  row.chg = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
+  history::append(row, time_synced());
   if (time_synced())
-    g_ring_end_ts = time(nullptr);
-  if (time_synced())
-    sd_log_sample(time(nullptr), t, h, p);
+    sdcard::log_sample(time(nullptr), t, h, p, row.out_f, fan::speed());
   if (g_mqtt.connected()) {
     char buf[96];
     snprintf(buf, sizeof(buf), "{\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
@@ -227,27 +145,26 @@ static void state_json(char* out, size_t cap) {
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
-  snprintf(out, cap,
-           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
-           "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
-           "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
-           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
-           "\"boots\":%lu,\"prev_death\":\"%s\","
-           "\"sd_q\":%s,"
-           "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
-           fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
-           fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
-           climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
-           ota_rollback_image_confirmed() ? "true" : "false",
-           (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
-           g_last_death, (unsigned long)g_boots, g_prev_death, g_sd_quarantined ? "true" : "false",
-           g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
-           g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt, WiFi.RSSI(),
-           g_mqtt.connected() ? "true" : "false", millis() / 1000UL,
-           WiFi.localIP().toString().c_str());
+  snprintf(
+      out, cap,
+      "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
+      "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
+      "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
+      "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
+      "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
+      "\"boots\":%lu,\"prev_death\":\"%s\","
+      "\"sd_q\":%s,"
+      "\"sd_total_mb\":%lu,"
+      "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
+      "\"uptime_s\":%lu,\"ip\":\"%s\"}",
+      fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
+      fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
+      climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
+      ota_rollback_image_confirmed() ? "true" : "false",
+      (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false", g_last_death,
+      (unsigned long)g_boots, g_prev_death, sdcard::quarantined() ? "true" : "false",
+      (unsigned long)sdcard::total_mb(), (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(),
+      g_mqtt.connected() ? "true" : "false", millis() / 1000UL, WiFi.localIP().toString().c_str());
 }
 
 // Never block on an SSE peer. NetworkClient::write retries a 1 s select up
@@ -316,7 +233,7 @@ static void epd_render() {
   g_epd.clearBuffer();
   g_epd.fillScreen(EPD_WHITE);
   g_epd.setTextColor(EPD_BLACK);
-  const float tin = g_ring_count ? g_ring_t[g_ring_count - 1] : NAN;
+  const float tin = history::count() ? history::temp()[history::count() - 1] : NAN;
   g_epd.setTextSize(4);
   g_epd.setCursor(4, 18);
   if (isnan(tin))
@@ -326,7 +243,7 @@ static void epd_render() {
   g_epd.setTextSize(1);
   g_epd.setCursor(6, 54);
   g_epd.print("GARAGE F");
-  const float rh = g_ring_count ? g_ring_h[g_ring_count - 1] : NAN;
+  const float rh = history::count() ? history::rh()[history::count() - 1] : NAN;
   g_epd.setCursor(70, 54);
   if (!isnan(rh))
     g_epd.printf("RH %.0f%%", rh);
@@ -350,8 +267,9 @@ static void epd_render() {
     g_epd.printf("BAT %.2fV %.0f%%", battery::volts(),
                  isnan(battery::percent()) ? 0 : battery::percent());
   g_epd.setCursor(6, 76);
-  g_epd.printf("run today %luh%02lum  total %luh", (unsigned long)(g_run_today_s / 3600),
-               (unsigned long)(g_run_today_s % 3600 / 60), (unsigned long)(g_run_total_s / 3600));
+  g_epd.printf("run today %luh%02lum  total %luh", (unsigned long)(odometer::run_today_s() / 3600),
+               (unsigned long)(odometer::run_today_s() % 3600 / 60),
+               (unsigned long)(odometer::run_total_s() / 3600));
   g_epd.setCursor(6, 106);
   g_epd.printf("%s  fw %s", WiFi.localIP().toString().c_str(), kFwVersion);
   g_epd.display();
@@ -361,24 +279,17 @@ static void epd_render() {
 }
 
 static void handle_stats() {
-  float tmin = NAN, tmax = NAN, tsum = 0;
-  for (uint16_t i = 0; i < g_ring_count; i++) {
-    const float t = g_ring_t[i];
-    if (isnan(tmin) || t < tmin)
-      tmin = t;
-    if (isnan(tmax) || t > tmax)
-      tmax = t;
-    tsum += t;
-  }
+  float tmin, tmax, tavg;
+  history::temp_stats(&tmin, &tmax, &tavg);
   char buf[288];
   snprintf(buf, sizeof(buf),
            "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,"
            "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
            "\"t_avg_f\":%.1f,\"samples\":%u}",
-           (unsigned long)g_run_today_s, (unsigned long)g_run_total_s, g_energy_wh,
-           fan::watts(fan::speed() < 0 ? 0 : fan::speed()), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
-           isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
-           g_ring_count ? (tsum / g_ring_count) * 9 / 5 + 32 : 0, g_ring_count);
+           (unsigned long)odometer::run_today_s(), (unsigned long)odometer::run_total_s(),
+           odometer::energy_wh(), fan::watts(fan::speed() < 0 ? 0 : fan::speed()),
+           isnan(tmin) ? 0 : tmin * 9 / 5 + 32, isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
+           isnan(tavg) ? 0 : tavg * 9 / 5 + 32, history::count());
   g_http.send(200, "application/json", buf);
 }
 
@@ -433,14 +344,16 @@ static void send_big(const char* mime, const char* body, size_t len, const char*
 }
 
 static void handle_csv() {
+  const uint16_t n = history::count();
   String out;
-  out.reserve(g_ring_count * 44 + 64);
+  out.reserve(n * 44 + 64);
   out += "epoch,temp_c,rh,hpa,outside_f,speed\n";
-  for (uint16_t i = 0; i < g_ring_count; i++) {
+  for (uint16_t i = 0; i < n; i++) {
     char l[80];
-    const long ts = g_ring_end_ts ? (long)g_ring_end_ts - (long)(g_ring_count - 1 - i) * 300 : 0;
-    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, g_ring_t[i], g_ring_h[i],
-             g_ring_p[i], isnan(g_ring_o[i]) ? -999 : g_ring_o[i], (int)g_ring_s[i]);
+    const long ts = history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * 300 : 0;
+    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, history::temp()[i], history::rh()[i],
+             history::hpa()[i], isnan(history::out_f()[i]) ? -999 : history::out_f()[i],
+             (int)history::speed()[i]);
     out += l;
   }
   send_big("text/csv", out.c_str(), out.length(),
@@ -566,14 +479,14 @@ static void handle_config() {
 }
 
 static void handle_sensors() {
-  if (!climate::ok() || g_ring_count == 0) {
+  if (!climate::ok() || history::count() == 0) {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
   char buf[128];
-  const uint16_t i = g_ring_count - 1;
-  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", g_ring_t[i],
-           g_ring_h[i], g_ring_p[i]);
+  const uint16_t i = history::count() - 1;
+  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}",
+           history::temp()[i], history::rh()[i], history::hpa()[i]);
   g_http.send(200, "application/json", buf);
 }
 
@@ -598,118 +511,45 @@ static void append_series(String& out, const char* name, const float* v, uint16_
   out += ']';
 }
 
-// Stream the month files covering [cutoff, now], decimating by stride into
-// the caller's arrays. Two passes: count, then collect every (count/max)th.
-static uint16_t sd_read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pts) {
-  CRUMB("sd_read");
-  time_t now = time(nullptr);
-  char paths[2][36];
-  int npaths = 0;
-  for (time_t at = cutoff; npaths < 2; at = now) {
-    struct tm tmv;
-    gmtime_r(&at, &tmv);
-    char path[36];
-    snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tmv.tm_year + 1900, tmv.tm_mon + 1);
-    if (npaths == 0 || strcmp(path, paths[0]) != 0) {
-      snprintf(paths[npaths], sizeof(paths[npaths]), "%s", path);
-      npaths++;
-    }
-    if (at == now)
-      break;
-  }
-  uint32_t rows = 0;
-  for (int pass = 0; pass < 2; pass++) {
-    const uint32_t stride = pass ? (rows > max_pts ? rows / max_pts + 1 : 1) : 1;
-    uint32_t seen = 0;
-    uint16_t kept = 0;
-    for (int i = 0; i < npaths; i++) {
-      File f = SD.open(paths[i], FILE_READ);
-      if (!f)
-        continue;
-      // Line-buffered scan; lines are short and epoch-prefixed.
-      char line[96];
-      size_t ll = 0;
-      while (f.available()) {
-        const char c = (char)f.read();
-        if (c != '\n') {
-          if (ll < sizeof(line) - 1)
-            line[ll++] = c;
-          continue;
-        }
-        line[ll] = '\0';
-        ll = 0;
-        const long epoch = strtol(line, nullptr, 10);
-        if (epoch < cutoff)
-          continue;
-        if (pass == 0) {
-          rows++;
-          continue;
-        }
-        if (seen++ % stride)
-          continue;
-        if (kept >= max_pts)
-          break;
-        float tv, hv, pv;
-        if (sscanf(line, "%*d,%f,%f,%f", &tv, &hv, &pv) == 3) {
-          t[kept] = tv;
-          h[kept] = hv;
-          p[kept] = pv;
-          kept++;
-        }
-      }
-      f.close();
-    }
-    if (pass == 1) {
-      CRUMB_CLEAR();
-      return kept;
-    }
-    if (rows == 0) {
-      CRUMB_CLEAR();
-      return 0;
-    }
-  }
-  CRUMB_CLEAR();
-  return 0;
-}
-
 static void handle_history() {
   const int days = g_http.hasArg("days") ? g_http.arg("days").toInt() : 1;
   String out;
   out.reserve(13000);
-  if (days <= 1 || !g_sd_ok || !time_synced()) {
+  if (days <= 1 || !sdcard::ok() || !time_synced()) {
+    const uint16_t rows = history::count();
     char hd[64];
-    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,", (long)g_ring_end_ts);
+    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,", (long)history::end_ts());
     out += hd;
-    append_series(out, "temp_c", g_ring_t, g_ring_count, 1);
+    append_series(out, "temp_c", history::temp(), rows, 1);
     out += ',';
-    append_series(out, "rh", g_ring_h, g_ring_count, 0);
+    append_series(out, "rh", history::rh(), rows, 0);
     out += ',';
-    append_series(out, "hpa", g_ring_p, g_ring_count, 1);
+    append_series(out, "hpa", history::hpa(), rows, 1);
     out += ',';
-    append_series(out, "out_f", g_ring_o, g_ring_count, 1);
+    append_series(out, "out_f", history::out_f(), rows, 1);
     out += ',';
-    append_series(out, "batt_v", g_ring_bv, g_ring_count, 2);
+    append_series(out, "batt_v", history::batt_v(), rows, 2);
     out += ",\"spd\":[";
-    for (uint16_t i = 0; i < g_ring_count; i++) {
+    for (uint16_t i = 0; i < rows; i++) {
       char n[6];
-      snprintf(n, sizeof(n), "%d", (int)g_ring_s[i]);
+      snprintf(n, sizeof(n), "%d", (int)history::speed()[i]);
       out += n;
-      if (i + 1 < g_ring_count)
+      if (i + 1 < rows)
         out += ',';
     }
     out += "],\"chg\":[";
-    for (uint16_t i = 0; i < g_ring_count; i++) {
+    for (uint16_t i = 0; i < rows; i++) {
       char n[6];
-      snprintf(n, sizeof(n), "%d", (int)g_ring_c[i]);
+      snprintf(n, sizeof(n), "%d", (int)history::chg()[i]);
       out += n;
-      if (i + 1 < g_ring_count)
+      if (i + 1 < rows)
         out += ',';
     }
     out += "]}";
   } else {
     static float t[kGraphMaxPts], h[kGraphMaxPts], p[kGraphMaxPts];
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
-    const uint16_t n = sd_read_range(cutoff, t, h, p, kGraphMaxPts);
+    const uint16_t n = sdcard::read_range(cutoff, t, h, p, kGraphMaxPts);
     char head[48];
     snprintf(head, sizeof(head), "{\"interval_s\":%ld,", n > 1 ? (long)(days * 86400L / n) : 300L);
     out += head;
@@ -733,30 +573,10 @@ static void handle_sd_format() {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
-  Serial.println("[SD] format requested");
-  esp_task_wdt_delete(NULL);  // a big-card format legitimately takes minutes
-  g_sd_quarantined = false;   // manual override un-quarantines
-  crashlog::rtc_sd_sentinel = crashlog::kSdSentinelMagic;
-  CRUMB("sd_format");
-  SD.end();
-  SPI.end();
-  delay(50);
-  SPI.begin();
-  pinMode(SD_CS_PIN, OUTPUT);
-  digitalWrite(SD_CS_PIN, HIGH);
-  pinMode(SRAM_CS_PIN, OUTPUT);
-  digitalWrite(SRAM_CS_PIN, HIGH);
-  pinMode(EPD_CS_PIN, OUTPUT);
-  digitalWrite(EPD_CS_PIN, HIGH);
-  const bool ok = SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", 5, true);
-  crashlog::rtc_sd_sentinel = 0;
-  CRUMB_CLEAR();
-  esp_task_wdt_add(NULL);
-  g_sd_ok = ok;
-  g_sd_fails = 0;
+  const bool ok = sdcard::format();
   char buf[80];
   snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}", ok ? "true" : "false",
-           ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0);
+           (unsigned long)sdcard::total_mb());
   Serial.printf("[SD] format result: %s\n", buf);
   g_http.send(ok ? 200 : 500, "application/json", buf);
 }
@@ -949,10 +769,7 @@ void setup() {
     sse_push();
   });
   fan::restore(&g_prefs);
-  g_run_total_s = g_prefs.getUInt("runs", 0);
-  g_run_today_s = g_prefs.getUInt("runt", 0);
-  g_today_ymd = g_prefs.getUInt("ymd", 0);
-  g_energy_wh = g_prefs.getFloat("ewh", 0);
+  odometer::restore(&g_prefs);
   String tk = g_prefs.getString("token", FAN_OTA_TOKEN);
   snprintf(g_token, sizeof(g_token), "%s", tk.c_str());
   // SD stays OUT of the boot path: the controller comes fully online first,
@@ -967,11 +784,11 @@ void setup() {
            crashlog::rtc_crumb[0] ? crashlog::rtc_crumb : "");
   // Quarantine on a mount sentinel from any reset, or any abnormal death
   // while an SD op was in flight.
-  g_sd_quarantined = (crashlog::rtc_sd_sentinel == crashlog::kSdSentinelMagic) ||
-                     (abnormal && strncmp(crashlog::rtc_crumb, "sd", 2) == 0);
+  sdcard::set_quarantined((crashlog::rtc_sd_sentinel == crashlog::kSdSentinelMagic) ||
+                          (abnormal && strncmp(crashlog::rtc_crumb, "sd", 2) == 0));
   crashlog::rtc_sd_sentinel = 0;
   CRUMB_CLEAR();
-  if (g_sd_quarantined)
+  if (sdcard::quarantined())
     Serial.println("[SD] previous boot died in an SD op -- card quarantined");
   Serial.printf("last reset: %s\n", g_last_death);
   // Longitudinal forensics: RTC evidence dies with power, NVS doesn't. Keep
@@ -1105,33 +922,9 @@ void loop() {
   g_mqtt.loop();
   g_http.handleClient();
   sse_accept();
-  // Runtime odometer + energy integration, once per second.
-  if (millis() - g_last_count_ms >= 1000) {
-    g_last_count_ms = millis();
-    if (fan::speed() > 0) {
-      g_run_total_s++;
-      g_run_today_s++;
-      g_energy_wh += fan::watts(fan::speed()) / 3600.0f;
-    }
-    if (time_synced()) {
-      struct tm lt;
-      time_t now = time(nullptr);
-      gmtime_r(&now, &lt);
-      const uint32_t ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
-      if (g_today_ymd != 0 && ymd != g_today_ymd)
-        g_run_today_s = 0;
-      g_today_ymd = ymd;
-    }
-  }
-  if (millis() - g_last_nvs_ms >= 15 * 60 * 1000) {
-    g_last_nvs_ms = millis();
-    g_prefs.putUInt("runs", g_run_total_s);
-    g_prefs.putUInt("runt", g_run_today_s);
-    g_prefs.putUInt("ymd", g_today_ymd);
-    g_prefs.putFloat("ewh", g_energy_wh);
-  }
+  odometer::tick(fan::speed(), fan::watts(fan::speed()));
   // E-ink: refresh with each sample cycle, or 60 s after a speed change.
-  if (g_epd_ok && g_ring_count &&
+  if (g_epd_ok && history::count() &&
       ((millis() - g_last_epd_ms >= kSampleMs) ||
        (fan::speed() != g_epd_speed_shown && millis() - g_last_epd_ms >= 60000)))
     epd_render();
@@ -1145,19 +938,7 @@ void loop() {
     fan::tick_auto();
     battery::begin();
     battery::read();
-    // First mount attempt ~60 s after boot, then every 5 min, 10-fail cap,
-    // and never while quarantined; /api/sdformat overrides all of it.
-    static bool sd_tried = false;
-    static uint8_t sd_backoff = 0;
-    if (!g_sd_ok && !g_sd_quarantined && g_sd_fails < 10) {
-      const bool due = sd_tried ? (++sd_backoff >= 10) : (millis() > 60000);
-      if (due) {
-        sd_tried = true;
-        sd_backoff = 0;
-        sd_mount_guarded();
-        g_sd_fails = g_sd_ok ? 0 : g_sd_fails + 1;
-      }
-    }
+    sdcard::retry_tick();
   }
   if (!g_ever_healthy && !ota_rollback_image_confirmed() && millis() > kUnconfirmedDeadlineMs) {
     Serial.println("[OTA] unconfirmed image never reached broker; restarting");
