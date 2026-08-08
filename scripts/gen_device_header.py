@@ -214,8 +214,9 @@ def main():
     # ship a binary reporting a different number than the tag (deploy.sh worked
     # around it by scraping the .cpp). The firmware now reports FW_VERSION, and
     # release.yml refuses to publish when the tag and VERSION disagree.
-    fw_version = str(os.environ.get("FW_VERSION", "") or read_version_file() or
-                     data.get("fw_version", "") or "")
+    fw_version = str(
+        os.environ.get("FW_VERSION", "") or read_version_file() or data.get("fw_version", "") or ""
+    )
     if not fw_version:
         try:
             fw_version = (

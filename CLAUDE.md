@@ -25,10 +25,16 @@ It is a SEPARATE project now.
 - Active firmware: `firmware/arduino`, envs `feather_esp32s2_fan_controller`
   (the product) and `feather_esp32s2_fan_rehearsal` (logic-analyzer validation).
   Both are in `default_envs`, so a bare `pio run` (and CI) builds them.
-- Firmware sources are being split out of the old single file into
-  `src/{config.h,fan,sensors,storage,net,ui,system}/`. Each module owns its own
-  statics behind a narrow API — follow that pattern rather than adding globals
-  back to `fan_controller_main.cpp`, which is mid-migration.
+- Firmware layout: `src/{config.h,fan,sensors,storage,net,ui,system}/`, one
+  concern per module, each owning its statics behind a narrow API (see
+  `ota_rollback` for the original pattern). `fan_controller_main.cpp` is a
+  ~160-line orchestrator — boot order, loop cadences, and the cross-module
+  glue (the fan notify hook, the 5-minute sample fan-out). Do not grow
+  globals or handlers back into it; new state belongs in the module that
+  owns the concern, and no source file should exceed 500 lines.
+- `tests/test_web_contract.py` pins every firmware JSON writer to the
+  interfaces in `web/src/types.ts`, wherever the functions live. If you
+  rename or add a wire field, change both sides or pytest fails.
 - The web console is TypeScript under `web/`. Never hand-edit
   `web/dist/console.html` or `src/generated_page.h`: both are build output.
 - `VERSION` at the repo root is the only firmware version. Do not hardcode one

@@ -26,6 +26,7 @@ import gzip
 import os
 import sys
 
+
 def repo_root() -> str:
     """Repository root, resolved as a CLI script or as a PlatformIO pre-script.
 

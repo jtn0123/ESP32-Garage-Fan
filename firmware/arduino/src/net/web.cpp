@@ -11,6 +11,7 @@
 #include <Wire.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 
@@ -31,6 +32,24 @@
 #include "system/odometer.h"
 #include "system/ota_rollback.h"
 #include "system/timeutil.h"
+
+// Static assets served verbatim. At file scope (not in the namespace) so the
+// unindented raw-string bodies do not fight the namespace indent rule --
+// their bytes are the response and cannot be re-indented.
+static const char kManifest[] PROGMEM = R"json({
+"name":"Garage fan","short_name":"GarageFan","start_url":"/",
+"display":"standalone","background_color":"#0b0e13","theme_color":"#0b0e13",
+"icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]})json";
+
+static const char kIcon[] PROGMEM =
+    R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<rect width="100" height="100" rx="22" fill="#0b0e13"/>
+<g fill="#3b82f6"><circle cx="50" cy="50" r="9"/>
+<path d="M50 14a10 10 0 0 1 10 10c0 8-6 12-8 18l-4-1c-2-9-8-13-8-19a10 10 0 0 1 10-8z"/>
+<path d="M50 86a10 10 0 0 1-10-10c0-8 6-12 8-18l4 1c2 9 8 13 8 19a10 10 0 0 1-10 8z"/>
+<path d="M14 50a10 10 0 0 1 10-10c8 0 12 6 18 8l-1 4c-9 2-13 8-19 8a10 10 0 0 1-8-10z"/>
+<path d="M86 50a10 10 0 0 1-10 10c-8 0-12-6-18-8l1-4c9-2 13-8 19-8a10 10 0 0 1 8 10z"/>
+</g></svg>)svg";
 
 namespace web {
 namespace {
@@ -110,21 +129,6 @@ static void json_str(char* dst, size_t cap, const char* src) {
   dst[j] = 0;
 }
 
-static const char kManifest[] PROGMEM = R"json({
-"name":"Garage fan","short_name":"GarageFan","start_url":"/",
-"display":"standalone","background_color":"#0b0e13","theme_color":"#0b0e13",
-"icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]})json";
-
-static const char kIcon[] PROGMEM =
-    R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-<rect width="100" height="100" rx="22" fill="#0b0e13"/>
-<g fill="#3b82f6"><circle cx="50" cy="50" r="9"/>
-<path d="M50 14a10 10 0 0 1 10 10c0 8-6 12-8 18l-4-1c-2-9-8-13-8-19a10 10 0 0 1 10-8z"/>
-<path d="M50 86a10 10 0 0 1-10-10c0-8 6-12 8-18l4 1c2 9 8 13 8 19a10 10 0 0 1-10 8z"/>
-<path d="M14 50a10 10 0 0 1 10-10c8 0 12 6 18 8l-1 4c-9 2-13 8-19 8a10 10 0 0 1-8-10z"/>
-<path d="M86 50a10 10 0 0 1-10 10c-8 0-12-6-18-8l1-4c9-2 13-8 19-8a10 10 0 0 1 8 10z"/>
-</g></svg>)svg";
-
 static void handle_stats() {
   float tmin, tmax, tavg;
   history::temp_stats(&tmin, &tmax, &tavg);
@@ -150,7 +154,7 @@ static void handle_csv() {
     const long ts = history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * 300 : 0;
     snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, history::temp()[i], history::rh()[i],
              history::hpa()[i], isnan(history::out_f()[i]) ? -999 : history::out_f()[i],
-             (int)history::speed()[i]);
+             static_cast<int>(history::speed()[i]));
     out += l;
   }
   http_tx::send_big(g_http.client(), "text/csv", out.c_str(), out.length(),
@@ -302,7 +306,7 @@ static void handle_history() {
     out += ",\"spd\":[";
     for (uint16_t i = 0; i < rows; i++) {
       char n[6];
-      snprintf(n, sizeof(n), "%d", (int)history::speed()[i]);
+      snprintf(n, sizeof(n), "%d", static_cast<int>(history::speed()[i]));
       out += n;
       if (i + 1 < rows)
         out += ',';
@@ -310,7 +314,7 @@ static void handle_history() {
     out += "],\"chg\":[";
     for (uint16_t i = 0; i < rows; i++) {
       char n[6];
-      snprintf(n, sizeof(n), "%d", (int)history::chg()[i]);
+      snprintf(n, sizeof(n), "%d", static_cast<int>(history::chg()[i]));
       out += n;
       if (i + 1 < rows)
         out += ',';
@@ -362,7 +366,7 @@ static void handle_raw() {
     g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
     return;
   }
-  fan::raw_high_us((uint16_t)((uint32_t)kPeriodUs * pct / 100));
+  fan::raw_high_us(static_cast<uint16_t>(static_cast<uint32_t>(kPeriodUs) * pct / 100));
   char buf[48];
   snprintf(buf, sizeof(buf), "{\"raw_high_pct\":%d}", pct);
   g_http.send(200, "application/json", buf);

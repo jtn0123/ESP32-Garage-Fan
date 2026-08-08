@@ -43,8 +43,9 @@ void handle_sd_test() {
     static const uint8_t kCmd8[] = {0x48, 0, 0, 0x01, 0xAA, 0x87};
     for (uint8_t b : kCmd8) SPI.transfer(b);
     for (int i = 0; i < 16 && (r1b & 0x80); i++) r1b = SPI.transfer(0xFF);
-    if (r1b == 0x01)
+    if (r1b == 0x01) {
       for (int i = 0; i < 4; i++) r7[i] = SPI.transfer(0xFF);
+    }
   }
   digitalWrite(SD_CS_PIN, HIGH);
   SPI.transfer(0xFF);
@@ -89,7 +90,7 @@ void register_routes(WebServer& http) {
                  "{\"reg\":\"0x%02X\",\"stop\":%d,\"wtx\":%d,\"got\":%d,"
                  "\"bytes\":\"%02X%02X%02X\",\"val\":%u,\"crc_ok\":%s},",
                  reg, variant, wtx, got, raw[0], raw[1], raw[2],
-                 (unsigned)(((uint16_t)raw[1] << 8) | raw[0]),
+                 static_cast<unsigned>((static_cast<uint16_t>(raw[1]) << 8) | raw[0]),
                  battery::crc8(chk, 5) == raw[2] ? "true" : "false");
         r += e;
       }

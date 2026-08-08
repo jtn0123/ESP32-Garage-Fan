@@ -74,7 +74,7 @@ bool read_reg(uint8_t reg, uint16_t* out) {
   const uint8_t chk[5] = {0x16, reg, 0x17, lo, hi};
   if (crc8(chk, 5) != crc)
     return false;
-  *out = ((uint16_t)hi << 8) | lo;
+  *out = static_cast<uint16_t>(hi << 8) | lo;
   return true;
 }
 

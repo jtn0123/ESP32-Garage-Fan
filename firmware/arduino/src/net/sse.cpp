@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include <cstdio>
+
 #include "lwip/sockets.h"
 
 namespace sse {
