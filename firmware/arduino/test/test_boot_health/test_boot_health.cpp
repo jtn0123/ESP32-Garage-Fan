@@ -3,7 +3,7 @@
 
 #include <unity.h>
 
-#include "../../src/boot_health.h"
+#include "system/boot_health.h"
 
 void setUp(void) {}
 void tearDown(void) {}
