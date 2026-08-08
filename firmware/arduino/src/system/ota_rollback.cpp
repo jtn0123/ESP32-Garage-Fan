@@ -61,7 +61,8 @@ void ota_rollback_check_at_boot() {
 
   rtc_unhealthy_boots++;  // provisionally unhealthy; mark_healthy() clears it
 
-  Serial.printf("[ROLLBACK] boot %u unhealthy in a row, image %s\n", rtc_unhealthy_boots,
+  Serial.printf("[ROLLBACK] boot %lu unhealthy in a row, image %s\n",
+                (unsigned long)rtc_unhealthy_boots,
                 g_running_confirmed ? "confirmed" : "UNCONFIRMED");
 
   if (!boot_health_should_rollback(rtc_unhealthy_boots, g_running_confirmed))
@@ -83,9 +84,9 @@ void ota_rollback_check_at_boot() {
   }
 
   Serial.printf(
-      "[ROLLBACK] %u boots without reaching the broker and this image was "
+      "[ROLLBACK] %lu boots without reaching the broker and this image was "
       "never confirmed - rolling back to %s\n",
-      rtc_unhealthy_boots, other->label);
+      (unsigned long)rtc_unhealthy_boots, other->label);
   Serial.flush();
   rtc_unhealthy_boots = 0;
   esp_restart();

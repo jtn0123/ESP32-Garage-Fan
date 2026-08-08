@@ -2,7 +2,7 @@
 // Native tests for fan_auto_logic.h -- the hold-at-max hysteresis thermostat.
 #include <unity.h>
 
-#include "fan_auto_logic.h"
+#include "fan/auto_logic.h"
 
 static const FanAutoCfg kCfg = kFanAutoDefaults;  // min 0, max 9, 2.5F/1.5F
 

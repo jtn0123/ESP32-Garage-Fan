@@ -58,13 +58,24 @@ jobs:
           set -euo pipefail
           # Deleting the generated header first proves the PlatformIO pre-script
           # really does regenerate it, so a clean checkout builds.
-          rm -f src/generated_config.h
+          rm -f src/generated_config.h src/generated_page.h
           pio run 2>&1 | tee build.log
           test -s src/generated_config.h
+          # gen_web_page.py embeds web/dist/console.html as a gzipped array.
+          # If it silently no-ops, the device serves an empty page.
+          test -s src/generated_page.h
 
       # The firmware build is warning-free; keep it that way. Anchored to ^src/
       # so this only covers our own sources -- a dependency that warns from
       # .pio/libdeps/<env>/<lib>/src/... must not fail an unrelated PR.
+      #
+      # This gate only has teeth because platformio.ini sets
+      # `build_src_flags = -Wall -Wextra`. Before that, gcc's defaults emitted
+      # almost nothing and the step passed while seven real warnings (uint32_t
+      # printed with %u, a dead buffer, two possible snprintf truncations, a
+      # bad scanf length modifier) sat in the tree. If those flags are ever
+      # removed, this check goes quiet rather than failing -- which is the
+      # dangerous direction.
       - name: Check for firmware warnings in our sources
         working-directory: firmware/arduino
         shell: bash
@@ -87,6 +98,47 @@ jobs:
             firmware/arduino/.pio/build/**/firmware*.bin
             firmware/arduino/.pio/build/**/*.elf
             firmware/arduino/build.log
+
+  web-console:
+    name: Web console (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: web
+        run: npm test
+
+      # web/dist/console.html is a committed build artifact: the firmware build
+      # runs with only Python and PlatformIO, so `pio run` must never need npm.
+      # That trade only holds if the committed copy really is what the source
+      # produces -- otherwise the device ships a page nobody can regenerate.
+      - name: Rebuild and check the committed bundle is current
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm run build
+          if ! git diff --exit-code -- dist/console.html; then
+            echo "::error::web/dist/console.html is stale."
+            echo "Run 'npm --prefix web run build' and commit the result."
+            exit 1
+          fi
 
   tests-native:
     name: Native unit tests (Unity)
@@ -230,7 +282,7 @@ jobs:
               # owns its formatting; it is also gitignored, so it is normally
               # absent here anyway.
               FILES=$(find firmware/arduino/src -type f \( -name "*.cpp" -o -name "*.h" \) \
-                ! -name 'generated_config.h')
+                ! -name 'generated_*.h')
               if [ -n "$FILES" ]; then
                 clang-format --version | tee clang-format-version.txt
                 clang-format -n --Werror $FILES 2>&1 | tee clang-format.txt
