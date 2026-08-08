@@ -1,0 +1,297 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0e13">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Garage fan</title>
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+:root{--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#5a6472;--fai:#4d5765;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{font-family:var(--sans);color:var(--tx);min-height:100vh;padding:0 40px 40px;-webkit-text-size-adjust:100%}
+#wrap{max-width:1136px;margin:0 auto}
+a{color:var(--out)}a:hover{color:var(--tx)}
+button{font-family:inherit}
+.m{font-family:var(--mono)}
+.k{font:500 11px var(--mono);letter-spacing:.1em;color:var(--dim)}
+.k9{font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
+.hide{display:none!important}
+#top{display:flex;align-items:center;gap:14px;padding:22px 0 18px}
+#brand{font:600 12px var(--mono);letter-spacing:.14em;color:var(--dim);white-space:nowrap}
+#rule{flex:1;height:1px;background:var(--ln)}
+#hbits{display:flex;gap:16px;align-items:center;font:500 11px var(--mono);color:var(--dim);white-space:nowrap}
+#hmq.up{color:var(--ok)}
+#nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0}
+#nav.on{color:var(--tx)}
+#conmain{display:grid;grid-template-columns:1fr 164px;gap:28px;align-items:start}
+#hero{display:flex;align-items:flex-start;gap:44px;flex-wrap:wrap}
+#stamp{font:500 10px var(--mono);letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:var(--pop);color:var(--dim)}
+#stamp.scrub{background:rgba(232,131,74,.16);color:var(--or)}
+.t1{font:600 92px/.82 var(--sans);letter-spacing:-.045em;color:var(--or);margin-top:4px}
+.t2{font:600 62px/.82 var(--sans);letter-spacing:-.04em;margin-top:6px}
+.deg{opacity:.42}
+.hcol{padding-top:24px}
+#dwrap{display:flex;align-items:baseline;margin-top:6px}
+#dunit{font-size:20px;color:var(--dim);margin-left:4px}
+#gauge{position:relative;height:40px;margin-top:26px}
+#gtrack{height:8px;border-radius:4px;background:linear-gradient(90deg,#3b82f6 0%,#33404f 34%,#2b333e 50%,#8a5334 78%,#e8834a 100%)}
+#gband{position:absolute;top:0;height:8px;background:rgba(230,233,237,.10);border-left:1px solid #4c5665;border-right:1px solid #4c5665}
+#gmark{position:absolute;top:-5px;width:3px;height:18px;border-radius:2px;background:var(--tx);transition:left .12s}
+.gtick{position:absolute;top:11px;height:6px;width:1px;background:#3d4653}
+.glab{position:absolute;top:21px;font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
+#glr{transform:translateX(-100%);padding-right:6px}
+#gle{padding-left:6px}
+#reason{font-size:15px;color:var(--mut);margin-top:20px;max-width:660px;text-wrap:pretty;min-height:44px}
+#acts{display:flex;gap:10px;margin-top:18px;align-items:center;flex-wrap:wrap}
+.pill{font-size:13.5px;padding:11px 22px;border-radius:999px;cursor:pointer;border:1px solid var(--pbd);background:transparent;color:var(--tx)}
+#bauto.on{background:var(--ok);border-color:var(--ok);color:#fff}
+#boff{border-color:#3a2626;color:#e0a9a9}
+#boff.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
+#metrics{display:flex;gap:44px;margin-top:26px;padding-top:16px;border-top:1px solid var(--ln);flex-wrap:wrap}
+.mv{font-size:15px;color:var(--tx);margin-top:3px}
+#pwmcell{position:relative;cursor:pointer}
+#pwmrow{display:flex;align-items:center;gap:8px;margin-top:3px}
+#pwmval{font-size:15px;border-bottom:1px dotted var(--pbd);color:var(--tx)}
+#pwmval.lit{color:var(--ac)}
+#pwmhint{font:500 9px var(--mono);letter-spacing:.1em;color:#3d4653}
+#pwmhint.lit{color:var(--ac)}
+#pwmcard{position:absolute;bottom:100%;left:-14px;margin-bottom:12px;width:250px;background:var(--pop);border:1px solid var(--pbd);border-radius:8px;padding:11px 13px 10px;box-shadow:0 12px 34px rgba(0,0,0,.6);z-index:6}
+#pwmcard h4{font:600 9.5px var(--mono);letter-spacing:.14em;color:var(--ac);margin:0}
+#cv_pm{display:block;width:100%;height:40px;margin-top:8px}
+#pwmfoot{display:flex;justify-content:space-between;font:500 10px var(--mono);color:var(--dim);margin-top:7px}
+#pwmnote{font-size:11.5px;color:var(--fai);margin-top:8px;line-height:1.45;text-wrap:pretty}
+#scope{margin-top:16px;border:1px solid #1c2b3d;border-radius:10px;background:linear-gradient(180deg,#0b131d 0%,#080d14 100%);padding:0 0 15px;box-shadow:0 0 0 1px rgba(59,130,246,.06),0 18px 44px rgba(0,0,0,.5)}
+#scbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid #16212e;flex-wrap:wrap}
+#scdot{width:7px;height:7px;border-radius:50%;background:#3d4653}
+#sctitle{font:700 10px var(--mono);letter-spacing:.16em;color:#cfe0f2}
+#scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:#4a5a6e}
+#scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:#4a5a6e}
+#scknobs span{padding:3px 7px;border:1px solid #1c2b3d;border-radius:3px}
+#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
+#cv_pw{display:block;width:100%;height:154px}
+#scstats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#16212e;border-top:1px solid #16212e}
+#scstats div{background:#080d14;padding:10px 2px 9px;text-align:center;border-top:2px solid var(--out)}
+#scstats .sk{font:500 9.5px var(--mono);letter-spacing:.1em;color:#4a5a6e}
+#scstats .sv{font:500 15px var(--mono);margin-top:5px}
+#captop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#captop b{font:600 9.5px var(--mono);letter-spacing:.14em;color:#4a5a6e;font-weight:600}
+#captop i{font-size:11.5px;color:#3d4653;font-style:normal}
+#capgrid{display:grid;grid-template-columns:repeat(13,1fr);gap:2px;margin-top:8px}
+#capgrid button{padding:6px 0 5px;border:1px solid #16212e;border-radius:4px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s;background:#080d14}
+#capgrid button:hover{border-color:var(--ac)}
+#capgrid button.on{background:rgba(59,130,246,.16);border-color:var(--ac)}
+#capgrid .ck{font:500 9px var(--mono);letter-spacing:.06em;color:#3d4653}
+#capgrid .cu{font:500 10.5px var(--mono);margin-top:3px;color:var(--dim)}
+#capgrid button.on .ck{color:#cfe0f2}
+#capgrid button.on .cu{color:#d6e8ff}
+#scnote{font-size:12.5px;color:var(--fai);margin:14px 16px 0;line-height:1.5;max-width:660px;text-wrap:pretty}
+#rail{display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:40px}
+#railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em}
+#stack{display:flex;flex-direction:column-reverse;gap:3px;width:100%;margin-top:4px}
+#stack button{height:19px;border-radius:4px;border:1px solid var(--ln);background:#12161d;cursor:pointer;transition:background .15s;padding:0}
+#charts{margin-top:36px}
+#chead{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ln);padding-bottom:2px;flex-wrap:wrap}
+#chead .ct{font:600 11px var(--mono);letter-spacing:.1em;color:var(--mut);padding-bottom:6px}
+#chead .cl{font:500 10px var(--mono);letter-spacing:.1em;color:#3d4653;padding-bottom:6px}
+#chips{display:flex;gap:12px}
+#chips button{background:none;padding:4px 0 6px;cursor:pointer;font:500 10px var(--mono);letter-spacing:.1em;border:0;border-bottom:2px solid transparent;color:var(--fai)}
+#ranges{margin-left:auto;display:flex;gap:14px;font:500 10px var(--mono);letter-spacing:.08em;padding-bottom:6px}
+#ranges button{background:none;border:0;padding:0;cursor:pointer;font:inherit;color:var(--dim)}
+#ranges button.on{color:var(--tx)}
+#plots{cursor:crosshair}
+.crow{display:flex;align-items:baseline;gap:12px;margin:12px 0 2px}
+.crow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--mut)}
+.crow .cd{font-size:11.5px;color:var(--dim)}
+.cr{margin-left:auto;font:500 11.5px var(--mono);color:var(--tx);padding-left:12px}
+.srow{display:flex;align-items:baseline;margin:10px 0 0}
+.srow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
+#plots canvas{display:block;width:100%}
+#cv_t{height:250px}
+.sub canvas{height:66px}
+#cv_ax{height:22px}
+#odo{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--ln);border-top:1px solid var(--ln);margin-top:28px}
+#odo div{background:var(--bg);padding:16px 4px 14px;text-align:center}
+#odo .ov{display:flex;align-items:baseline;justify-content:center;gap:6px;margin-top:6px}
+#odo .ov b{font:600 26px/1 var(--sans);letter-spacing:-.02em;font-weight:600}
+#odo .ov i{font-size:12px;color:var(--dim);font-style:normal}
+#statwrap{position:relative;margin-top:22px}
+#stats{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font:500 11px var(--mono);letter-spacing:.04em}
+#stats span.bit{cursor:help;display:flex;gap:6px;border-bottom:1px dotted var(--bd);padding-bottom:2px}
+#stats span.bit>b{color:#3d4653;font-weight:500}
+#tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:12px;width:440px;max-width:calc(100vw - 40px);background:var(--pop);border:1px solid var(--pbd);border-radius:7px;padding:11px 14px;box-shadow:0 10px 30px rgba(0,0,0,.55);z-index:5}
+#tipt{font:600 10px var(--mono);letter-spacing:.12em}
+#tipb{font-size:13px;color:#b9c1cc;margin-top:5px;line-height:1.5;text-wrap:pretty}
+#sethead{display:flex;align-items:baseline;gap:14px;padding-bottom:20px;flex-wrap:wrap}
+#sethead h2{font:600 30px/1 var(--sans);letter-spacing:-.03em;margin:0;font-weight:600}
+#sethead p{font-size:13.5px;color:var(--dim);margin:0}
+.grp{display:grid;grid-template-columns:190px 1fr;gap:36px;padding:24px 0;border-top:1px solid var(--ln)}
+.grp .gt{font:600 11px var(--mono);letter-spacing:.12em;color:var(--mut)}
+.grp .gb{font-size:12.5px;color:var(--fai);margin-top:7px;line-height:1.5;text-wrap:pretty}
+.grows{display:flex;flex-direction:column}
+.grow{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:10px 0;min-height:34px}
+.grow .rl{max-width:430px}
+.grow .rlab{font-size:14.5px;color:var(--tx)}
+.grow .rh{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.45;text-wrap:pretty}
+.stp{display:flex;align-items:center}
+.stp button{width:28px;height:28px;border:1px solid var(--bd);background:#12161d;color:var(--mut);cursor:pointer;font:500 15px var(--mono)}
+.stp button:first-child{border-radius:5px 0 0 5px;border-right:0}
+.stp button:last-child{border-radius:0 5px 5px 0;border-left:0}
+.stp span{min-width:90px;height:28px;line-height:28px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px var(--mono);color:var(--tx)}
+.tgl{width:42px;height:24px;border-radius:999px;border:1px solid var(--bd);cursor:pointer;position:relative;padding:0;transition:background .15s;background:#12161d}
+.tgl i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;transition:left .15s;background:var(--fai)}
+.tgl.on{background:rgba(34,160,107,.30);border-color:var(--ok)}
+.tgl.on i{left:22px;background:var(--ok)}
+.rtx{font:500 12.5px var(--mono);color:var(--mut);text-align:right}
+.acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.acts button,.acts a{padding:7px 14px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;white-space:nowrap;line-height:1.15;background:transparent;color:var(--tx);text-decoration:none;display:inline-block}
+.acts .danger{border-color:#3a2626;color:#e0a9a9}
+.fld{font-size:12.5px;padding:6px 8px;border-radius:5px;background:#0e1218;color:var(--tx);border:1px solid var(--bd);font-family:var(--mono);max-width:190px}
+.fld::file-selector-button{font:500 11px var(--mono);letter-spacing:.06em;padding:4px 9px;margin-right:9px;border-radius:4px;border:1px solid var(--pbd);background:#12161d;color:var(--mut);cursor:pointer}
+#otarow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+#otarow button{padding:7px 14px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
+#otamsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;margin-top:6px}
+@media(max-width:900px){
+body{padding:0 16px 32px}
+#top{gap:8px}
+#hbits{gap:9px}
+.crow{flex-wrap:wrap}
+.crow .cd{display:none}
+#conmain{grid-template-columns:1fr;gap:22px}
+#hero{gap:26px}
+.t1{font-size:62px}.t2{font-size:40px}
+.hcol{padding-top:10px}
+#rail{margin-right:0;align-items:stretch}
+#railtop{display:flex;align-items:baseline;gap:10px;justify-content:center}
+#stack{flex-direction:row;gap:4px}
+#stack button{flex:1;height:34px}
+#metrics{gap:24px}
+#scstats{grid-template-columns:repeat(3,1fr)}
+#capgrid{grid-template-columns:repeat(7,1fr)}
+#odo{grid-template-columns:repeat(2,1fr)}
+#odo div:last-child{grid-column:1/-1}
+.grp{grid-template-columns:1fr;gap:14px}
+.grow{flex-direction:column;align-items:flex-start;gap:10px}
+.grow .rl{max-width:none}
+.rtx,.acts{text-align:left;justify-content:flex-start}
+}
+#updot{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac);align-self:center}
+.upd{text-align:right}
+.updline{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font:500 12px var(--mono)}
+.updnew{color:var(--ac)}
+.updok{color:var(--ok)}
+.updmuted{color:var(--dim)}
+.updlink{color:var(--out);text-decoration:none;border-bottom:1px dotted var(--pbd)}
+.updlink:hover{color:var(--tx)}
+.updbtn{padding:6px 12px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-family:var(--sans);font-size:12.5px;background:transparent;color:var(--tx)}
+@media(max-width:900px){.upd,.updline{text-align:left;justify-content:flex-start}}
+</style></head><body>
+<div id="wrap">
+
+<div id="top">
+<div id="brand">GARAGE FAN</div><div id="rule"></div>
+<div id="hbits"><span id="hmq">● BROKER —</span><span id="hbat" class="hide"></span><span id="hfw">FW —</span><button id="nav">SETTINGS</button><span id="updot" class="hide" title="a newer release is available"></span></div>
+</div>
+
+<div id="console">
+<div id="conmain">
+<div>
+<div id="hero">
+<div>
+<div style="display:flex;align-items:center;gap:8px"><span class="k">GARAGE</span><span id="stamp">NOW</span></div>
+<div class="t1"><span id="tT">&ndash;</span><span class="deg">&deg;</span></div>
+</div>
+<div class="hcol"><div class="k">OUTSIDE</div><div class="t2" style="color:var(--out)"><span id="tO">&ndash;</span><span class="deg">&deg;</span></div></div>
+<div class="hcol"><div class="k">DIFFERENTIAL</div><div id="dwrap"><span class="t2" id="tD" style="margin-top:0">&ndash;</span><span id="dunit">&deg;F</span></div></div>
+</div>
+
+<div id="gauge">
+<div id="gtrack"></div>
+<div id="gband"></div>
+<div id="gmark"></div>
+<div class="gtick" id="gtr"></div><div class="gtick" id="gte"></div>
+<div class="glab" id="glr">RELEASE &ndash; &#9666;</div>
+<div class="glab" id="gle">&#9656; ENGAGE &ndash;</div>
+</div>
+<div id="reason">Connecting to the controller&hellip;</div>
+
+<div id="acts">
+<button class="pill" id="bauto">auto</button>
+<button class="pill" id="boff">Fan off</button>
+</div>
+
+<div id="metrics">
+<div><div class="k9">AIRFLOW</div><div class="mv" id="mAir">&ndash;</div></div>
+<div><div class="k9">DRAW</div><div class="mv" id="mW">&ndash;</div></div>
+<div id="pwmcell">
+<div class="k9">PWM DUTY</div>
+<div id="pwmrow"><span id="pwmval">&ndash;</span><span id="pwmhint">SIGNAL</span></div>
+<div id="pwmcard" class="hide">
+<h4>CAPTURED WAVEFORM</h4>
+<canvas id="cv_pm"></canvas>
+<div id="pwmfoot"><span id="pwmhigh">&ndash;</span><span id="pwmhz">&ndash;</span></div>
+<div id="pwmnote">Click to open the live signal we replicate.</div>
+</div>
+</div>
+<div><div class="k9">RUN TODAY</div><div class="mv" id="mRun">&ndash;</div></div>
+</div>
+
+<div id="scope" class="hide">
+<div id="scbar">
+<span id="scdot"></span><span id="sctitle">GATE DRIVE</span><span id="scstate">IDLE</span>
+<span id="scknobs"><span id="scdiv">&ndash; ms/div</span><span>1.25 V/div</span><span>TRIG &uarr; CH1</span></span>
+<button id="scclose">CLOSE &#10005;</button>
+</div>
+<canvas id="cv_pw"></canvas>
+<div id="scstats"></div>
+<div style="margin:14px 16px 0">
+<div id="captop"><b>CAPTURE TABLE &mdash; HIGH TIME PER STEP (&micro;s)</b><i>click a step to transmit it</i></div>
+<div id="capgrid"></div>
+</div>
+<div id="scnote">Every speed the OEM remote can send is one high time inside the same frame &mdash; so the frequency never moves, only the width of the pulse does. All twelve were captured off the air, and the controller emits them byte-for-byte from the same table. The trace above is the pulse train on the gate pin at the step you have selected.</div>
+</div>
+</div>
+
+<div id="rail">
+<div id="railtop"><div class="k9">SPEED / 12</div><div id="railnum">&ndash;</div></div>
+<div id="stack"></div>
+</div>
+</div>
+
+<div id="charts">
+<div id="chead">
+<span class="ct" id="chtitle">LAST 24 HOURS</span>
+<span class="cl">ADD ROW</span>
+<span id="chips"></span>
+<span id="ranges"><button data-d="1" class="on">24H</button><button data-d="7">7D</button><button data-d="30">30D</button></span>
+</div>
+<div id="plots">
+<div class="crow"><span class="cn">TEMPERATURE &deg;F</span><span class="cd" id="tcap">band = how much hotter the garage is than the yard &middot; drag across to read any moment</span><span class="cr" id="roT"></span></div>
+<canvas id="cv_t"></canvas>
+<div class="sub hide" id="sub_s"><div class="srow"><span class="cn">FAN 0&ndash;12</span><span class="cr" id="roS"></span></div><canvas id="cv_s"></canvas></div>
+<div class="sub hide" id="sub_h"><div class="srow"><span class="cn">HUMIDITY %</span><span class="cr" id="roH"></span></div><canvas id="cv_h"></canvas></div>
+<div class="sub hide" id="sub_p"><div class="srow"><span class="cn">PRESSURE MB</span><span class="cr" id="roP"></span></div><canvas id="cv_p"></canvas></div>
+<div class="sub hide" id="sub_b"><div class="srow"><span class="cn">BATTERY V</span><span class="cr" id="roB"></span></div><canvas id="cv_b"></canvas></div>
+<canvas id="cv_ax"></canvas>
+</div>
+</div>
+
+<div id="odo"></div>
+</div>
+
+<div id="settings" class="hide">
+<div id="sethead"><h2>Settings</h2><p>Changes apply to the controller immediately &mdash; there is no save step.</p></div>
+<div id="groups"></div>
+</div>
+
+<div id="statwrap">
+<div id="stats"></div>
+<div id="tip" class="hide"><div id="tipt"></div><div id="tipb"></div></div>
+</div>
+
+</div>
+<script>
+"use strict";(()=>{async function O(e){let t=await fetch(e);if(!t.ok)throw new Error(`${e} -> ${t.status}`);return await t.json()}var he=()=>O("/api/state"),ge=()=>O("/api/device"),be=()=>O("/api/stats"),ve=()=>O("/api/sensors"),we=e=>O(`/api/history?days=${e}`),xe=e=>O(`/api/set?speed=${e}`),J=e=>O(`/api/config?${e}`);async function ye(e,t){return(await fetch(`${e}?token=${encodeURIComponent(t)}`)).text()}var Se=e=>ye("/api/restart",e),ke=e=>ye("/api/sdformat",e);async function Ce(e,t){let o=new FormData;return o.append("firmware",e),(await fetch(`/update?token=${encodeURIComponent(t)}`,{method:"POST",body:o})).text()}function Te(e){try{let t=new EventSource(`http://${location.hostname}:8081/`);t.onmessage=o=>{try{e(JSON.parse(o.data))}catch{}}}catch{}}function u(e){let t=document.getElementById(e);if(!t)throw new Error(`missing element #${e}`);return t}function p(e,t={}){return Object.assign(document.createElement(e),t)}function k(e,t){e.classList.toggle("hide",!t)}function _e(e){e.replaceChildren()}function x(e,t){if(!e||t<0||t>=e.length)return null;let o=e[t];return o==null||Number.isNaN(o)?null:o}function Ee(e){let t=e.temp_c?.length??0,o=r=>e.end_ts?e.end_ts-(t-1-r)*e.interval_s:null,n=[];for(let r=0;r<t;r++){let c=o(r);if(c===null){n.push(!1);continue}let i=new Date(c*1e3).getHours();n.push(i>=20||i<6)}let s=r=>r??[];return{n:t,ts:o,night:n,tf:(e.temp_c??[]).map(r=>r===null?null:r*9/5+32),of:(e.out_f??[]).map(r=>r===null||r<=-100?null:r),rh:s(e.rh),hpa:s(e.hpa),spd:e.spd??[],bv:s(e.batt_v),chg:e.chg??[]}}function se(e){return!!e&&e.some(t=>t!==null&&!Number.isNaN(t))}var $e="gf24",ut=86400;function Me(e,t=dt()){if(!e.end_ts||!t)return e;let o={};try{o=JSON.parse(t.getItem($e)??"{}")}catch{o={}}let n=e.temp_c?.length??0;for(let l=0;l<n;l++){let d=e.end_ts-(n-1-l)*e.interval_s;o[String(d)]={t:e.temp_c[l]??null,r:e.rh[l]??null,p:e.hpa[l]??null,o:e.out_f?.[l]??null,s:e.spd?.[l]??0,b:e.batt_v?.[l]??null,c:e.chg?.[l]??-1}}let s=e.end_ts-ut,r=Object.keys(o).map(Number).filter(l=>Number.isFinite(l)&&l>=s).sort((l,d)=>l-d);if(!r.length)return e;let c={interval_s:e.interval_s,end_ts:r[r.length-1],temp_c:[],rh:[],hpa:[],out_f:[],spd:[],batt_v:[],chg:[]},i={};for(let l of r){let d=o[String(l)];c.temp_c.push(d.t),c.rh.push(d.r),c.hpa.push(d.p),c.out_f.push(d.o),c.spd.push(d.s),c.batt_v.push(d.b??null),c.chg.push(d.c??-1),i[String(l)]=d}try{t.setItem($e,JSON.stringify(i))}catch{}return c}function dt(){try{return window.localStorage}catch{return null}}var F="#3b82f6",M="#22a06b",R="#e8834a",B="#b98add",_="#8fa3b8",Re="#6ea8fe",T="#5a6472",ae="#e6e9ed";function L(e){let t=e.offsetWidth,o=e.offsetHeight,n=window.devicePixelRatio||1;if(!t||!o)return null;let s=Math.round(t*n),r=Math.round(o*n);(e.width!==s||e.height!==r)&&(e.width=s,e.height=r);let c=e.getContext("2d");return c?(c.setTransform(n,0,0,n,0,0),c.clearRect(0,0,t,o),{c,W:t,H:o}):null}function ie(e){let t=1/0,o=-1/0;for(let s of e)s==null||Number.isNaN(s)||(s<t&&(t=s),s>o&&(o=s));if(t>o)return null;t===o&&(t-=1,o+=1);let n=(o-t)*.12;return Ae(t-n,o+n)}function Ae(e,t){return{min:e,max:t,ticks:[e,(e+t)/2,t]}}var w=(e,t,o)=>46+e*(t-46-8)/Math.max(o-1,1),S=(e,t,o)=>t-6-(e-o.min)*(t-16)/(o.max-o.min);function z({c:e,W:t,H:o},n,s,r,c){if(c){e.fillStyle="rgba(255,255,255,.035)";let i=0;for(;i<n.n;)if(n.night[i]){let l=i;for(;l<n.n&&n.night[l];)l++;let d=w(i,t,n.n);e.fillRect(d,0,w(l-1,t,n.n)-d||1,o-2),i=l}else i++}e.strokeStyle="#161c24",e.lineWidth=1,e.fillStyle=T,e.font='10px "JetBrains Mono",monospace',e.textAlign="right";for(let i of s.ticks){let l=S(i,o,s);e.beginPath(),e.moveTo(46,l),e.lineTo(t-8,l),e.stroke(),e.fillText(r(i),41,l+3)}}function X({c:e,W:t,H:o},n,s,r,c,i,l){e.strokeStyle=c,e.lineWidth=l,e.lineJoin="round",i&&e.setLineDash([5,4]),e.beginPath();let d=!1;for(let f=0;f<n.n;f++){let m=x(r,f);if(m===null){d=!1;continue}let h=w(f,t,n.n),b=S(m,o,s);d?e.lineTo(h,b):e.moveTo(h,b),d=!0}e.stroke(),e.setLineDash([])}function Q({c:e,W:t,H:o},n,s){if(s<0)return;e.strokeStyle="rgba(230,233,237,.5)",e.lineWidth=1;let r=w(s,t,n.n)+.5;e.beginPath(),e.moveTo(r,0),e.lineTo(r,o-2),e.stroke()}function P({c:e,W:t,H:o},n){e.fillStyle=T,e.font='12px "JetBrains Mono",monospace',e.textAlign="center",e.fillText(n,t/2,o/2)}function Le(e,t,o){let n=L(e);if(!n)return;let{c:s,W:r,H:c}=n;if(t.n<2){P(n,"waiting for data \u2014 one sample every 5 minutes");return}let i=ie([...t.tf,...t.of]);if(!i){P(n,"no data");return}z(n,t,i,l=>`${l.toFixed(0)}\xB0`,!0);for(let l=0;l+1<t.n;l++){let d=x(t.tf,l),f=x(t.tf,l+1),m=x(t.of,l),h=x(t.of,l+1);d===null||f===null||m===null||h===null||(s.beginPath(),s.moveTo(w(l,r,t.n),S(d,c,i)),s.lineTo(w(l+1,r,t.n),S(f,c,i)),s.lineTo(w(l+1,r,t.n),S(h,c,i)),s.lineTo(w(l,r,t.n),S(m,c,i)),s.closePath(),s.fillStyle=(d+f)/2>=(m+h)/2?"rgba(232,131,74,.22)":"rgba(59,130,246,.14)",s.fill())}if(X(n,t,i,t.of,_,!0,2),X(n,t,i,t.tf,R,!1,2.2),o>=0){Q(n,t,o);for(let[l,d]of[[x(t.tf,o),R],[x(t.of,o),_]]){if(l===null)continue;let f=w(o,r,t.n),m=S(l,c,i);s.fillStyle="#0b0e13",s.beginPath(),s.arc(f,m,5,0,7),s.fill(),s.fillStyle=d,s.beginPath(),s.arc(f,m,3.5,0,7),s.fill()}}}function Ne(e,t,o){let n=L(e);if(!n)return;let{c:s,W:r,H:c}=n;if(!t.spd.length){P(n,"fan history is only kept for the last 24 hours");return}let i=Ae(0,12);z(n,t,i,f=>f.toFixed(0),!1);let l=f=>t.spd[f]??0;s.fillStyle="rgba(59,130,246,.28)",s.strokeStyle=F,s.lineWidth=1.6,s.beginPath(),s.moveTo(w(0,r,t.n),S(0,c,i));for(let f=0;f<t.n;f++)s.lineTo(w(f,r,t.n),S(l(f),c,i)),f+1<t.n&&s.lineTo(w(f+1,r,t.n),S(l(f),c,i));s.lineTo(w(t.n-1,r,t.n),S(0,c,i)),s.closePath(),s.fill(),s.beginPath();let d=l(0);s.moveTo(w(0,r,t.n),S(d,c,i));for(let f=1;f<t.n;f++)s.lineTo(w(f,r,t.n),S(d,c,i)),s.lineTo(w(f,r,t.n),S(l(f),c,i)),d=l(f);s.stroke(),Q(n,t,o)}function le(e,t,o,n,s,r,c){let i=L(e);if(!i)return;if(!se(o)){P(i,r);return}let l=ie(o);if(!l){P(i,r);return}z(i,t,l,s,!1),X(i,t,l,o,n,!1,2),Q(i,t,c)}function He(e,t,o){let n=L(e);if(!n)return;let{c:s,W:r,H:c}=n;if(!se(t.bv)){P(n,"battery history is only kept for the last 24 hours");return}let i=ie(t.bv);if(!i){P(n,"no battery data");return}s.fillStyle="rgba(59,130,246,.14)";let l=0;for(;l<t.n;)if(t.chg[l]===1){let d=l;for(;d<t.n&&t.chg[d]===1;)d++;let f=w(l,r,t.n);s.fillRect(f,0,w(d-1,r,t.n)-f||1,c-2),l=d}else l++;z(n,t,i,d=>d.toFixed(2),!1),X(n,t,i,t.bv,B,!1,2),Q(n,t,o)}function Oe(e,t,o){let n=L(e);if(!n)return;let{c:s,W:r}=n;if(t.n<2)return;s.fillStyle=T,s.font='10px "JetBrains Mono",monospace',s.textAlign="center";let c=r<520?70:120,i=Math.max(1,Math.ceil(t.n/Math.max(3,Math.floor((r-46-8)/c))));for(let l=0;l<t.n;l+=i){let d=t.ts(l);if(d===null)continue;let f=new Date(d*1e3),m=o===1?`${String(f.getHours()).padStart(2,"0")}:${String(f.getMinutes()).padStart(2,"0")}`:`${f.getMonth()+1}/${f.getDate()} ${f.getHours()}h`;s.fillText(m,Math.min(Math.max(w(l,r,t.n),22),r-24),14)}}var Z={fan:F,humidity:Re,pressure:M,battery:B};function j(e){let t=Math.max(0,Math.floor(e));return`${Math.floor(t/3600)}h${String(Math.floor(t%3600/60)).padStart(2,"0")}m`}function ce(e){let t=new Date(e*1e3);return`${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`}function Fe(e){let t=Math.max(0,Math.round(e));if(t<60)return`${t} MIN AGO`;let o=t%60;return`${Math.floor(t/60)}H${o?String(o).padStart(2,"0"):""} AGO`}function Pe(e,t=1){return(e>=0?"+":"")+e.toFixed(t)}function De(e){return e<=0?"Still":e<=3?"Trickle":e<=6?"Steady":e<=9?"Strong":"Full tilt"}function ee(e,t){return`${(e/1024).toFixed(2)} / ${(t/1024).toFixed(1)} GB`}function K(e,t,o,n,s,r,c,i,l,d){let f=d,m=o-d,h=t/s,b=-r*h;if(e.save(),e.beginPath(),e.rect(0,0,t,o),e.clip(),l&&n>0){e.fillStyle=l;for(let y=-1;y<=s+1;y++)e.fillRect(b+y*h,f,Math.max(n*h,1),m-f)}if(e.strokeStyle=c,e.lineWidth=i,e.lineJoin="miter",e.lineCap="butt",e.beginPath(),n<=0)e.moveTo(0,m),e.lineTo(t,m);else{e.moveTo(b-h,f);for(let y=-1;y<=s+1;y++){let $=b+y*h,E=$+n*h,I=$+h;e.lineTo(E,f),e.lineTo(E,m),e.lineTo(I,m),e.lineTo(I,f)}}e.stroke(),e.restore()}function te(e,t){let o=L(e);if(!o)return;let{c:n,W:s,H:r}=o;n.fillStyle="#060a10",n.fillRect(0,0,s,r),n.fillStyle="rgba(120,160,210,.14)";for(let c=2;c<s;c+=6)for(let i=0;i<=2;i++)n.fillRect(c,Math.round(6+i*(r-12)/2),1,1);n.shadowColor="rgba(90,165,255,.7)",n.shadowBlur=8,K(n,s,r,t.duty,3,0,"#3b82f6",1.8,"rgba(59,130,246,.12)",6),n.shadowBlur=4,n.shadowColor="rgba(200,230,255,.9)",K(n,s,r,t.duty,3,0,"#d6e8ff",.9,null,6),n.shadowBlur=0}var W=4;function ne(e,t,o,n){let s=L(e);if(!s)return;let{c:r,W:c,H:i}=s,{duty:l}=t,d=c/W,f=i-34,m=12,h=f-12,b=i-22;r.fillStyle="#060a10",r.fillRect(0,0,c,f);let y=d/5,$=(h-m)/4;r.fillStyle="rgba(120,165,215,.13)";for(let g=-(o*d%y);g<c;g+=y)for(let v=0;v<=4;v++)r.fillRect(Math.round(g),Math.round(m+v*$),1,1);r.strokeStyle="rgba(120,165,215,.07)",r.lineWidth=1;for(let g=0;g<=W;g++){let v=Math.round(-o*d+g*d)+.5;r.beginPath(),r.moveTo(v,m-6),r.lineTo(v,h+6),r.stroke()}r.setLineDash([2,5]),r.strokeStyle="rgba(120,165,215,.16)";for(let g of[m,h])r.beginPath(),r.moveTo(0,g+.5),r.lineTo(c,g+.5),r.stroke();r.setLineDash([]);for(let g=4;g>=1;g--){let v=(.05+.035*(5-g)/4).toFixed(3);K(r,c,f,l,W,o-g*.008,`rgba(59,130,246,${v})`,2+g*.9,null,12)}if(r.shadowColor="rgba(90,165,255,.85)",r.shadowBlur=15,K(r,c,f,l,W,o,"#3b82f6",2.4,"rgba(59,130,246,.10)",12),r.shadowBlur=7,r.shadowColor="rgba(200,230,255,.95)",K(r,c,f,l,W,o,"#d6e8ff",1,null,12),r.shadowBlur=0,l>0){let g=-o*d;for(let v=-1;v<=W+1;v++){let C=g+v*d;if(C<-3||C>c+3)continue;let H=r.createLinearGradient(C,m,C,h);H.addColorStop(0,"rgba(207,228,255,.45)"),H.addColorStop(1,"rgba(207,228,255,0)"),r.fillStyle=H,r.fillRect(C-1,m,2,h-m),r.fillStyle="#eaf3ff",r.beginPath(),r.arc(C,m,2.1,0,7),r.fill()}}let E=n/2600%1*(c+140)-70,I=r.createLinearGradient(E-80,0,E,0);I.addColorStop(0,"rgba(120,180,255,0)"),I.addColorStop(1,"rgba(120,180,255,.11)"),r.fillStyle=I,r.fillRect(E-80,0,80,f),r.fillStyle="rgba(0,0,0,.10)";for(let g=0;g<f;g+=3)r.fillRect(0,g,c,1);r.strokeStyle="rgba(120,165,215,.30)",r.lineWidth=1;for(let[g,v,C,H]of[[0,0,1,1],[c,0,-1,1],[0,f,1,-1],[c,f,-1,-1]])r.beginPath(),r.moveTo(g+C*9.5,v+H*.5),r.lineTo(g+C*.5,v+H*.5),r.lineTo(g+C*.5,v+H*9.5),r.stroke();r.font='9.5px "JetBrains Mono",monospace',r.textAlign="left";for(let[g,v]of[["5 V",m],["0 V",h]]){let C=r.measureText(g).width+9;r.fillStyle="rgba(6,10,16,.94)",r.fillRect(0,v-6,C,13),r.fillStyle="#63748c",r.fillText(g,4,v+3.5)}let U=-o*d+d,me=U+l*d,re=U+d;r.strokeStyle="#39424e",r.lineWidth=1,r.beginPath(),r.moveTo(U,b),r.lineTo(re,b),r.stroke();for(let g of[U,me,re])r.beginPath(),r.moveTo(g+.5,b-4),r.lineTo(g+.5,b+4),r.stroke();r.textAlign="center",l>.1&&(r.fillStyle="#8fb6e8",r.fillText(`${t.highUs} \xB5s high`,(U+me)/2,b+13)),r.fillStyle=T,r.fillText(`${t.periodUs} \xB5s frame`,(U+re)/2,b-9)}var Ie=e=>(e/5e3).toFixed(2);var N=(e,t,o)=>Math.min(o,Math.max(t,Number(e.toFixed(2))));function Ue(e){let t=e.state,o=e.info,n=e.setConfig,s=t.on_f,r=t.off_f,c=(l,d,f,m,h)=>({kind:"step",label:l,hint:d,value:f,dec:m,inc:h}),i=(l,d,f)=>({kind:"text",label:l,hint:d,value:f});return[{title:"AUTO MODE",blurb:"The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles.",rows:[c("Engage above","Garage must be this many degrees hotter than the yard before auto drives the fan to its hold speed.",`+${s.toFixed(1)} \xB0F`,()=>n(`onf=${N(s-.5,r+.5,20)}`),()=>n(`onf=${N(s+.5,.5,20)}`)),c("Release below","Fan drops back to the rest speed once the gap falls under this. Keep it well under the engage point or the fan chatters.",`+${r.toFixed(1)} \xB0F`,()=>n(`offf=${N(r-.5,0,20)}`),()=>n(`offf=${N(r+.5,0,s-.5)}`)),c("Hold speed","Speed auto holds while the differential is above the engage point \u2014 partial venting wastes the gap.",`${t.auto_max} / 12`,()=>n(`max=${Math.max(1,t.auto_max-1)}`),()=>n(`max=${Math.min(12,t.auto_max+1)}`)),c("Rest speed","Speed auto falls back to once inside and outside have equalized. Zero means the fan stops.",t.auto_min===0?"off":`${t.auto_min} / 12`,()=>n(`min=${Math.max(0,t.auto_min-1)}`),()=>n(`min=${Math.min(12,t.auto_min+1)}`)),{kind:"toggle",label:"Auto mode",hint:"When off, the fan holds whatever speed you set by hand until you turn auto back on.",on:t.auto,toggle:e.toggleAuto}]},{title:"SENSORS",blurb:"Calibration and sampling. Every stored reading is corrected before it is written, so changes here do not rewrite history.",rows:[c("Probe offset \xB7 charging","Correction added to the garage sensor while the pack is charging, when the board runs warmest.",`${t.offc>0?"+":""}${t.offc.toFixed(1)} \xB0C`,()=>n(`offc=${N(t.offc-.1,-15,15)}`),()=>n(`offc=${N(t.offc+.1,-15,15)}`)),c("Probe offset \xB7 idle","Correction added to the garage sensor the rest of the time.",`${t.offi>0?"+":""}${t.offi.toFixed(1)} \xB0C`,()=>n(`offi=${N(t.offi-.1,-15,15)}`),()=>n(`offi=${N(t.offi+.1,-15,15)}`)),i("Garage probe",t.sensor?"On-board BME280 \u2014 temperature, humidity and pressure.":"The on-board BME280 did not answer at boot; garage readings are unavailable.",t.sensor?"BME280 OK":"NOT FOUND"),i("Outside temperature","Subscribed topic the yard reading arrives on. A reading older than 30 minutes counts as stale and auto holds.",o?.topic_out??"\u2013"),i("Sample interval","How often a reading is taken, logged to the card and pushed into the 24 h ring.",o?`${o.sample_s/60} min`:"\u2013")]},{title:"NETWORK",blurb:"Where the controller publishes and how it is reached. Local logging on the card continues through any outage.",rows:[i("MQTT broker","Address the controller publishes state to and takes commands from.",o?.broker??"\u2013"),i("Link","Access point joined at boot, and the current signal.",`${o?.ssid??"\u2013"} \xB7 ${t.rssi} dBm`),i("Address","Where this page is served from.",`${t.ip||"\u2013"}${o?` \xB7 ${o.host}.local`:""}`),i("Command topic","Publish a speed 0\u201312 here to drive the fan from anywhere.",o?.topic_set??"\u2013")]},{title:"POWER",blurb:"The backup pack that keeps the controller alive and logging when the USB supply drops out. The fan itself runs from its own 12 V brick.",rows:[i("Cell voltage","Live pack voltage \u2014 the same series plotted in the BATTERY chart row.",t.batt?`${t.batt.v.toFixed(3)} V`:"no pack detected"),i("Charge state","Sticky verdict from the voltage slope, so trickle charging does not flap the temperature offset.",t.batt?`${t.batt.chg?"charging":"discharging"}${t.batt.mvh!==null?` \xB7 ${t.batt.mvh>=0?"+":""}${t.batt.mvh} mV/h`:""}`:"\u2013"),i("Estimated runtime","Hours left at the current discharge slope. Blank while charging or flat.",t.batt?.eta_h!=null?`${t.batt.eta_h.toFixed(1)} h`:"\u2013")]},{title:"DEVICE",blurb:"Identity, storage and maintenance. A restart takes about eight seconds and does not clear logs.",rows:[i("Firmware","Running image and slot. See SLOT in the status bar for what \u201Cconfirmed\u201D means.",`${t.fw} \xB7 ${t.slot} \xB7 ${t.confirmed?"confirmed":"unconfirmed"}`),i("Device ID","Unique controller identifier, derived from the radio MAC.",o?.id??"\u2013"),i("Uptime",`Time since the last reboot.${t.prev_death&&t.prev_death!=="none"?` Previous boot ended in ${t.prev_death}.`:""}`,`${j(t.uptime_s)} \xB7 boot ${t.boots}`),i("Log storage","microSD card holding the per-month CSV files behind the 7-day and 30-day ranges.",t.sd_total_mb?ee(t.sd_used_mb,t.sd_total_mb):t.sd_q?"quarantined":"not mounted"),{kind:"actions",label:"Maintenance",hint:"Restart reboots into the same slot. Formatting the card erases every stored sample and needs the update token.",actions:[{text:"Download 24 h CSV",href:"/download.csv"},{text:"Restart",run:e.restart},{text:"Format SD card",run:e.formatCard,danger:!0}]}]},{title:"UPDATE",blurb:"Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.",rows:[{kind:"update",label:"Latest release",hint:"Your browser asks GitHub \u2014 the controller itself never talks to the internet.",status:e.update,recheck:e.recheckUpdate},{kind:"ota",label:"Upload firmware",hint:"Pick the firmware.bin from a release (or from make build), enter the update token, and the board reboots into it."}]}]}function Be(e,t){e.replaceChildren(...t.map(ft))}function ft(e){let t=p("div",{className:"grp"}),o=p("div");o.append(p("div",{className:"gt",textContent:e.title}),p("div",{className:"gb",textContent:e.blurb}));let n=p("div",{className:"grows"});return n.append(...e.rows.map(pt)),t.append(o,n),t}function pt(e){let t=p("div",{className:"grow"}),o=p("div",{className:"rl"});return o.append(p("div",{className:"rlab",textContent:e.label}),p("div",{className:"rh",textContent:e.hint})),t.append(o,mt(e)),t}function mt(e){switch(e.kind){case"step":{let t=p("div",{className:"stp"});return t.append(p("button",{textContent:"\u2212",onclick:e.dec}),p("span",{textContent:e.value}),p("button",{textContent:"+",onclick:e.inc})),t}case"toggle":{let t=p("button",{className:`tgl${e.on?" on":""}`,onclick:e.toggle});return t.append(p("i")),t}case"text":return p("div",{className:"rtx",textContent:e.value});case"actions":{let t=p("div",{className:"acts"});for(let o of e.actions)if(o.href)t.append(p("a",{textContent:o.text,href:o.href}));else{let n=p("button",{textContent:o.text});o.danger&&(n.className="danger"),o.run&&(n.onclick=o.run),t.append(n)}return t}case"update":return ht(e.status,e.recheck);case"ota":return gt()}}function ht(e,t){let o=p("div",{className:"upd"}),n=p("div",{className:"updline"});return e===null?n.append(p("span",{className:"updmuted",textContent:"checking\u2026"})):e.kind==="available"?(n.append(p("span",{className:"updnew",textContent:`${e.latest} available`})),n.append(p("a",{className:"updlink",textContent:"release notes",href:e.release.html_url,target:"_blank",rel:"noopener noreferrer"})),e.asset?n.append(p("a",{className:"updlink",textContent:"download .bin",href:e.asset.browser_download_url})):n.append(p("span",{className:"updmuted",textContent:"no binary attached yet"}))):e.kind==="up-to-date"?n.append(p("span",{className:"updok",textContent:`up to date (${e.latest})`})):n.append(p("span",{className:"updmuted",textContent:`unknown \u2014 ${e.reason}`})),n.append(p("button",{className:"updbtn",textContent:"Check again",onclick:t})),o.append(n),o}function gt(){let e=p("div"),t=p("div",{id:"otarow"}),o=p("input",{className:"fld",id:"ota_f",type:"file",accept:".bin"}),n=p("input",{className:"fld",id:"ota_t",type:"password",placeholder:"update token",autocomplete:"off"}),s=p("button",{id:"ota_go",textContent:"Upload"});t.append(o,n,s);let r=p("div",{id:"otamsg"});return e.append(t,r),k(r,!0),e}var bt=/^v?(\d+)\.(\d+)\.(\d+)$/;function We(e){let t=bt.exec(e.trim());if(!t)return null;let o=Number(t[1]),n=Number(t[2]),s=Number(t[3]);return o>2e3||n>999||s>999?null:o*1e6+n*1e3+s}function vt(e,t){return e===null||t===null?"unknown":t>e?"newer":t===e?"current":"older"}function Ge(e,t){return vt(We(e),We(t))}function wt(e){for(let t of e){let o=t.name.toLowerCase();if(o.endsWith(".bin")&&!o.endsWith(".factory.bin"))return t}return null}function xt(e,t){let n=t.filter(r=>!r.draft&&!r.prerelease)[0];if(!n)return{kind:"unknown",reason:"no published releases yet"};let s=Ge(e,n.tag_name);return s==="unknown"?{kind:"unknown",reason:`cannot compare "${e}" with "${n.tag_name}"`}:s==="newer"?{kind:"available",latest:n.tag_name,release:n,asset:wt(n.assets)}:{kind:"up-to-date",latest:n.tag_name}}async function yt(e,t=fetch,o=5){let n=`https://api.github.com/repos/${e}/releases?per_page=${o}`,s=await t(n,{headers:{Accept:"application/vnd.github+json"}});if(!s.ok)throw new Error(`github returned ${s.status}`);let r=await s.json();if(!Array.isArray(r))throw new Error("unexpected releases payload");return r}async function Ve(e,t,o=fetch){try{return xt(t,await yt(e,o))}catch(n){return{kind:"unknown",reason:n instanceof Error?n.message:String(n)}}}var a={state:null,info:null,stats:null,live:null,series:null,history:null,update:null,days:1,scrub:-1,screen:"console",scopeOpen:!1,previewOpen:!1,tip:-1,rows:{fan:!0,humidity:!1,pressure:!1,battery:!1},phase:0,raf:null},Ze={fan:{sub:"sub_s",canvas:"cv_s",readout:"roS"},humidity:{sub:"sub_h",canvas:"cv_h",readout:"roH"},pressure:{sub:"sub_p",canvas:"cv_p",readout:"roP"},battery:{sub:"sub_b",canvas:"cv_b",readout:"roB"}},et=[{key:"RSSI",title:"WI-FI SIGNAL",body:"How strong the controller\u2019s link to the house access point is. Around \u221261 dBm is a solid connection; below about \u221280 dBm the MQTT session starts dropping and telemetry gaps show up in the charts."},{key:"SD",title:"LOG STORAGE",body:"Space used by on-device logs on the microSD card. Every 5-minute sample is written locally first, then published \u2014 so a broker outage never loses history. The card is mounted lazily and quarantined if a mount ever crashes the board."},{key:"VBAT",title:"BATTERY VOLTAGE",body:"Live cell voltage of the backup pack \u2014 the same series plotted in the BATTERY row. Roughly 4.10 V is full and 3.3 V is empty. The pack keeps the controller logging when the USB supply drops out; the fan itself runs from its own 12 V brick."},{key:"T-OFFSET",title:"PROBE CALIBRATION",body:"A fixed correction added to every garage temperature reading to cancel heat the board adds to its own sensor. Charging warms the board much more than idle does, so there are two values \u2014 set both in Settings \u203A Sensors after comparing against a reference thermometer."},{key:"UPTIME",title:"TIME SINCE BOOT",body:"How long the controller has been running without a reboot. A number that keeps resetting to zero usually means brownouts on the supply rather than a firmware crash \u2014 the status line also carries the previous boot\u2019s cause of death."},{key:"SLOT",title:"FIRMWARE SLOT",body:"The device keeps two firmware images, app0 and app1, and boots whichever was flashed last. \u201CConfirmed\u201D means this image came up cleanly and checked in with the broker, so it is now the permanent choice \u2014 an unconfirmed image rolls back to the other slot rather than boot-looping."}];function D(){let e=a.info?.period_us??9934,t=a.state?.speed??0,o=t>0?a.info?.high_us[t]??0:0;return{duty:o/e,highUs:o,periodUs:e}}function tt(){if(!a.scopeOpen||a.screen!=="console"){a.raf=null;return}a.phase=performance.now()/1900%1,ne(u("cv_pw"),D(),a.phase,performance.now()),a.raf=requestAnimationFrame(tt)}function nt(){ne(u("cv_pw"),D(),a.phase,performance.now()),a.raf===null&&(a.raf=requestAnimationFrame(tt))}function ot(){a.raf!==null&&(cancelAnimationFrame(a.raf),a.raf=null)}function rt(){let e=a.series;return!e||!e.n?-1:a.scrub>=0?a.scrub:e.n-1}function ue(){let e=D(),t=a.state?.speed??0,o=(e.highUs/e.periodUs*100).toFixed(1),n=u("pwmval");n.textContent=`${o}%`,n.className=a.scopeOpen||a.previewOpen?"lit":"";let s=u("pwmhint");if(s.textContent=a.scopeOpen?"LIVE \u25BE":"SIGNAL",s.className=a.scopeOpen?"lit":"",u("pwmhigh").textContent=t>0?`${e.highUs} \xB5s high`:"line held low",u("pwmhz").textContent=`${(1e6/e.periodUs).toFixed(1)} Hz`,!a.scopeOpen)return;let r=t>0,c=u("scdot");c.style.background=r?M:"#3d4653",c.style.boxShadow=`0 0 9px ${r?M:"#3d4653"}`;let i=u("scstate");i.textContent=r?"TRANSMITTING":"IDLE",i.style.background=r?"rgba(34,160,107,.16)":"#111823",i.style.color=r?M:"#4a5a6e",u("scdiv").textContent=`${Ie(e.periodUs)} ms/div`;let l=(a.info?.high_us.length??13)-1,d=[["HIGH",`${e.highUs} \xB5s`,F],["LOW",`${e.periodUs-e.highUs} \xB5s`,_],["FRAME",`${e.periodUs} \xB5s`,_],["FREQUENCY",`${(1e6/e.periodUs).toFixed(1)} Hz`,_],["DUTY",`${o}%`,ae],["STEPS LEARNED",`${l} / ${l}`,M]];u("scstats").replaceChildren(...d.map(([h,b,y])=>{let $=p("div");$.style.borderTopColor=y,$.append(p("div",{className:"sk",textContent:h}));let E=p("div",{className:"sv",textContent:b});return E.style.color=y,$.append(E),$}));let m=u("capgrid");Array.from(m.children).forEach((h,b)=>{h.className=b===t?"on":""})}function Y(){let e=a.state;if(!e)return;let t=a.series,o=rt(),n=a.scrub>=0&&o>=0&&t!==null,s=a.live?.ok?a.live.temp_c*9/5+32:null,r=e.outside_f;n?(s=x(t.tf,o),r=x(t.of,o)):s===null&&t&&t.n&&(s=x(t.tf,t.n-1)),u("tT").textContent=s===null?"\u2013":s.toFixed(1),u("tO").textContent=r===null?"\u2013":r.toFixed(1);let c=s!==null&&r!==null?s-r:null;u("tD").textContent=c===null?"\u2013":Pe(c);let i=b=>Math.max(2,Math.min(97,46+b*6.4)),l=u("gband");l.style.left=`${i(e.off_f)}%`,l.style.width=`${Math.max(0,i(e.on_f)-i(e.off_f))}%`,u("gtr").style.left=`${i(e.off_f)}%`,u("gte").style.left=`${i(e.on_f)}%`;let d=u("glr");d.style.left=`${i(e.off_f)}%`,d.textContent=`RELEASE +${e.off_f} \u25C2`;let f=u("gle");f.style.left=`${i(e.on_f)}%`,f.textContent=`\u25B8 ENGAGE +${e.on_f}`;let m=u("gmark");m.style.left=`${c===null?46:i(c)}%`,m.style.opacity=c===null?"0.25":"1";let h=u("stamp");if(n){let b=t.ts(o),y=(t.n-1-o)*(a.history?.interval_s??300)/60;h.textContent=`${b===null?"\u2013":ce(b)} \xB7 ${Fe(y)}`,h.className="scrub"}else h.textContent="NOW",h.className="";u("reason").textContent=St(c,n,o)}function St(e,t,o){let n=a.state;if(!n)return"";let s=n.auto_min>0?`speed ${n.auto_min}`:"off";if(t&&a.series){let c=a.series.ts(o),i=c===null?"that sample":ce(c),l=a.series.spd.length?a.series.spd[o]:void 0,d=l===void 0?"not logged":l>0?`running at ${l}`:"off",f=e===null?"\u2013":e.toFixed(1);return`At ${i} the garage was ${f}\xB0F hotter than the yard and the fan was ${d}. Move off the chart to return to now.`}if(e===null)return`No outdoor reading yet \u2014 auto holds the last speed rather than guessing. The yard temperature arrives over MQTT${a.info?.topic_out?` on ${a.info.topic_out}`:""}.`;if(!n.auto)return`Auto is off \u2014 the fan is at ${n.speed>0?`speed ${n.speed}`:"off"} because you set it by hand. Turn auto back on to let the differential drive it again.`;let r=e.toFixed(1);return e>=n.on_f?`Garage is ${r}\xB0F hotter than the yard \u2014 past the +${n.on_f}\xB0 engage point, so auto is holding speed ${n.auto_max}. It falls back to ${s} when the gap drops under +${n.off_f}\xB0.`:e<=n.off_f?`Garage is only ${r}\xB0F hotter than the yard \u2014 under the +${n.off_f}\xB0 release point, so auto has dropped the fan to ${s}. It engages speed ${n.auto_max} again above +${n.on_f}\xB0.`:`Gap is ${r}\xB0F, inside the +${n.off_f}\xB0/+${n.on_f}\xB0 deadband \u2014 auto is holding ${n.speed>0?`speed ${n.speed}`:"off"} until it crosses a threshold, so the fan does not chatter.`}function st(){let e=a.state;if(!e)return[];let t=e.sd_total_mb?ee(e.sd_used_mb,e.sd_total_mb):e.sd_q?"quarantined":"not mounted";return[{value:`${e.rssi} dBm`,colour:e.rssi>-70?M:e.rssi>-80?R:"#e0a9a9"},{value:t,colour:e.sd_total_mb?_:T},{value:e.batt?`${e.batt.v.toFixed(3)} V`:"no pack",colour:e.batt?B:T},{value:`${e.toff>0?"+":""}${e.toff.toFixed(1)} \xB0C`,colour:R},{value:j(e.uptime_s),colour:_},{value:`${e.slot} \xB7 ${e.confirmed?"confirmed":"unconfirmed"}`,colour:e.confirmed?M:R}]}function kt(){let e=st();if(!e.length)return;u("stats").replaceChildren(...et.map((o,n)=>{let s=p("span",{className:"bit"});s.append(p("b",{textContent:o.key}));let r=p("span",{textContent:e[n]?.value??""});return r.style.color=e[n]?.colour??T,s.append(r),s.onmouseenter=()=>{a.tip=n,q()},s.onmouseleave=()=>{a.tip=-1,q()},s.onclick=()=>{a.tip=a.tip===n?-1:n,q()},s})),q()}function q(){let e=a.tip>=0?et[a.tip]:void 0;if(k(u("tip"),!!e),!e)return;let t=u("tipt");t.textContent=e.title,t.style.color=st()[a.tip]?.colour??T,u("tipb").textContent=e.body}function Ct(){let e=a.series,t=rt();if(!e||t<0)return;let o=x(e.tf,t),n=x(e.of,t);u("roT").textContent=(o===null?"\u2013":`${o.toFixed(1)}\xB0`)+(n===null?"":` / out ${n.toFixed(1)}\xB0`);let s=e.spd.length?e.spd[t]:void 0;u("roS").textContent=s===void 0?"":s>0?`speed ${s}`:"off";let r=x(e.rh,t);u("roH").textContent=r===null?"":`${r.toFixed(0)}%`;let c=x(e.hpa,t);u("roP").textContent=c===null?"":`${c.toFixed(1)} mb`;let i=x(e.bv,t);u("roB").textContent=i===null?"":`${i.toFixed(2)} V${e.chg[t]===1?" \u26A1 charging":""}`}function G(){if(a.screen!=="console")return;let e=a.series;e&&(Le(u("cv_t"),e,a.scrub),a.rows.fan&&Ne(u("cv_s"),e,a.scrub),a.rows.humidity&&le(u("cv_h"),e,e.rh,Z.humidity,t=>t.toFixed(0),"no humidity data",a.scrub),a.rows.pressure&&le(u("cv_p"),e,e.hpa,Z.pressure,t=>t.toFixed(1),"no pressure data",a.scrub),a.rows.battery&&He(u("cv_b"),e,a.scrub),Oe(u("cv_ax"),e,a.days),Ct())}function Tt(){let e=a.stats;if(!e)return;u("mW").textContent=`${e.watts_now.toFixed(0)} W`,u("mRun").textContent=j(e.run_today_s);let t=[["FAN TODAY",(e.run_today_s/3600).toFixed(1),"h",F],["LIFETIME",(e.run_total_s/3600).toFixed(0),"h",_],["ENERGY EST",(e.energy_wh/1e3).toFixed(2),"kWh",B],["24H RANGE",e.samples?`${e.t_min_f.toFixed(0)}\u2013${e.t_max_f.toFixed(0)}`:"\u2013","\xB0F",R],["24H AVERAGE",e.samples?e.t_avg_f.toFixed(1):"\u2013","\xB0F",R]];u("odo").replaceChildren(...t.map(([o,n,s,r])=>{let c=p("div");c.append(p("div",{className:"k9",textContent:o}));let i=p("div",{className:"ov"}),l=p("b",{textContent:n});return l.style.color=r,i.append(l,p("i",{textContent:s})),c.append(i),c}))}function de(e){e&&(a.state=e);let t=a.state;if(!t)return;let o=u("hmq");o.textContent=t.mqtt?"\u25CF BROKER UP":"\u25CF BROKER DOWN",o.className=t.mqtt?"up":"";let n=u("hbat");t.batt?(k(n,!0),n.textContent=(t.batt.chg?"\u26A1 ":"")+(t.batt.pct!==null?`${t.batt.pct}%`:`${t.batt.v.toFixed(2)} V`)):k(n,!1),u("hfw").textContent=`FW ${t.fw}`,u("railnum").textContent=t.speed===0?"off":t.speed<0?"raw":String(t.speed),Array.from(u("stack").children).forEach((s,r)=>{let c=s,i=r+1,l=i<=t.speed&&t.speed>0;c.style.background=l?`rgba(59,130,246,${.2+.055*i})`:"#12161d",c.style.borderColor=i===t.speed?F:l?"rgba(59,130,246,.4)":"#1a2029"}),u("bauto").className=`pill${t.auto?" on":""}`,u("bauto").textContent=t.auto?"auto on":"auto off",u("boff").className=`pill${t.speed===0?" on":""}`,u("mAir").textContent=De(t.speed),ue(),Y(),kt(),a.screen==="settings"&&fe()}function fe(){if(!a.state){_e(u("groups"));return}Be(u("groups"),Ue({state:a.state,info:a.info,update:a.update,setConfig:t=>void oe(()=>J(t)),toggleAuto:()=>void oe(()=>J(`auto=${a.state?.auto?0:1}`)),restart:()=>void je("restart"),formatCard:()=>void je("format"),recheckUpdate:()=>void at(!0)}));let e=document.getElementById("ota_go");e&&(e.onclick=()=>void $t())}async function oe(e){try{de(await e())}catch{}}function pe(e){oe(()=>xe(e))}function _t(e){let t=document.getElementById("ota_t");return t?.value?t.value:window.prompt(e)}async function je(e){let t=_t(e==="restart"?"Update token to restart the controller:":"Update token to format the card:");if(!(!t||!window.confirm(e==="restart"?"Reboot the controller? The fan keeps its current speed through the reset.":"Formatting erases every sample stored on the card. Continue?")))try{window.alert(await(e==="restart"?Se(t):ke(t)))}catch(n){window.alert(`request failed: ${n instanceof Error?n.message:String(n)}`)}}async function $t(){let e=document.getElementById("ota_f")?.files?.[0],t=document.getElementById("ota_t")?.value??"",o=document.getElementById("otamsg");if(o){if(!e){o.textContent="pick firmware.bin first";return}o.textContent=`uploading ${(e.size/1024).toFixed(0)} KB\u2026`;try{o.textContent=await Ce(e,t)}catch(n){o.textContent=`upload failed: ${n instanceof Error?n.message:String(n)}`}}}async function at(e=!1){let t=a.info?.repo,o=a.state?.fw;if(!t||!o||a.update&&!e)return;a.update=await Ve(t,o),a.screen==="settings"&&fe();let n=a.update;k(u("updot"),n.kind==="available")}function Et(e){a.screen=e??(a.screen==="console"?"settings":"console"),k(u("console"),a.screen==="console"),k(u("settings"),a.screen==="settings");let t=u("nav");t.textContent=a.screen==="settings"?"\u2190 CONSOLE":"SETTINGS",t.className=a.screen==="settings"?"on":"",a.tip=-1,q(),a.screen==="console"?(G(),a.previewOpen&&te(u("cv_pm"),D()),a.scopeOpen&&nt()):(ot(),fe())}function Ke(e){let t=a.scopeOpen?!1:e;a.previewOpen!==t&&(a.previewOpen=t,k(u("pwmcard"),t),ue(),t&&te(u("cv_pm"),D()))}function qe(e){e?.stopPropagation(),a.scopeOpen=!a.scopeOpen,a.previewOpen=!1,k(u("pwmcard"),!1),k(u("scope"),a.scopeOpen),ue(),a.scopeOpen?nt():ot()}function Mt(e){a.days=e,a.scrub=-1,Array.from(u("ranges").children).forEach(t=>{let o=t;o.className=Number(o.dataset.d)===e?"on":""}),u("chtitle").textContent=e===1?"LAST 24 HOURS":`LAST ${e} DAYS`,u("tcap").textContent=e===1?"band = how much hotter the garage is than the yard \xB7 drag across to read any moment":"garage only \u2014 the card keeps no outdoor series \xB7 drag across to read any moment",it()}function Ye(e){let t=a.series;if(!t||t.n<2)return;let o=u("cv_t").getBoundingClientRect(),n=(e-o.left-46)/(o.width-46-8),s=Math.round(n*(t.n-1)),r=s<0||s>=t.n||n<-.02||n>1.02?-1:s;r!==a.scrub&&(a.scrub=r,G(),Y())}function Je(){a.scrub!==-1&&(a.scrub=-1,G(),Y())}function Rt(){u("stack").replaceChildren(...Array.from({length:12},(t,o)=>{let n=o+1;return p("button",{title:`set speed ${n}`,onclick:()=>pe(n)})}))}function At(){u("chips").replaceChildren(...Object.keys(Ze).map(t=>{let o=p("button",{textContent:t.toUpperCase()});return o.dataset.key=t,o.onclick=()=>{a.rows[t]=!a.rows[t],Xe(),requestAnimationFrame(G)},o})),Xe()}function Xe(){Array.from(u("chips").children).forEach(e=>{let t=e,o=t.dataset.key,n=a.rows[o];t.style.color=n?ae:"#4d5765",t.style.borderColor=n?Z[o]:"transparent",k(u(Ze[o].sub),n)})}function Lt(){let e=a.info;if(!e)return;u("capgrid").replaceChildren(...e.high_us.map((o,n)=>{let s=p("button");return s.append(p("div",{className:"ck",textContent:n===0?"OFF":String(n)}),p("div",{className:"cu",textContent:n===0?"\u2014":String(o)})),s.onclick=r=>{r.stopPropagation(),pe(n)},s}))}async function it(){try{let e=await we(a.days),t=a.days===1?Me(e):e;a.history=t,a.series=Ee(t),G(),Y()}catch{}}async function ze(){try{a.live=await ve()}catch{}try{a.stats=await be(),Tt()}catch{}await it(),Y()}async function Qe(){try{de(await he())}catch{}}async function lt(){Rt(),At(),u("nav").onclick=()=>Et(),u("bauto").onclick=()=>void oe(()=>J(`auto=${a.state?.auto?0:1}`)),u("boff").onclick=()=>pe(0);let e=u("pwmcell");e.onmouseenter=()=>Ke(!0),e.onmouseleave=()=>Ke(!1),e.onclick=()=>qe(),u("scclose").onclick=o=>qe(o),Array.from(u("ranges").children).forEach(o=>{let n=o;n.onclick=()=>Mt(Number(n.dataset.d))});let t=u("plots");t.addEventListener("mousemove",o=>Ye(o.clientX)),t.addEventListener("mouseleave",Je),t.addEventListener("touchmove",o=>{let n=o.touches[0];n&&(Ye(n.clientX),o.preventDefault())},{passive:!1}),t.addEventListener("touchend",Je),window.addEventListener("resize",()=>{G(),a.previewOpen&&te(u("cv_pm"),D()),a.scopeOpen&&ne(u("cv_pw"),D(),a.phase,performance.now())});try{a.info=await ge(),Lt()}catch{}await Qe(),await ze(),at(),Te(de),window.setInterval(()=>void Qe(),15e3),window.setInterval(()=>void ze(),6e4)}lt();})();
+</script></body></html>

@@ -1,7 +1,7 @@
 # ESP32-Garage-Fan - Makefile
 # Simple entry points for common operations
 
-.PHONY: help build flash monitor deploy test test-native test-python lint clean
+.PHONY: help build flash monitor deploy test test-native test-python web lint clean
 
 # Default target
 .DEFAULT_GOAL := help
@@ -55,11 +55,16 @@ test-python: ## Run the pytest suite
 	@echo "$(CYAN)Running python tests...$(NC)"
 	@pytest -q
 
+web: ## Build the console bundle (needs node; output is committed)
+	@echo "$(CYAN)Building web console...$(NC)"
+	@npm --prefix web ci --silent
+	@npm --prefix web run check
+
 lint: ## Run ruff, black and cpplint
 	@echo "$(CYAN)Linting...$(NC)"
 	@ruff check .
 	@black --check .
-	@python -m cpplint $$(find $(PIO_DIR)/src -type f \( -name '*.cpp' -o -name '*.h' \) ! -name 'generated_config.h')
+	@python -m cpplint $$(find $(PIO_DIR)/src -type f \( -name '*.cpp' -o -name '*.h' \) ! -name 'generated_*.h')
 
 clean: ## Clean build artifacts and caches
 	@echo "$(CYAN)Cleaning...$(NC)"

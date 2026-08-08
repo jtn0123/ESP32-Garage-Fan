@@ -1,0 +1,104 @@
+<div id="wrap">
+
+<div id="top">
+<div id="brand">GARAGE FAN</div><div id="rule"></div>
+<div id="hbits"><span id="hmq">● BROKER —</span><span id="hbat" class="hide"></span><span id="hfw">FW —</span><button id="nav">SETTINGS</button><span id="updot" class="hide" title="a newer release is available"></span></div>
+</div>
+
+<div id="console">
+<div id="conmain">
+<div>
+<div id="hero">
+<div>
+<div style="display:flex;align-items:center;gap:8px"><span class="k">GARAGE</span><span id="stamp">NOW</span></div>
+<div class="t1"><span id="tT">&ndash;</span><span class="deg">&deg;</span></div>
+</div>
+<div class="hcol"><div class="k">OUTSIDE</div><div class="t2" style="color:var(--out)"><span id="tO">&ndash;</span><span class="deg">&deg;</span></div></div>
+<div class="hcol"><div class="k">DIFFERENTIAL</div><div id="dwrap"><span class="t2" id="tD" style="margin-top:0">&ndash;</span><span id="dunit">&deg;F</span></div></div>
+</div>
+
+<div id="gauge">
+<div id="gtrack"></div>
+<div id="gband"></div>
+<div id="gmark"></div>
+<div class="gtick" id="gtr"></div><div class="gtick" id="gte"></div>
+<div class="glab" id="glr">RELEASE &ndash; &#9666;</div>
+<div class="glab" id="gle">&#9656; ENGAGE &ndash;</div>
+</div>
+<div id="reason">Connecting to the controller&hellip;</div>
+
+<div id="acts">
+<button class="pill" id="bauto">auto</button>
+<button class="pill" id="boff">Fan off</button>
+</div>
+
+<div id="metrics">
+<div><div class="k9">AIRFLOW</div><div class="mv" id="mAir">&ndash;</div></div>
+<div><div class="k9">DRAW</div><div class="mv" id="mW">&ndash;</div></div>
+<div id="pwmcell">
+<div class="k9">PWM DUTY</div>
+<div id="pwmrow"><span id="pwmval">&ndash;</span><span id="pwmhint">SIGNAL</span></div>
+<div id="pwmcard" class="hide">
+<h4>CAPTURED WAVEFORM</h4>
+<canvas id="cv_pm"></canvas>
+<div id="pwmfoot"><span id="pwmhigh">&ndash;</span><span id="pwmhz">&ndash;</span></div>
+<div id="pwmnote">Click to open the live signal we replicate.</div>
+</div>
+</div>
+<div><div class="k9">RUN TODAY</div><div class="mv" id="mRun">&ndash;</div></div>
+</div>
+
+<div id="scope" class="hide">
+<div id="scbar">
+<span id="scdot"></span><span id="sctitle">GATE DRIVE</span><span id="scstate">IDLE</span>
+<span id="scknobs"><span id="scdiv">&ndash; ms/div</span><span>1.25 V/div</span><span>TRIG &uarr; CH1</span></span>
+<button id="scclose">CLOSE &#10005;</button>
+</div>
+<canvas id="cv_pw"></canvas>
+<div id="scstats"></div>
+<div style="margin:14px 16px 0">
+<div id="captop"><b>CAPTURE TABLE &mdash; HIGH TIME PER STEP (&micro;s)</b><i>click a step to transmit it</i></div>
+<div id="capgrid"></div>
+</div>
+<div id="scnote">Every speed the OEM remote can send is one high time inside the same frame &mdash; so the frequency never moves, only the width of the pulse does. All twelve were captured off the air, and the controller emits them byte-for-byte from the same table. The trace above is the pulse train on the gate pin at the step you have selected.</div>
+</div>
+</div>
+
+<div id="rail">
+<div id="railtop"><div class="k9">SPEED / 12</div><div id="railnum">&ndash;</div></div>
+<div id="stack"></div>
+</div>
+</div>
+
+<div id="charts">
+<div id="chead">
+<span class="ct" id="chtitle">LAST 24 HOURS</span>
+<span class="cl">ADD ROW</span>
+<span id="chips"></span>
+<span id="ranges"><button data-d="1" class="on">24H</button><button data-d="7">7D</button><button data-d="30">30D</button></span>
+</div>
+<div id="plots">
+<div class="crow"><span class="cn">TEMPERATURE &deg;F</span><span class="cd" id="tcap">band = how much hotter the garage is than the yard &middot; drag across to read any moment</span><span class="cr" id="roT"></span></div>
+<canvas id="cv_t"></canvas>
+<div class="sub hide" id="sub_s"><div class="srow"><span class="cn">FAN 0&ndash;12</span><span class="cr" id="roS"></span></div><canvas id="cv_s"></canvas></div>
+<div class="sub hide" id="sub_h"><div class="srow"><span class="cn">HUMIDITY %</span><span class="cr" id="roH"></span></div><canvas id="cv_h"></canvas></div>
+<div class="sub hide" id="sub_p"><div class="srow"><span class="cn">PRESSURE MB</span><span class="cr" id="roP"></span></div><canvas id="cv_p"></canvas></div>
+<div class="sub hide" id="sub_b"><div class="srow"><span class="cn">BATTERY V</span><span class="cr" id="roB"></span></div><canvas id="cv_b"></canvas></div>
+<canvas id="cv_ax"></canvas>
+</div>
+</div>
+
+<div id="odo"></div>
+</div>
+
+<div id="settings" class="hide">
+<div id="sethead"><h2>Settings</h2><p>Changes apply to the controller immediately &mdash; there is no save step.</p></div>
+<div id="groups"></div>
+</div>
+
+<div id="statwrap">
+<div id="stats"></div>
+<div id="tip" class="hide"><div id="tipt"></div><div id="tipb"></div></div>
+</div>
+
+</div>
