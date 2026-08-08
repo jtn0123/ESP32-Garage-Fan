@@ -15,8 +15,6 @@
 //           retained on the broker; whichever answers first wins the tie.
 // OTA:      POST /update?token=...; A/B slots with ota_rollback confirm.
 #include <Adafruit_BME280.h>
-#include <Adafruit_EPD.h>
-#include <Adafruit_GFX.h>
 #include <Adafruit_LC709203F.h>
 #include <Adafruit_MAX1704X.h>
 #include <Arduino.h>
@@ -39,6 +37,7 @@
 #include "system/crashlog.h"
 #include "fan/control.h"
 #include "storage/history.h"
+#include "ui/display.h"
 #include "storage/sdcard.h"
 #include "system/odometer.h"
 #include "sensors/battery.h"
@@ -52,12 +51,7 @@ static PubSubClient g_mqtt(g_net);
 static WebServer g_http(80);
 static WiFiServer g_sse_srv(8081);
 static WiFiClient g_sse[4];
-// 2.13" mono SSD1680 FeatherWing, landscape; no busy/rst pins wired.
-static Adafruit_SSD1680 g_epd(250, 122, EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
 static Preferences g_prefs;
-static char g_last_death[48] = "none";
-static char g_prev_death[48] = "none";  // the boot before this one, from NVS
-static uint32_t g_boots = 0;            // lifetime boot count, NVS
 
 static bool g_services_up = false;
 static bool g_ever_healthy = false;
@@ -66,9 +60,6 @@ static uint32_t g_last_reconnect_ms = 0;
 static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
 static uint32_t g_last_auto_ms = 0;
-static bool g_epd_ok = false;
-static uint32_t g_last_epd_ms = 0;
-static int g_epd_speed_shown = -99;
 static char g_token[40];
 
 static void sse_push();
@@ -145,26 +136,27 @@ static void state_json(char* out, size_t cap) {
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
-  snprintf(
-      out, cap,
-      "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
-      "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
-      "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
-      "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-      "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
-      "\"boots\":%lu,\"prev_death\":\"%s\","
-      "\"sd_q\":%s,"
-      "\"sd_total_mb\":%lu,"
-      "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
-      "\"uptime_s\":%lu,\"ip\":\"%s\"}",
-      fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
-      fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
-      climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
-      ota_rollback_image_confirmed() ? "true" : "false",
-      (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false", g_last_death,
-      (unsigned long)g_boots, g_prev_death, sdcard::quarantined() ? "true" : "false",
-      (unsigned long)sdcard::total_mb(), (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(),
-      g_mqtt.connected() ? "true" : "false", millis() / 1000UL, WiFi.localIP().toString().c_str());
+  snprintf(out, cap,
+           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
+           "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
+           "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
+           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
+           "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
+           "\"boots\":%lu,\"prev_death\":\"%s\","
+           "\"sd_q\":%s,"
+           "\"sd_total_mb\":%lu,"
+           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
+           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
+           fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
+           fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
+           climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
+           ota_rollback_image_confirmed() ? "true" : "false",
+           (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
+           crashlog::last_death(), (unsigned long)crashlog::boots(), crashlog::prev_death(),
+           sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),
+           (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(),
+           g_mqtt.connected() ? "true" : "false", millis() / 1000UL,
+           WiFi.localIP().toString().c_str());
 }
 
 // Never block on an SSE peer. NetworkClient::write retries a 1 s select up
@@ -224,58 +216,6 @@ static void sse_accept() {
     }
   }
   nc.stop();  // table full
-}
-
-static void epd_render() {
-  if (!g_epd_ok)
-    return;
-  CRUMB("epd");
-  g_epd.clearBuffer();
-  g_epd.fillScreen(EPD_WHITE);
-  g_epd.setTextColor(EPD_BLACK);
-  const float tin = history::count() ? history::temp()[history::count() - 1] : NAN;
-  g_epd.setTextSize(4);
-  g_epd.setCursor(4, 18);
-  if (isnan(tin))
-    g_epd.print("--.-");
-  else
-    g_epd.printf("%.1f", tin * 9 / 5 + 32);
-  g_epd.setTextSize(1);
-  g_epd.setCursor(6, 54);
-  g_epd.print("GARAGE F");
-  const float rh = history::count() ? history::rh()[history::count() - 1] : NAN;
-  g_epd.setCursor(70, 54);
-  if (!isnan(rh))
-    g_epd.printf("RH %.0f%%", rh);
-  g_epd.setTextSize(3);
-  g_epd.setCursor(158, 8);
-  if (fan::speed() <= 0)
-    g_epd.print("OFF");
-  else
-    g_epd.printf("F%d", fan::speed());
-  g_epd.setTextSize(1);
-  g_epd.setCursor(158, 38);
-  g_epd.print(fan::auto_on() ? "AUTO ON" : "AUTO OFF");
-  const float oc = climate::outside_c_fresh();
-  g_epd.setCursor(158, 52);
-  if (isnan(oc))
-    g_epd.print("OUT --");
-  else
-    g_epd.printf("OUT %.1fF", oc * 9 / 5 + 32);
-  g_epd.setCursor(158, 66);
-  if (!isnan(battery::volts()))
-    g_epd.printf("BAT %.2fV %.0f%%", battery::volts(),
-                 isnan(battery::percent()) ? 0 : battery::percent());
-  g_epd.setCursor(6, 76);
-  g_epd.printf("run today %luh%02lum  total %luh", (unsigned long)(odometer::run_today_s() / 3600),
-               (unsigned long)(odometer::run_today_s() % 3600 / 60),
-               (unsigned long)(odometer::run_total_s() / 3600));
-  g_epd.setCursor(6, 106);
-  g_epd.printf("%s  fw %s", WiFi.localIP().toString().c_str(), kFwVersion);
-  g_epd.display();
-  CRUMB_CLEAR();
-  g_last_epd_ms = millis();
-  g_epd_speed_shown = fan::speed();
 }
 
 static void handle_stats() {
@@ -776,31 +716,9 @@ void setup() {
   // and the first mount attempt happens ~60 s later from loop(). A card that
   // crashes the mount gets quarantined by the sentinel above -- no card can
   // take fan control down with it.
-  const esp_reset_reason_t rr = esp_reset_reason();
-  const bool abnormal = rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT || rr == ESP_RST_TASK_WDT ||
-                        rr == ESP_RST_WDT || rr == ESP_RST_BROWNOUT;
-  snprintf(g_last_death, sizeof(g_last_death), "%s%s%s", crashlog::reset_reason_str(rr),
-           crashlog::rtc_crumb[0] ? " during " : "",
-           crashlog::rtc_crumb[0] ? crashlog::rtc_crumb : "");
-  // Quarantine on a mount sentinel from any reset, or any abnormal death
-  // while an SD op was in flight.
-  sdcard::set_quarantined((crashlog::rtc_sd_sentinel == crashlog::kSdSentinelMagic) ||
-                          (abnormal && strncmp(crashlog::rtc_crumb, "sd", 2) == 0));
-  crashlog::rtc_sd_sentinel = 0;
-  CRUMB_CLEAR();
+  sdcard::set_quarantined(crashlog::examine_boot(&g_prefs));
   if (sdcard::quarantined())
     Serial.println("[SD] previous boot died in an SD op -- card quarantined");
-  Serial.printf("last reset: %s\n", g_last_death);
-  // Longitudinal forensics: RTC evidence dies with power, NVS doesn't. Keep
-  // the prior boot's certificate and a lifetime boot counter so a reboot
-  // storm is visible from /api/state even after the fact.
-  {
-    String pd = g_prefs.getString("pdeath", "none");
-    snprintf(g_prev_death, sizeof(g_prev_death), "%s", pd.c_str());
-    g_prefs.putString("pdeath", g_last_death);
-    g_boots = g_prefs.getUInt("boots", 0) + 1;
-    g_prefs.putUInt("boots", g_boots);
-  }
   // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
   // in 30 s instead of hanging dark forever. The fan rides through on RMT.
   // 60 s: tolerates worst-case framework writes to one stalled peer (10 s
@@ -812,11 +730,7 @@ void setup() {
   esp_task_wdt_add(NULL);
   Wire.begin();
   SPI.begin();
-  CRUMB("epd_init");
-  g_epd.begin();
-  g_epd.setRotation(1);
-  g_epd_ok = true;
-  CRUMB_CLEAR();
+  display::begin();
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setHostname(FAN_HOSTNAME);
@@ -923,11 +837,7 @@ void loop() {
   g_http.handleClient();
   sse_accept();
   odometer::tick(fan::speed(), fan::watts(fan::speed()));
-  // E-ink: refresh with each sample cycle, or 60 s after a speed change.
-  if (g_epd_ok && history::count() &&
-      ((millis() - g_last_epd_ms >= kSampleMs) ||
-       (fan::speed() != g_epd_speed_shown && millis() - g_last_epd_ms >= 60000)))
-    epd_render();
+  display::maybe_render();
   if (g_last_sample_ms == 0 || millis() - g_last_sample_ms >= kSampleMs) {
     g_last_sample_ms = millis();
     sample_climate();
