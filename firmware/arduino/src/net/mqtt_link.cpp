@@ -7,6 +7,7 @@
 #include <WiFi.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "config.h"

@@ -2,6 +2,9 @@
 // one translation unit.
 #include "system/crashlog.h"
 
+#include <cstdio>
+#include <cstring>
+
 namespace crashlog {
 
 RTC_DATA_ATTR uint32_t rtc_sd_sentinel = 0;

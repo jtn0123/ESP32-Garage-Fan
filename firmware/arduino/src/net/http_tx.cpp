@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 
+#include <cstdio>
+
 #include "esp_task_wdt.h"
 #include "lwip/sockets.h"
 
@@ -51,9 +53,9 @@ void send_big(WiFiClient c, const char* mime, const char* body, size_t len, cons
   const int hn = snprintf(hdr, sizeof(hdr),
                           "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
                           "%sConnection: close\r\n\r\n",
-                          mime, (unsigned)len, extra_hdr);
-  if (!send_bounded(s, hdr, hn) || !send_bounded(s, body, len)) {
-  }
+                          mime, static_cast<unsigned>(len), extra_hdr);
+  if (send_bounded(s, hdr, hn))
+    send_bounded(s, body, len);
   c.stop();  // Connection: close either way; a stalled peer is already gone
 }
 

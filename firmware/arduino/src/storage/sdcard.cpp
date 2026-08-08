@@ -112,7 +112,7 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
       char line[96];
       size_t ll = 0;
       while (f.available()) {
-        const char c = (char)f.read();
+        const char c = static_cast<char>(f.read());
         if (c != '\n') {
           if (ll < sizeof(line) - 1)
             line[ll++] = c;
@@ -182,8 +182,8 @@ bool format() {
 bool ok() { return g_ok; }
 bool quarantined() { return g_quarantined; }
 void set_quarantined(bool q) { g_quarantined = q; }
-uint32_t total_mb() { return g_ok ? (uint32_t)(SD.totalBytes() / 1048576) : 0; }
-uint32_t used_mb() { return g_ok ? (uint32_t)(SD.usedBytes() / 1048576) : 0; }
+uint32_t total_mb() { return g_ok ? static_cast<uint32_t>(SD.totalBytes() / 1048576) : 0; }
+uint32_t used_mb() { return g_ok ? static_cast<uint32_t>(SD.usedBytes() / 1048576) : 0; }
 
 void retry_tick() {
   // First mount attempt ~60 s after boot, then every 10th call (~5 min at the
