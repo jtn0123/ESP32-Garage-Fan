@@ -131,6 +131,20 @@ def c_string(s: str) -> str:
     return '"' + str(s).replace("\\", r"\\").replace('"', r"\"") + '"'
 
 
+def read_version_file() -> str:
+    """The repo-root VERSION file, or "" when it is absent or unreadable.
+
+    Same convention as the sibling projects: one plaintext `major.minor.patch`
+    line that the release pipeline owns. Kept tolerant on purpose -- a missing
+    VERSION falls through to the next source rather than failing the build.
+    """
+    try:
+        with open(os.path.join(str(ROOT), "VERSION"), "r") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def main():
     _load_dotenv_once()
     prj = str(ROOT)
@@ -190,9 +204,18 @@ def main():
     low_pct = int(battery.get("low_pct", 20) or 20)
     # thresholds for redraw skipping
     thresholds = data.get("thresholds", {})
-    # Optional firmware version: allow explicit config/env, else fallback to
-    # git
-    fw_version = str(data.get("fw_version", "") or os.environ.get("FW_VERSION", "") or "")
+    # Firmware version, in precedence order:
+    #   1. $FW_VERSION       -- CI derives this from the release tag
+    #   2. the repo-root VERSION file  -- the canonical product version
+    #   3. device.yaml fw_version      -- legacy per-device override
+    #   4. git describe / short SHA    -- untagged working tree
+    # There used to be a second source: the firmware carried its own hardcoded
+    # kFwVersion literal and never read this define, so a tagged release could
+    # ship a binary reporting a different number than the tag (deploy.sh worked
+    # around it by scraping the .cpp). The firmware now reports FW_VERSION, and
+    # release.yml refuses to publish when the tag and VERSION disagree.
+    fw_version = str(os.environ.get("FW_VERSION", "") or read_version_file() or
+                     data.get("fw_version", "") or "")
     if not fw_version:
         try:
             fw_version = (

@@ -35,12 +35,23 @@ jobs:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('**/platformio.ini') }}
 
-      - name: Derive FW_VERSION from tag
+      # The tag and the VERSION file must agree, because the device reports
+      # FW_VERSION and the update check compares exactly that against the newest
+      # tag on GitHub. If they drift, every device in the field either sees a
+      # phantom update forever or never sees a real one.
+      - name: Derive FW_VERSION from tag and check it matches VERSION
         id: ver
         run: |
           TAG=${GITHUB_REF#refs/tags/}
           # Strip leading 'v' if present for FW_VERSION canonical format
           FW=${TAG#v}
+          FILE=$(tr -d '[:space:]' < VERSION)
+          if [ "$FW" != "$FILE" ]; then
+            echo "::error::tag $TAG implies version '$FW' but VERSION says '$FILE'."
+            echo "Update VERSION and re-tag; a release where these disagree ships a"
+            echo "binary that misreports itself to the update check."
+            exit 1
+          fi
           echo "fw_version=$FW" >> $GITHUB_OUTPUT
 
       - name: Build fan controller firmware
@@ -49,6 +60,29 @@ jobs:
         run: |
           cd firmware/arduino
           pio run -e feather_esp32s2_fan_controller
+
+      # Name the assets after the tag and publish a checksum beside each one.
+      # The update check builds its download URL from the version string rather
+      # than parsing the releases API's asset array, so the names have to be
+      # predictable -- and the glob this replaced matched both firmware.bin and
+      # firmware.factory.bin, leaving no way to tell which was the OTA image.
+      #
+      # The .sha256 sidecars are not decoration. Unlike an Android APK there is
+      # no OS signature gate on the way in: /update accepts whatever bytes it is
+      # handed. Without secure boot, the checksum is the only integrity check
+      # between GitHub and the flash.
+      - name: Stage release assets
+        id: assets
+        run: |
+          set -euo pipefail
+          V=${{ steps.ver.outputs.fw_version }}
+          BUILD=firmware/arduino/.pio/build/feather_esp32s2_fan_controller
+          mkdir -p dist
+          cp "$BUILD/firmware.bin"          "dist/garage-fan-v$V.bin"
+          cp "$BUILD/firmware.factory.bin"  "dist/garage-fan-v$V.factory.bin"
+          cp "$BUILD/firmware.elf"          "dist/garage-fan-v$V.elf"
+          ( cd dist && for f in *.bin; do sha256sum "$f" > "$f.sha256"; done )
+          ls -l dist
 
       # generated_config.h is deliberately NOT published here. It is the output
       # of scripts/gen_device_header.py and carries WIFI_SSID / WIFI_PASS /
@@ -60,9 +94,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: firmware-${{ steps.ver.outputs.fw_version }}
-          path: |
-            firmware/arduino/.pio/build/**/firmware*.bin
-            firmware/arduino/.pio/build/**/firmware*.elf
+          path: dist/*
 
       # SHA-pinned per githubactions:S7637 — see the other third-party actions.
       - name: Create GitHub Release
@@ -72,9 +104,8 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: |
-            firmware/arduino/.pio/build/**/firmware*.bin
-            firmware/arduino/.pio/build/**/firmware*.elf
+          fail_on_unmatched_files: true
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
