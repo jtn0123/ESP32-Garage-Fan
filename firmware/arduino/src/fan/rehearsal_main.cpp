@@ -23,9 +23,8 @@ struct Step {
 static constexpr uint16_t kPeriodUs = 9934;
 // Measured HIGH width per setting, verbatim from PROTOCOL.md.
 static constexpr Step kTable[] = {
-    {0, kPeriodUs}, {1, 6457}, {2, 5862}, {3, 5066},  {4, 4868},
-    {5, 4273},      {6, 3775}, {7, 3180}, {8, 2683},  {9, 2087},
-    {10, 1590},     {11, 994}, {12, 497},
+    {0, kPeriodUs}, {1, 6457}, {2, 5862}, {3, 5066},  {4, 4868}, {5, 4273}, {6, 3775},
+    {7, 3180},      {8, 2683}, {9, 2087}, {10, 1590}, {11, 994}, {12, 497},
 };
 static constexpr uint32_t kDwellMs = 4000;
 
