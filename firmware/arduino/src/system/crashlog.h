@@ -14,6 +14,7 @@
 // crash loop and guessing at it.
 
 #include <Arduino.h>
+#include <Preferences.h>
 #include <stdint.h>
 
 #include "esp_system.h"
@@ -32,6 +33,22 @@ extern uint32_t rtc_sd_sentinel;
 extern char rtc_crumb[16];
 
 const char* reset_reason_str(esp_reset_reason_t r);
+
+/**
+ * Boot-time forensics, called once from setup() before anything risky runs:
+ * names this boot's cause of death (reset reason + the breadcrumb of the op
+ * in flight), rolls the previous verdict into NVS, bumps the lifetime boot
+ * counter, and clears the RTC evidence. Returns true when the previous boot
+ * died inside an SD operation -- the caller quarantines the card on that.
+ */
+bool examine_boot(Preferences* prefs);
+
+/** "panic during sd_mount", or "poweron". What killed the PREVIOUS run. */
+const char* last_death();
+/** The verdict from the boot before that, out of NVS. */
+const char* prev_death();
+/** Lifetime boot counter. */
+uint32_t boots();
 
 }  // namespace crashlog
 
