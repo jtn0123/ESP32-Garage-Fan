@@ -1,0 +1,21 @@
+{
+  "//": "Checker only -- esbuild does the emitting, tsc never writes a file. Full `strict` plus the two flags that catch the bugs this page is actually prone to: noUncheckedIndexedAccess (every history series is an array indexed by a scrub position that may be past the end) and exactOptionalPropertyTypes (the /api/state payload has genuinely optional fields like `batt`, and conflating absent with undefined is how the old page ended up rendering 'undefined%'). Run via `npm run typecheck`.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

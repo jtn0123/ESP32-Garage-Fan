@@ -28,17 +28,18 @@ pio run -d "$ROOT/firmware/arduino" -e "$ENV"
 BIN="$ROOT/firmware/arduino/.pio/build/$ENV/firmware.bin"
 [ -f "$BIN" ] || { echo "ABORT: no firmware.bin at $BIN"; exit 1; }
 
-# The version this build carries, read from the firmware's own single source of
-# truth. Read before flashing so a failed verify can say which version we
-# EXPECTED to see. (Deliberately not FW_VERSION from generated_config.h: the fan
-# controller never reads that define -- it reports kFwVersion -- so comparing
-# against it would verify a number the device does not serve.)
-EXPECTED_FW=$(sed -n 's/^static const char\* kFwVersion = "\(.*\)";/\1/p' \
-  "$ROOT/firmware/arduino/src/fan_controller_main.cpp" | head -1)
+# The version this build carries. Read from the generated header rather than
+# the VERSION file, because the header is what the compiler actually saw: if a
+# stale build is sitting in .pio, this catches it instead of verifying against a
+# number that was never flashed. Read before flashing so a failed verify can say
+# which version we EXPECTED to see.
+EXPECTED_FW=$(sed -n 's/^#define FW_VERSION "\(.*\)"$/\1/p' \
+  "$ROOT/firmware/arduino/src/generated_config.h" 2>/dev/null | head -1)
 if [ -z "$EXPECTED_FW" ]; then
-  echo "ABORT: could not read kFwVersion from fan_controller_main.cpp."
-  echo "Without it the post-deploy verify would compare empty against empty and"
-  echo "report VERIFIED for any device that answers."
+  echo "ABORT: could not read FW_VERSION from generated_config.h."
+  echo "Build first (make build) so the header exists. Without it the"
+  echo "post-deploy verify would compare empty against empty and report"
+  echo "VERIFIED for any device that answers."
   exit 1
 fi
 

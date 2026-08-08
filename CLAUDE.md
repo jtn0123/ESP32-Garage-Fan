@@ -25,13 +25,29 @@ It is a SEPARATE project now.
 - Active firmware: `firmware/arduino`, envs `feather_esp32s2_fan_controller`
   (the product) and `feather_esp32s2_fan_rehearsal` (logic-analyzer validation).
   Both are in `default_envs`, so a bare `pio run` (and CI) builds them.
+- Firmware layout: `src/{config.h,fan,sensors,storage,net,ui,system}/`, one
+  concern per module, each owning its statics behind a narrow API (see
+  `ota_rollback` for the original pattern). `fan_controller_main.cpp` is a
+  ~160-line orchestrator — boot order, loop cadences, and the cross-module
+  glue (the fan notify hook, the 5-minute sample fan-out). Do not grow
+  globals or handlers back into it; new state belongs in the module that
+  owns the concern, and no source file should exceed 500 lines.
+- `tests/test_web_contract.py` pins every firmware JSON writer to the
+  interfaces in `web/src/types.ts`, wherever the functions live. If you
+  rename or add a wire field, change both sides or pytest fails.
+- The web console is TypeScript under `web/`. Never hand-edit
+  `web/dist/console.html` or `src/generated_page.h`: both are build output.
+- `VERSION` at the repo root is the only firmware version. Do not hardcode one
+  in C++ again.
 - The whole repo is the fan now. The inherited ESP32-Temp-Sensor room-node
   subsystems — e-ink display firmware, UI-spec codegen, web simulator, device
   manager, icon pipeline, CAD, ESPHome, Rust stub — were deleted in the
   fan-only cleanup. `firmware/arduino/src` holds five files. Do not resurrect
   any of it without an explicit request; port from upstream instead.
 - Protocol ground truth: `docs/fan_protocol/PROTOCOL.md` + raw `.sr` captures.
-  The duty table is measured, not derived — do not "clean it up".
+  The duty table is measured, not derived — do not "clean it up". There is no
+  tach or feedback line: D− was measured idling high, so anything needing RPM
+  or stall detection needs new hardware first.
 - OTA: POST firmware.bin to `/update?token=...` (A/B slots; ota_rollback
   confirms an image only after it reaches the MQTT broker).
 - WiFi/MQTT credentials come from a gitignored `.env` at repo root via

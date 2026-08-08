@@ -12,8 +12,18 @@ cable into a computer: the fan drives 5 V out on VBUS.
 
 ## Features
 
-- **Web UI** at `http://garage-fan.local/` — speed 0–12, live status
-- **HTTP API** — `GET /api/state`, `GET /api/set?speed=0..12`
+- **Fan Console** at `http://garage-fan.local/` — differential-first: garage
+  and yard temperature with the gap between them, a gauge placing that gap
+  against the engage/release band, speed 0–12, and a 24 h / 7 d / 30 d chart
+  you can drag across to read any moment. The PWM readout opens a live scope
+  of the gate-drive waveform next to the captured duty table, and Settings
+  edits the auto thresholds, probe offsets and maintenance actions in place.
+- **Update check** — the console asks GitHub Releases whether a newer tag
+  exists and links the `.bin`; the controller itself never talks to the
+  internet, so there is no TLS stack on the device
+- **HTTP API** — `GET /api/state`, `GET /api/set?speed=0..12`,
+  `GET /api/device` (duty table, identity, broker), `GET /api/history?days=`,
+  `GET /api/stats`
 - **MQTT** — `garage/fan/set` / `garage/fan/state` / `garage/fan/availability`,
   retained commands resume after power loss
 - **OTA updates** — `POST /update?token=...`, written to the inactive A/B
@@ -37,7 +47,20 @@ make build          # build the fan controller firmware
 make flash          # build + flash over USB
 make deploy IP=...  # build + OTA + verify (defaults to garage-fan.local)
 make test           # native Unity tests + pytest
+make web            # typecheck + test + rebuild the console bundle (needs node)
 ```
+
+The version in `VERSION` is the single source of truth: `gen_device_header.py`
+turns it into `FW_VERSION`, the firmware reports it on `/api/state`, and the
+release workflow refuses to publish a tag that disagrees with it.
+
+The web console lives in `web/` as TypeScript and is bundled into one
+self-contained HTML file at `web/dist/console.html`, which **is committed** —
+the firmware build runs with only Python and PlatformIO, so `pio run` never
+needs node. A PlatformIO pre-script gzips that file into
+`src/generated_page.h` (52 KB of HTML becomes 18 KB of flash) and the device
+serves it with `Content-Encoding: gzip`. If you edit anything under `web/src`,
+run `make web` and commit the regenerated bundle; CI fails the PR otherwise.
 
 WiFi/MQTT credentials come from a gitignored `.env` at the repo root (copy
 `.env.example`), which `scripts/gen_device_header.py` turns into
