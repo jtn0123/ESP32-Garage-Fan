@@ -4,7 +4,7 @@
 //
 // Control:  web UI http://garage-fan.local/ · /api/set?speed=0..12 ·
 //           MQTT garage/fan/set · /api/raw?high_pct= (calibration)
-// Auto:     differential thermostat vs outdoors (fan_auto_logic.h, natively
+// Auto:     differential thermostat vs outdoors (fan/auto_logic.h, natively
 //           tested). Outdoor temp arrives on MQTT_SUB_BASE "/temp_f" from the
 //           existing home/outdoor feed. Hotter outside -> min speed; hotter
 //           inside -> ramp toward the user's max. Manual set disables auto.
@@ -14,80 +14,47 @@
 // Persist:  speed + auto config in NVS (restored before WiFi), commands also
 //           retained on the broker; whichever answers first wins the tie.
 // OTA:      POST /update?token=...; A/B slots with ota_rollback confirm.
-#include <Adafruit_BME280.h>
-#include <Adafruit_LC709203F.h>
-#include <Adafruit_MAX1704X.h>
+//
+// This file is the orchestrator and nothing else: boot order, the loop
+// cadences, and the glue between modules that must not know about each other
+// (fan -> transports via the notify hook, climate sample -> ring/SD/MQTT).
+// State lives in the modules; resist growing globals back here.
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
-#include <PubSubClient.h>
-#include <SD.h>
 #include <SPI.h>
-#include <Update.h>
-#include <WebServer.h>
 #include <WiFi.h>
 #include <Wire.h>
 
-#include <ctime>
+#include <cmath>
 
-#include "esp_ota_ops.h"
-#include "lwip/sockets.h"
-#include "esp_task_wdt.h"
 #include "config.h"
-#include "system/crashlog.h"
+#include "esp_task_wdt.h"
 #include "fan/control.h"
-#include "storage/history.h"
-#include "ui/display.h"
-#include "storage/sdcard.h"
-#include "system/odometer.h"
+#include "net/mqtt_link.h"
+#include "net/web.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
-#include "system/timeutil.h"
-#include "generated_page.h"
+#include "storage/history.h"
+#include "storage/sdcard.h"
+#include "system/crashlog.h"
+#include "system/odometer.h"
 #include "system/ota_rollback.h"
+#include "system/timeutil.h"
+#include "ui/display.h"
 
-static WiFiClient g_net;
-static PubSubClient g_mqtt(g_net);
-static WebServer g_http(80);
-static WiFiServer g_sse_srv(8081);
-static WiFiClient g_sse[4];
 static Preferences g_prefs;
-
 static bool g_services_up = false;
-static bool g_ever_healthy = false;
-static bool g_ota_authorized = false;
-static uint32_t g_last_reconnect_ms = 0;
-static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
 static uint32_t g_last_auto_ms = 0;
-static char g_token[40];
 
-static void sse_push();
-static void publish_state();
-
-// Thin wrapper deciding manual-ness for fan::apply: an HTTP set is always the
-// human; an MQTT set is the human unless it lands in the retained-replay grace
-// window right after the broker connects.
-static void apply_speed(int v, const char* source) {
-  const bool manual = strcmp(source, "http") == 0 ||
-                      (strcmp(source, "mqtt") == 0 && millis() - g_mqtt_up_ms > kMqttGraceMs);
-  fan::apply(v, source, manual);
-}
-
-static void publish_state() {
-  if (!g_mqtt.connected())
-    return;
-  char buf[4];
-  snprintf(buf, sizeof(buf), "%d", fan::speed());
-  g_mqtt.publish(kTopicState, buf, true);
-}
-
+// One 5-minute sample: read the corrected climate, snapshot everything that
+// belongs in the same row (battery first, so the row records the verdict this
+// reading produced), then fan it out to the ring, the card and the broker.
 static void sample_climate() {
   float t, h, p;
   if (!climate::sample(&t, &h, &p))
     return;
-  // Battery first so this sample's ring row records the fresh reading and
-  // the charging verdict it produced, not the 5-minute-old one.
   battery::sample();
   const float oc = climate::outside_c_fresh();
   history::Sample row;
@@ -101,590 +68,7 @@ static void sample_climate() {
   history::append(row, time_synced());
   if (time_synced())
     sdcard::log_sample(time(nullptr), t, h, p, row.out_f, fan::speed());
-  if (g_mqtt.connected()) {
-    char buf[96];
-    snprintf(buf, sizeof(buf), "{\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
-    g_mqtt.publish(kTopicClimate, buf, true);
-  }
-}
-
-static void state_json(char* out, size_t cap) {
-  const esp_partition_t* run = esp_ota_get_running_partition();
-  const float oc = climate::outside_c_fresh();
-  char outside[16];
-  if (isnan(oc))
-    snprintf(outside, sizeof(outside), "null");
-  else
-    snprintf(outside, sizeof(outside), "%.1f", oc * 9 / 5 + 32);
-  bool chg = false;
-  float eta = NAN;
-  battery::eta(&chg, &eta);
-  char batt[96];
-  if (battery::kind() && !isnan(battery::volts())) {
-    char mvh[16] = "null";
-    const float slope = battery::slope_mv_per_h();
-    if (!isnan(slope))
-      snprintf(mvh, sizeof(mvh), "%.0f", slope);
-    char etas[16] = "null";
-    if (!isnan(eta))
-      snprintf(etas, sizeof(etas), "%.1f", eta);
-    char pcts[16] = "null";
-    if (!isnan(battery::percent()))
-      snprintf(pcts, sizeof(pcts), "%.0f", battery::percent());
-    snprintf(batt, sizeof(batt), "{\"v\":%.3f,\"pct\":%s,\"chg\":%s,\"eta_h\":%s,\"mvh\":%s}",
-             battery::volts(), pcts, chg ? "true" : "false", etas, mvh);
-  } else {
-    snprintf(batt, sizeof(batt), "null");
-  }
-  snprintf(out, cap,
-           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
-           "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
-           "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
-           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
-           "\"boots\":%lu,\"prev_death\":\"%s\","
-           "\"sd_q\":%s,"
-           "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
-           fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
-           fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
-           climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
-           ota_rollback_image_confirmed() ? "true" : "false",
-           (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
-           crashlog::last_death(), (unsigned long)crashlog::boots(), crashlog::prev_death(),
-           sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),
-           (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(),
-           g_mqtt.connected() ? "true" : "false", millis() / 1000UL,
-           WiFi.localIP().toString().c_str());
-}
-
-// Never block on an SSE peer. NetworkClient::write retries a 1 s select up
-// to 10 times per call, so one sleeping laptop with a full socket buffer
-// costs 10 s per print -- sse_push's three prints hit the 30 s task
-// watchdog and panic the board (proven live 2026-08-05: crash loop after
-// v1.11.0 with several dashboards open). Instead: zero-timeout select +
-// MSG_DONTWAIT send, and any peer that can't take the whole frame right
-// now is dropped -- the browser's EventSource auto-reconnects.
-static void sse_send(WiFiClient& c, const char* buf, int n) {
-  const int s = c.fd();
-  if (s < 0) {
-    c.stop();
-    return;
-  }
-  fd_set set;
-  timeval tv{0, 0};
-  FD_ZERO(&set);
-  FD_SET(s, &set);
-  if (select(s + 1, nullptr, &set, nullptr, &tv) <= 0 || !FD_ISSET(s, &set)) {
-    c.stop();
-    return;
-  }
-  if (send(s, buf, n, MSG_DONTWAIT) != n)
-    c.stop();
-}
-
-static void sse_push() {
-  char st[768];
-  char frame[832];
-  state_json(st, sizeof(st));
-  const int n = snprintf(frame, sizeof(frame), "data: %s\n\n", st);
-  for (auto& c : g_sse) {
-    if (c && c.connected())
-      sse_send(c, frame, n);
-  }
-}
-
-static void sse_accept() {
-  WiFiClient nc = g_sse_srv.accept();
-  if (!nc)
-    return;
-  for (auto& c : g_sse) {
-    if (!c || !c.connected()) {
-      c = nc;
-      c.setNoDelay(true);
-      char st[768];
-      char frame[1024];
-      state_json(st, sizeof(st));
-      const int n = snprintf(frame, sizeof(frame),
-                             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
-                             "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
-                             "Connection: keep-alive\r\n\r\nretry: 3000\n\ndata: %s\n\n",
-                             st);
-      sse_send(c, frame, n);
-      return;
-    }
-  }
-  nc.stop();  // table full
-}
-
-static void handle_stats() {
-  float tmin, tmax, tavg;
-  history::temp_stats(&tmin, &tmax, &tavg);
-  char buf[288];
-  snprintf(buf, sizeof(buf),
-           "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,"
-           "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
-           "\"t_avg_f\":%.1f,\"samples\":%u}",
-           (unsigned long)odometer::run_today_s(), (unsigned long)odometer::run_total_s(),
-           odometer::energy_wh(), fan::watts(fan::speed() < 0 ? 0 : fan::speed()),
-           isnan(tmin) ? 0 : tmin * 9 / 5 + 32, isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
-           isnan(tavg) ? 0 : tavg * 9 / 5 + 32, history::count());
-  g_http.send(200, "application/json", buf);
-}
-
-// Bounded raw send: WebServer's own writes go through NetworkClient::write,
-// which burns up to 10 s of 1 s selects PER CALL against a peer that stops
-// draining. The 21.8 KB page goes out in ~16 chunks, so one stalled browser
-// meant 160 s of stall -- the 30 s task watchdog panicked mid-serve (the
-// user-visible "clipped" truncated pages) and the board crash-looped. This
-// path never blocks more than 50 ms at a time, feeds the watchdog between
-// slices, and drops any peer that makes no progress for 4 s.
-static bool send_bounded(int s, const char* p, size_t n) {
-  uint32_t last_progress = millis();
-  size_t off = 0;
-  while (off < n) {
-    fd_set set;
-    timeval tv{0, 50000};
-    FD_ZERO(&set);
-    FD_SET(s, &set);
-    const int r = select(s + 1, nullptr, &set, nullptr, &tv);
-    esp_task_wdt_reset();
-    if (r < 0)
-      return false;
-    if (r > 0 && FD_ISSET(s, &set)) {
-      const int w = send(s, p + off, n - off, MSG_DONTWAIT);
-      if (w > 0) {
-        off += w;
-        last_progress = millis();
-        continue;
-      }
-      if (w < 0 && errno != EAGAIN)
-        return false;
-    }
-    if (millis() - last_progress > 4000)
-      return false;  // peer stalled: drop it, never stall loop()
-  }
-  return true;
-}
-
-static void send_big(const char* mime, const char* body, size_t len, const char* extra_hdr = "") {
-  WiFiClient c = g_http.client();
-  const int s = c.fd();
-  if (s < 0)
-    return;
-  char hdr[224];
-  const int hn = snprintf(hdr, sizeof(hdr),
-                          "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
-                          "%sConnection: close\r\n\r\n",
-                          mime, (unsigned)len, extra_hdr);
-  if (!send_bounded(s, hdr, hn) || !send_bounded(s, body, len)) {
-  }
-  c.stop();  // Connection: close either way; a stalled peer is already gone
-}
-
-static void handle_csv() {
-  const uint16_t n = history::count();
-  String out;
-  out.reserve(n * 44 + 64);
-  out += "epoch,temp_c,rh,hpa,outside_f,speed\n";
-  for (uint16_t i = 0; i < n; i++) {
-    char l[80];
-    const long ts = history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * 300 : 0;
-    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, history::temp()[i], history::rh()[i],
-             history::hpa()[i], isnan(history::out_f()[i]) ? -999 : history::out_f()[i],
-             (int)history::speed()[i]);
-    out += l;
-  }
-  send_big("text/csv", out.c_str(), out.length(),
-           "Content-Disposition: attachment; filename=garage-fan-24h.csv\r\n");
-}
-
-static const char kManifest[] PROGMEM = R"json({
-"name":"Garage fan","short_name":"GarageFan","start_url":"/",
-"display":"standalone","background_color":"#0b0e13","theme_color":"#0b0e13",
-"icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml"}]})json";
-
-static const char kIcon[] PROGMEM =
-    R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-<rect width="100" height="100" rx="22" fill="#0b0e13"/>
-<g fill="#3b82f6"><circle cx="50" cy="50" r="9"/>
-<path d="M50 14a10 10 0 0 1 10 10c0 8-6 12-8 18l-4-1c-2-9-8-13-8-19a10 10 0 0 1 10-8z"/>
-<path d="M50 86a10 10 0 0 1-10-10c0-8 6-12 8-18l4 1c2 9 8 13 8 19a10 10 0 0 1-10 8z"/>
-<path d="M14 50a10 10 0 0 1 10-10c8 0 12 6 18 8l-1 4c-9 2-13 8-19 8a10 10 0 0 1-8-10z"/>
-<path d="M86 50a10 10 0 0 1-10 10c-8 0-12-6-18-8l1-4c9-2 13-8 19-8a10 10 0 0 1 8 10z"/>
-</g></svg>)svg";
-
-static void handle_state() {
-  char buf[768];
-  state_json(buf, sizeof(buf));
-  g_http.send(200, "application/json", buf);
-}
-
-// Copy src into a JSON string body, escaping the two characters that would
-// otherwise terminate it early. The SSID and broker host come from the user's
-// .env, so one stray quote there would take out the whole settings pane.
-static void json_str(char* dst, size_t cap, const char* src) {
-  size_t j = 0;
-  for (size_t i = 0; src[i] && j + 2 < cap; i++) {
-    if (src[i] == '"' || src[i] == '\\')
-      dst[j++] = '\\';
-    dst[j++] = src[i];
-  }
-  dst[j] = 0;
-}
-
-// Facts the console needs exactly once per page load: the measured duty table
-// -- the single source of truth behind the PWM readouts, the scope trace and
-// the capture grid -- plus identity and network strings that never change at
-// runtime. Deliberately not folded into /api/state, which is polled every 15 s
-// and pushed on every SSE frame.
-static void handle_device() {
-  char high[96];
-  size_t n = 0;
-  for (size_t i = 0; i < sizeof(kHighUs) / sizeof(kHighUs[0]) && n < sizeof(high); i++)
-    n += snprintf(high + n, sizeof(high) - n, i ? ",%u" : "%u", kHighUs[i]);
-  uint8_t mac[6] = {0};
-  WiFi.macAddress(mac);
-  char ssid[80], host[80];
-  json_str(ssid, sizeof(ssid), WIFI_SSID);
-  json_str(host, sizeof(host), MQTT_HOST);
-  char out[512];
-  snprintf(out, sizeof(out),
-           "{\"id\":\"%s-%02x%02x%02x\",\"host\":\"%s\",\"repo\":\"%s\","
-           "\"broker\":\"%s:%d\",\"ssid\":\"%s\",\"topic_set\":\"%s\","
-           "\"topic_out\":\"%s\",\"period_us\":%u,\"sample_s\":%lu,\"high_us\":[%s]}",
-           FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host, MQTT_PORT,
-           ssid, kTopicSet, kTopicOutdoor, (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000),
-           high);
-  g_http.send(200, "application/json", out);
-}
-
-// Token-guarded reboot behind the console's maintenance row. Shares the OTA
-// token so reaching the page is not by itself enough to bounce the fan.
-static void handle_restart() {
-  if (g_http.arg("token") != g_token) {
-    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
-    return;
-  }
-  g_http.send(200, "application/json", "{\"ok\":true,\"note\":\"restarting\"}");
-  delay(150);  // let the response drain before the reset takes the socket
-  esp_restart();
-}
-
-static void handle_config() {
-  if (g_http.hasArg("auto"))
-    fan::set_auto(g_http.arg("auto").toInt() != 0);
-  if (g_http.hasArg("max")) {
-    const int m = g_http.arg("max").toInt();
-    if (m >= 1 && m <= 12)
-      fan::set_auto_max(m);
-  }
-  if (g_http.hasArg("offc")) {
-    const float v = g_http.arg("offc").toFloat();
-    if (v >= -15 && v <= 15)
-      climate::set_offset_charging(v);
-  }
-  if (g_http.hasArg("offi")) {
-    const float v = g_http.arg("offi").toFloat();
-    if (v >= -15 && v <= 15)
-      climate::set_offset_idle(v);
-  }
-  if (g_http.hasArg("min")) {
-    const int m = g_http.arg("min").toInt();
-    if (m >= 0 && m <= 12)
-      fan::set_auto_min(m);
-  }
-  if (g_http.hasArg("onf")) {
-    const float v = g_http.arg("onf").toFloat();
-    if (v >= 0.5f && v <= 20)
-      fan::set_engage_f(v);
-  }
-  if (g_http.hasArg("offf")) {
-    const float v = g_http.arg("offf").toFloat();
-    if (v >= 0 && v <= 20)
-      fan::set_release_f(v);
-  }
-  fan::enforce_hysteresis_gap();
-  if (g_http.hasArg("newtoken") && g_http.arg("auth") == g_token) {
-    const String nt = g_http.arg("newtoken");
-    if (nt.length() >= 6 && nt.length() < 39) {
-      snprintf(g_token, sizeof(g_token), "%s", nt.c_str());
-      g_prefs.putString("token", g_token);
-      Serial.println("ota token changed");
-    }
-  }
-  sse_push();
-  handle_state();
-}
-
-static void handle_sensors() {
-  if (!climate::ok() || history::count() == 0) {
-    g_http.send(200, "application/json", "{\"ok\":false}");
-    return;
-  }
-  char buf[128];
-  const uint16_t i = history::count() - 1;
-  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}",
-           history::temp()[i], history::rh()[i], history::hpa()[i]);
-  g_http.send(200, "application/json", buf);
-}
-
-static void append_series(String& out, const char* name, const float* v, uint16_t n,
-                          uint8_t decimals) {
-  out += '"';
-  out += name;
-  out += "\":[";
-  char num[16];
-  for (uint16_t i = 0; i < n; i++) {
-    if (isnan(v[i])) {
-      // A literal "nan" is not JSON -- one bad sample would make the
-      // browser's parser reject the entire history payload (blank graph).
-      out += "null";
-    } else {
-      dtostrf(v[i], 0, decimals, num);
-      out += num;
-    }
-    if (i + 1 < n)
-      out += ',';
-  }
-  out += ']';
-}
-
-static void handle_history() {
-  const int days = g_http.hasArg("days") ? g_http.arg("days").toInt() : 1;
-  String out;
-  out.reserve(13000);
-  if (days <= 1 || !sdcard::ok() || !time_synced()) {
-    const uint16_t rows = history::count();
-    char hd[64];
-    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,", (long)history::end_ts());
-    out += hd;
-    append_series(out, "temp_c", history::temp(), rows, 1);
-    out += ',';
-    append_series(out, "rh", history::rh(), rows, 0);
-    out += ',';
-    append_series(out, "hpa", history::hpa(), rows, 1);
-    out += ',';
-    append_series(out, "out_f", history::out_f(), rows, 1);
-    out += ',';
-    append_series(out, "batt_v", history::batt_v(), rows, 2);
-    out += ",\"spd\":[";
-    for (uint16_t i = 0; i < rows; i++) {
-      char n[6];
-      snprintf(n, sizeof(n), "%d", (int)history::speed()[i]);
-      out += n;
-      if (i + 1 < rows)
-        out += ',';
-    }
-    out += "],\"chg\":[";
-    for (uint16_t i = 0; i < rows; i++) {
-      char n[6];
-      snprintf(n, sizeof(n), "%d", (int)history::chg()[i]);
-      out += n;
-      if (i + 1 < rows)
-        out += ',';
-    }
-    out += "]}";
-  } else {
-    static float t[kGraphMaxPts], h[kGraphMaxPts], p[kGraphMaxPts];
-    const time_t cutoff = time(nullptr) - (time_t)days * 86400;
-    const uint16_t n = sdcard::read_range(cutoff, t, h, p, kGraphMaxPts);
-    char head[48];
-    snprintf(head, sizeof(head), "{\"interval_s\":%ld,", n > 1 ? (long)(days * 86400L / n) : 300L);
-    out += head;
-    append_series(out, "temp_c", t, n, 1);
-    out += ',';
-    append_series(out, "rh", h, n, 0);
-    out += ',';
-    append_series(out, "hpa", p, n, 1);
-    out += '}';
-  }
-  send_big("application/json", out.c_str(), out.length());
-}
-
-// Token-guarded one-shot: mount with format-on-failure, turning a fresh
-// exFAT card into FAT32 in place. Deliberately NOT automatic on normal
-// mounts -- a flaky-but-full card must never be silently erased. Blocks the
-// loop for the duration (can be minutes on big cards); the RMT peripheral
-// keeps the fan running throughout.
-static void handle_sd_format() {
-  if (g_http.arg("token") != g_token) {
-    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
-    return;
-  }
-  const bool ok = sdcard::format();
-  char buf[80];
-  snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}", ok ? "true" : "false",
-           (unsigned long)sdcard::total_mb());
-  Serial.printf("[SD] format result: %s\n", buf);
-  g_http.send(ok ? 200 : 500, "application/json", buf);
-}
-
-// Raw SD probe: bit-level CMD0/CMD8 handshake at 400 kHz, reporting each
-// step, so "card not seated", "card dead", and "card incompatible" stop
-// looking identical. Read-only; safe on any card.
-static void handle_sd_test() {
-  SD.end();
-  SPI.end();
-  delay(50);
-  SPI.begin();
-  pinMode(SD_CS_PIN, OUTPUT);
-  digitalWrite(SD_CS_PIN, HIGH);
-  pinMode(SRAM_CS_PIN, OUTPUT);
-  digitalWrite(SRAM_CS_PIN, HIGH);
-  pinMode(EPD_CS_PIN, OUTPUT);
-  digitalWrite(EPD_CS_PIN, HIGH);
-  SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
-  for (int i = 0; i < 10; i++) SPI.transfer(0xFF);  // 80 warm-up clocks
-  digitalWrite(SD_CS_PIN, LOW);
-  static const uint8_t kCmd0[] = {0x40, 0, 0, 0, 0, 0x95};
-  for (uint8_t b : kCmd0) SPI.transfer(b);
-  uint8_t r1 = 0xFF;
-  for (int i = 0; i < 16 && (r1 & 0x80); i++) r1 = SPI.transfer(0xFF);
-  uint8_t r7[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-  uint8_t r1b = 0xFF;
-  if (r1 == 0x01) {  // idle: try CMD8 (SDv2 voltage check, echoes 0x1AA)
-    static const uint8_t kCmd8[] = {0x48, 0, 0, 0x01, 0xAA, 0x87};
-    for (uint8_t b : kCmd8) SPI.transfer(b);
-    for (int i = 0; i < 16 && (r1b & 0x80); i++) r1b = SPI.transfer(0xFF);
-    if (r1b == 0x01)
-      for (int i = 0; i < 4; i++) r7[i] = SPI.transfer(0xFF);
-  }
-  digitalWrite(SD_CS_PIN, HIGH);
-  SPI.transfer(0xFF);
-  SPI.endTransaction();
-  char buf[160];
-  snprintf(buf, sizeof(buf),
-           "{\"cmd0_r1\":\"0x%02X\",\"cmd8_r1\":\"0x%02X\","
-           "\"cmd8_echo\":\"%02X%02X%02X%02X\",\"verdict\":\"%s\"}",
-           r1, r1b, r7[0], r7[1], r7[2], r7[3],
-           r1 == 0xFF   ? "no response - card absent, unseated, or bad contact"
-           : r1 == 0x01 ? (r7[2] == 0x01 && r7[3] == 0xAA ? "card alive, SDv2, handshake ok"
-                                                          : "card alive but CMD8 odd")
-                        : "card answered abnormally");
-  Serial.printf("[SD] probe: %s\n", buf);
-  g_http.send(200, "application/json", buf);
-}
-
-// Calibration instrument: drive an arbitrary duty, no reflash per data point.
-static void handle_raw() {
-  if (!g_http.hasArg("high_pct")) {
-    g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
-    return;
-  }
-  const int pct = g_http.arg("high_pct").toInt();
-  if (pct < 0 || pct > 100) {
-    g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
-    return;
-  }
-  fan::raw_high_us((uint16_t)((uint32_t)kPeriodUs * pct / 100));
-  char buf[48];
-  snprintf(buf, sizeof(buf), "{\"raw_high_pct\":%d}", pct);
-  g_http.send(200, "application/json", buf);
-}
-
-static void handle_set() {
-  if (!g_http.hasArg("speed")) {
-    g_http.send(400, "application/json", "{\"error\":\"speed required\"}");
-    return;
-  }
-  const int v = g_http.arg("speed").toInt();
-  if (v < 0 || v > 12) {
-    g_http.send(400, "application/json", "{\"error\":\"0-12 only\"}");
-    return;
-  }
-  apply_speed(v, "http");
-  handle_state();
-}
-
-static void handle_update_upload() {
-  HTTPUpload& up = g_http.upload();
-  if (up.status == UPLOAD_FILE_START) {
-    g_ota_authorized = g_http.arg("token") == g_token;
-    if (!g_ota_authorized) {
-      Serial.println("[OTA] rejected: bad token");
-      return;
-    }
-    Serial.printf("[OTA] receiving %s\n", up.filename.c_str());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
-      Update.printError(Serial);
-  } else if (up.status == UPLOAD_FILE_WRITE && g_ota_authorized) {
-    if (Update.write(up.buf, up.currentSize) != up.currentSize)
-      Update.printError(Serial);
-  } else if (up.status == UPLOAD_FILE_END && g_ota_authorized) {
-    if (Update.end(true))
-      Serial.printf("[OTA] received %u bytes ok\n", up.totalSize);
-    else
-      Update.printError(Serial);
-  }
-}
-
-static void handle_update_done() {
-  if (!g_ota_authorized) {
-    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
-    return;
-  }
-  if (Update.hasError()) {
-    g_http.send(500, "application/json", "{\"error\":\"update failed\"}");
-    return;
-  }
-  g_http.send(200, "application/json", "{\"ok\":true,\"note\":\"rebooting into new slot\"}");
-  delay(300);
-  esp_restart();
-}
-
-static void on_message(char* topic, uint8_t* payload, unsigned int len) {
-  char buf[16];
-  if (len >= sizeof(buf))
-    return;
-  memcpy(buf, payload, len);
-  buf[len] = '\0';
-  if (strstr(topic, "/ts") != nullptr &&
-      strncmp(topic, MQTT_SUB_BASE, strlen(MQTT_SUB_BASE)) == 0) {
-    const long e = strtol(buf, nullptr, 10);
-    if (e > 1700000000)
-      climate::set_outdoor_epoch(e);
-    return;
-  }
-  if (strcmp(topic, kTopicOutdoor) == 0) {
-    char* end = nullptr;
-    const float f = strtof(buf, &end);
-    if (end != buf && isfinite(f) && f > -60 && f < 150)
-      climate::set_outside_f(f);
-    return;
-  }
-  if (strcmp(topic, kTopicSet) != 0 || len == 0 || len > 2)
-    return;
-  char* end = nullptr;
-  long v = strtol(buf, &end, 10);
-  if (end == buf || *end != '\0')
-    return;
-  apply_speed(static_cast<int>(v), "mqtt");
-  publish_state();
-}
-
-static void ensure_mqtt() {
-  if (WiFi.status() != WL_CONNECTED)
-    return;
-  if (g_mqtt.connected() || millis() - g_last_reconnect_ms < 3000)
-    return;
-  g_last_reconnect_ms = millis();
-  char id[24];
-  snprintf(id, sizeof(id), "garage-fan-%06llx", ESP.getEfuseMac() & 0xffffff);
-  if (g_mqtt.connect(id, MQTT_USER, MQTT_PASS, kTopicAvail, 0, true, "offline")) {
-    Serial.println("mqtt connected");
-    g_mqtt_up_ms = millis();
-    g_ever_healthy = true;
-    ota_rollback_mark_healthy();
-    g_mqtt.publish(kTopicAvail, "online", true);
-    publish_state();
-    g_mqtt.subscribe(kTopicSet);
-    g_mqtt.subscribe(kTopicOutdoor);
-    g_mqtt.subscribe(MQTT_SUB_BASE "/ts");
-  } else {
-    Serial.printf("mqtt connect failed rc=%d\n", g_mqtt.state());
-  }
+  mqtt_link::publish_climate(t, h, p);
 }
 
 void setup() {
@@ -700,30 +84,24 @@ void setup() {
   // Announce speed changes over whatever transports are up. Registered before
   // fan::restore so even the boot-time resume publishes once MQTT connects.
   fan::set_notify([](int speed, bool from_mqtt) {
-    publish_state();
-    if (!from_mqtt && g_mqtt.connected()) {
-      char buf[4];
-      snprintf(buf, sizeof(buf), "%d", speed);
-      g_mqtt.publish(kTopicSet, buf, true);
-    }
-    sse_push();
+    mqtt_link::publish_state(speed);
+    if (!from_mqtt)
+      mqtt_link::echo_set(speed);
+    web::push_state();
   });
   fan::restore(&g_prefs);
   odometer::restore(&g_prefs);
-  String tk = g_prefs.getString("token", FAN_OTA_TOKEN);
-  snprintf(g_token, sizeof(g_token), "%s", tk.c_str());
   // SD stays OUT of the boot path: the controller comes fully online first,
   // and the first mount attempt happens ~60 s later from loop(). A card that
-  // crashes the mount gets quarantined by the sentinel above -- no card can
-  // take fan control down with it.
+  // crashed a previous boot is quarantined here and never retried.
   sdcard::set_quarantined(crashlog::examine_boot(&g_prefs));
   if (sdcard::quarantined())
     Serial.println("[SD] previous boot died in an SD op -- card quarantined");
   // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
-  // in 30 s instead of hanging dark forever. The fan rides through on RMT.
-  // 60 s: tolerates worst-case framework writes to one stalled peer (10 s
-  // per NetworkClient::write call) on the small JSON endpoints while still
-  // catching genuine hangs. Large payloads use send_bounded and never stall.
+  // in 60 s instead of hanging dark forever. The fan rides through on RMT.
+  // 60 s tolerates worst-case framework writes to one stalled peer (10 s per
+  // NetworkClient::write call) on the small JSON endpoints while still
+  // catching genuine hangs. Large payloads use http_tx and never stall.
   esp_task_wdt_config_t wdt_cfg = {.timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true};
   if (esp_task_wdt_init(&wdt_cfg) != ESP_OK)
     esp_task_wdt_reconfigure(&wdt_cfg);
@@ -736,81 +114,8 @@ void setup() {
   WiFi.setHostname(FAN_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   configTime(0, 0, "pool.ntp.org");
-  g_mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  g_mqtt.setCallback(on_message);
-  g_http.on("/", []() {
-    // Unconditionally gzipped: the page is only ever stored compressed, and
-    // there is no browser in service that does not accept it. A CLI client
-    // wanting to read it needs curl --compressed.
-    send_big("text/html", reinterpret_cast<const char*>(kPageGz), sizeof(kPageGz),
-             "Content-Encoding: gzip\r\n");
-  });
-  g_http.on("/api/state", handle_state);
-  g_http.on("/api/device", handle_device);
-  g_http.on("/api/restart", handle_restart);
-  g_http.on("/api/set", handle_set);
-  g_http.on("/api/raw", handle_raw);
-  g_http.on("/api/config", handle_config);
-  g_http.on("/api/sensors", handle_sensors);
-  g_http.on("/api/history", handle_history);
-  g_http.on("/api/stats", handle_stats);
-  g_http.on("/download.csv", handle_csv);
-  g_http.on("/manifest.json",
-            []() { send_big("application/json", kManifest, sizeof(kManifest) - 1); });
-  g_http.on("/icon.svg", []() { send_big("image/svg+xml", kIcon, sizeof(kIcon) - 1); });
-  g_http.on("/api/sdformat", handle_sd_format);
-  g_http.on("/api/battdebug", []() {
-    char out[512];
-    const bool w15 = battery::write_reg(0x15, 0x0001);
-    const bool w0b = battery::write_reg(0x0B, 0x0056);
-    String r;
-    for (int variant = 0; variant < 2; variant++) {
-      for (uint8_t reg : {(uint8_t)0x09, (uint8_t)0x0D, (uint8_t)0x11}) {
-        Wire.beginTransmission(0x0B);
-        Wire.write(reg);
-        const int wtx = Wire.endTransmission(variant == 1);
-        int got = 0;
-        uint8_t raw[3] = {0, 0, 0};
-        if (wtx == 0) {
-          got = Wire.requestFrom((uint8_t)0x0B, (uint8_t)3);
-          for (int i = 0; i < got && i < 3; i++) raw[i] = Wire.read();
-        }
-        const uint8_t chk[5] = {0x16, reg, 0x17, raw[0], raw[1]};
-        char e[96];
-        snprintf(e, sizeof(e),
-                 "{\"reg\":\"0x%02X\",\"stop\":%d,\"wtx\":%d,\"got\":%d,"
-                 "\"bytes\":\"%02X%02X%02X\",\"val\":%u,\"crc_ok\":%s},",
-                 reg, variant, wtx, got, raw[0], raw[1], raw[2],
-                 (unsigned)(((uint16_t)raw[1] << 8) | raw[0]),
-                 battery::crc8(chk, 5) == raw[2] ? "true" : "false");
-        r += e;
-      }
-    }
-    snprintf(out, sizeof(out), "{\"w15\":%s,\"w0b\":%s,\"reads\":[", w15 ? "true" : "false",
-             w0b ? "true" : "false");
-    String full = String(out) + r.substring(0, r.length() - 1) + "]}";
-    g_http.send(200, "application/json", full);
-  });
-  g_http.on("/api/i2cscan", []() {
-    String out = "{\"found\":[";
-    bool first = true;
-    for (uint8_t a = 1; a < 127; a++) {
-      Wire.beginTransmission(a);
-      if (Wire.endTransmission() == 0) {
-        if (!first)
-          out += ',';
-        char b[8];
-        snprintf(b, sizeof(b), "\"0x%02X\"", a);
-        out += b;
-        first = false;
-      }
-    }
-    out += "]}";
-    g_http.send(200, "application/json", out);
-  });
-  g_http.on("/api/sdtest", handle_sd_test);
-  g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
-  g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
+  mqtt_link::init();
+  web::begin(&g_prefs);
   Serial.printf("garage fan controller %s: waiting for wifi\n", kFwVersion);
 }
 
@@ -825,23 +130,20 @@ void loop() {
         g_services_up = true;
         MDNS.begin(FAN_HOSTNAME);
         MDNS.addService("http", "tcp", 80);
-        g_http.begin();
-        g_sse_srv.begin();
+        web::start();
         Serial.printf("web ui: http://%s.local/\n", FAN_HOSTNAME);
       }
     }
   }
   esp_task_wdt_reset();
-  ensure_mqtt();
-  g_mqtt.loop();
-  g_http.handleClient();
-  sse_accept();
+  mqtt_link::tick();
+  web::handle();
   odometer::tick(fan::speed(), fan::watts(fan::speed()));
   display::maybe_render();
   if (g_last_sample_ms == 0 || millis() - g_last_sample_ms >= kSampleMs) {
     g_last_sample_ms = millis();
     sample_climate();
-    sse_push();
+    web::push_state();
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
@@ -850,7 +152,8 @@ void loop() {
     battery::read();
     sdcard::retry_tick();
   }
-  if (!g_ever_healthy && !ota_rollback_image_confirmed() && millis() > kUnconfirmedDeadlineMs) {
+  if (!mqtt_link::ever_connected() && !ota_rollback_image_confirmed() &&
+      millis() > kUnconfirmedDeadlineMs) {
     Serial.println("[OTA] unconfirmed image never reached broker; restarting");
     Serial.flush();
     esp_restart();
