@@ -41,12 +41,20 @@ regexes = [
 # Bare shell-style assignment of a credential: PASS=hunter2, MQPASS=<digits>,
 # MQTT_PASSWORD=..., BROKER_PASS=... Unquoted or quoted, any variable name
 # ending in PASS/PASSWD/PASSWORD/SECRET/TOKEN.
+#
+# Case-SENSITIVE on purpose, unlike the quoted-assignment rules below: the
+# shape being hunted is shell/env convention, which is uppercase. The (?i)
+# this rule originally carried made it match `for (int pass = 0; ...)` loop
+# counters and `const token = el(...)` DOM locals across the C++ and
+# TypeScript sources -- dozens of false positives and zero real secrets.
+# The secret group also refuses a leading '=' so C++ `PASS == 0` comparisons
+# do not read as assignments.
 [[rules]]
 id = "bare-credential-assignment"
 description = "Bare credential assignment (shell/env style)"
-regex = '''(?i)\b[A-Z0-9_]*(?:PASS(?:WD|WORD)?|SECRET|TOKEN)\s*=\s*["']?([^\s"'#$][^\s"'#]*)'''
+regex = '''\b[A-Z0-9_]*(?:PASS(?:WD|WORD)?|SECRET|TOKEN)\s*=\s*["']?([^\s"'#$=][^\s"'#]*)'''
 secretGroup = 1
-keywords = ["pass", "secret", "token"]
+keywords = ["PASS", "SECRET", "TOKEN"]
 
 # Credentials passed as command-line flags: mosquitto_pub -P <pw>,
 # mosquitto_sub -u <user> -P <pw>, curl -u user:pw.
