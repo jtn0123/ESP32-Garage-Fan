@@ -1,0 +1,366 @@
+// The settings screen: a declarative spec plus a renderer.
+//
+// Every control here maps to something the firmware actually exposes. The
+// design mockup this came from also drew overnight-quiet, PWM-floor, stall
+// detection, solar priority and an update channel -- none of which exist in
+// the firmware, and two of which the hardware cannot support (there is no tach
+// line; D- was measured idle). Shipping controls that silently do nothing is
+// worse than not shipping them, so those rows are absent rather than inert.
+
+import { el, show } from './dom.js';
+import { hoursMinutes, storage } from './format.js';
+import type { DeviceInfo, DeviceState } from './types.js';
+import type { UpdateStatus } from './update.js';
+
+export type Row =
+  | { kind: 'step'; label: string; hint: string; value: string; dec: () => void; inc: () => void }
+  | { kind: 'toggle'; label: string; hint: string; on: boolean; toggle: () => void }
+  | { kind: 'text'; label: string; hint: string; value: string }
+  | { kind: 'actions'; label: string; hint: string; actions: Action[] }
+  | { kind: 'update'; label: string; hint: string; status: UpdateStatus | null; recheck: () => void }
+  | { kind: 'ota'; label: string; hint: string };
+
+export interface Action {
+  text: string;
+  href?: string;
+  run?: () => void;
+  danger?: boolean;
+}
+
+export interface Group {
+  title: string;
+  blurb: string;
+  rows: Row[];
+}
+
+export interface SettingsDeps {
+  state: DeviceState;
+  info: DeviceInfo | null;
+  update: UpdateStatus | null;
+  setConfig: (query: string) => void;
+  toggleAuto: () => void;
+  restart: () => void;
+  formatCard: () => void;
+  recheckUpdate: () => void;
+}
+
+const clamp = (v: number, lo: number, hi: number): number =>
+  Math.min(hi, Math.max(lo, Number(v.toFixed(2))));
+
+export function buildGroups(d: SettingsDeps): Group[] {
+  const s = d.state;
+  const info = d.info;
+  const set = d.setConfig;
+  const eng = s.on_f;
+  const rel = s.off_f;
+
+  const step = (
+    label: string,
+    hint: string,
+    value: string,
+    dec: () => void,
+    inc: () => void,
+  ): Row => ({ kind: 'step', label, hint, value, dec, inc });
+
+  const text = (label: string, hint: string, value: string): Row =>
+    ({ kind: 'text', label, hint, value });
+
+  return [
+    {
+      title: 'AUTO MODE',
+      blurb:
+        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles.',
+      rows: [
+        step(
+          'Engage above',
+          'Garage must be this many degrees hotter than the yard before auto drives the fan to its hold speed.',
+          `+${eng.toFixed(1)} °F`,
+          // Release must stay strictly below engage or the hysteresis latch
+          // flaps; the firmware enforces this too, this just avoids the round trip.
+          () => set(`onf=${clamp(eng - 0.5, rel + 0.5, 20)}`),
+          () => set(`onf=${clamp(eng + 0.5, 0.5, 20)}`),
+        ),
+        step(
+          'Release below',
+          'Fan drops back to the rest speed once the gap falls under this. Keep it well under the engage point or the fan chatters.',
+          `+${rel.toFixed(1)} °F`,
+          () => set(`offf=${clamp(rel - 0.5, 0, 20)}`),
+          () => set(`offf=${clamp(rel + 0.5, 0, eng - 0.5)}`),
+        ),
+        step(
+          'Hold speed',
+          'Speed auto holds while the differential is above the engage point — partial venting wastes the gap.',
+          `${s.auto_max} / 12`,
+          () => set(`max=${Math.max(1, s.auto_max - 1)}`),
+          () => set(`max=${Math.min(12, s.auto_max + 1)}`),
+        ),
+        step(
+          'Rest speed',
+          'Speed auto falls back to once inside and outside have equalized. Zero means the fan stops.',
+          s.auto_min === 0 ? 'off' : `${s.auto_min} / 12`,
+          () => set(`min=${Math.max(0, s.auto_min - 1)}`),
+          () => set(`min=${Math.min(12, s.auto_min + 1)}`),
+        ),
+        {
+          kind: 'toggle',
+          label: 'Auto mode',
+          hint: 'When off, the fan holds whatever speed you set by hand until you turn auto back on.',
+          on: s.auto,
+          toggle: d.toggleAuto,
+        },
+      ],
+    },
+    {
+      title: 'SENSORS',
+      blurb:
+        'Calibration and sampling. Every stored reading is corrected before it is written, so changes here do not rewrite history.',
+      rows: [
+        step(
+          'Probe offset · charging',
+          'Correction added to the garage sensor while the pack is charging, when the board runs warmest.',
+          `${s.offc > 0 ? '+' : ''}${s.offc.toFixed(1)} °C`,
+          () => set(`offc=${clamp(s.offc - 0.1, -15, 15)}`),
+          () => set(`offc=${clamp(s.offc + 0.1, -15, 15)}`),
+        ),
+        step(
+          'Probe offset · idle',
+          'Correction added to the garage sensor the rest of the time.',
+          `${s.offi > 0 ? '+' : ''}${s.offi.toFixed(1)} °C`,
+          () => set(`offi=${clamp(s.offi - 0.1, -15, 15)}`),
+          () => set(`offi=${clamp(s.offi + 0.1, -15, 15)}`),
+        ),
+        text(
+          'Garage probe',
+          s.sensor
+            ? 'On-board BME280 — temperature, humidity and pressure.'
+            : 'The on-board BME280 did not answer at boot; garage readings are unavailable.',
+          s.sensor ? 'BME280 OK' : 'NOT FOUND',
+        ),
+        text(
+          'Outside temperature',
+          'Subscribed topic the yard reading arrives on. A reading older than 30 minutes counts as stale and auto holds.',
+          info?.topic_out ?? '–',
+        ),
+        text(
+          'Sample interval',
+          'How often a reading is taken, logged to the card and pushed into the 24 h ring.',
+          info ? `${info.sample_s / 60} min` : '–',
+        ),
+      ],
+    },
+    {
+      title: 'NETWORK',
+      blurb:
+        'Where the controller publishes and how it is reached. Local logging on the card continues through any outage.',
+      rows: [
+        text('MQTT broker', 'Address the controller publishes state to and takes commands from.',
+          info?.broker ?? '–'),
+        text('Link', 'Access point joined at boot, and the current signal.',
+          `${info?.ssid ?? '–'} · ${s.rssi} dBm`),
+        text('Address', 'Where this page is served from.',
+          `${s.ip || '–'}${info ? ` · ${info.host}.local` : ''}`),
+        text('Command topic', 'Publish a speed 0–12 here to drive the fan from anywhere.',
+          info?.topic_set ?? '–'),
+      ],
+    },
+    {
+      title: 'POWER',
+      blurb:
+        'The backup pack that keeps the controller alive and logging when the USB supply drops out. The fan itself runs from its own 12 V brick.',
+      rows: [
+        text('Cell voltage', 'Live pack voltage — the same series plotted in the BATTERY chart row.',
+          s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack detected'),
+        text(
+          'Charge state',
+          'Sticky verdict from the voltage slope, so trickle charging does not flap the temperature offset.',
+          s.batt
+            ? `${s.batt.chg ? 'charging' : 'discharging'}${
+                s.batt.mvh !== null ? ` · ${s.batt.mvh >= 0 ? '+' : ''}${s.batt.mvh} mV/h` : ''
+              }`
+            : '–',
+        ),
+        text('Estimated runtime', 'Hours left at the current discharge slope. Blank while charging or flat.',
+          s.batt?.eta_h != null ? `${s.batt.eta_h.toFixed(1)} h` : '–'),
+      ],
+    },
+    {
+      title: 'DEVICE',
+      blurb:
+        'Identity, storage and maintenance. A restart takes about eight seconds and does not clear logs.',
+      rows: [
+        text('Firmware', 'Running image and slot. See SLOT in the status bar for what “confirmed” means.',
+          `${s.fw} · ${s.slot} · ${s.confirmed ? 'confirmed' : 'unconfirmed'}`),
+        text('Device ID', 'Unique controller identifier, derived from the radio MAC.', info?.id ?? '–'),
+        text(
+          'Uptime',
+          `Time since the last reboot.${
+            s.prev_death && s.prev_death !== 'none' ? ` Previous boot ended in ${s.prev_death}.` : ''
+          }`,
+          `${hoursMinutes(s.uptime_s)} · boot ${s.boots}`,
+        ),
+        text(
+          'Log storage',
+          'microSD card holding the per-month CSV files behind the 7-day and 30-day ranges.',
+          s.sd_total_mb
+            ? storage(s.sd_used_mb, s.sd_total_mb)
+            : s.sd_q
+              ? 'quarantined'
+              : 'not mounted',
+        ),
+        {
+          kind: 'actions',
+          label: 'Maintenance',
+          hint: 'Restart reboots into the same slot. Formatting the card erases every stored sample and needs the update token.',
+          actions: [
+            { text: 'Download 24 h CSV', href: '/download.csv' },
+            { text: 'Restart', run: d.restart },
+            { text: 'Format SD card', run: d.formatCard, danger: true },
+          ],
+        },
+      ],
+    },
+    {
+      title: 'UPDATE',
+      blurb:
+        'Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.',
+      rows: [
+        {
+          kind: 'update',
+          label: 'Latest release',
+          hint: 'Your browser asks GitHub — the controller itself never talks to the internet.',
+          status: d.update,
+          recheck: d.recheckUpdate,
+        },
+        {
+          kind: 'ota',
+          label: 'Upload firmware',
+          hint: 'Pick the firmware.bin from a release (or from make build), enter the update token, and the board reboots into it.',
+        },
+      ],
+    },
+  ];
+}
+
+/** Render a spec into `host`, replacing whatever was there. */
+export function render(host: HTMLElement, groups: Group[]): void {
+  host.replaceChildren(...groups.map(renderGroup));
+}
+
+function renderGroup(g: Group): HTMLElement {
+  const wrap = el('div', { className: 'grp' });
+  const head = el('div');
+  head.append(
+    el('div', { className: 'gt', textContent: g.title }),
+    el('div', { className: 'gb', textContent: g.blurb }),
+  );
+  const rows = el('div', { className: 'grows' });
+  rows.append(...g.rows.map(renderRow));
+  wrap.append(head, rows);
+  return wrap;
+}
+
+function renderRow(r: Row): HTMLElement {
+  const row = el('div', { className: 'grow' });
+  const left = el('div', { className: 'rl' });
+  left.append(
+    el('div', { className: 'rlab', textContent: r.label }),
+    el('div', { className: 'rh', textContent: r.hint }),
+  );
+  row.append(left, control(r));
+  return row;
+}
+
+function control(r: Row): HTMLElement {
+  switch (r.kind) {
+    case 'step': {
+      const box = el('div', { className: 'stp' });
+      box.append(
+        el('button', { textContent: '−', onclick: r.dec }),
+        el('span', { textContent: r.value }),
+        el('button', { textContent: '+', onclick: r.inc }),
+      );
+      return box;
+    }
+    case 'toggle': {
+      const b = el('button', { className: `tgl${r.on ? ' on' : ''}`, onclick: r.toggle });
+      b.append(el('i'));
+      return b;
+    }
+    case 'text':
+      return el('div', { className: 'rtx', textContent: r.value });
+    case 'actions': {
+      const box = el('div', { className: 'acts' });
+      for (const a of r.actions) {
+        if (a.href) {
+          box.append(el('a', { textContent: a.text, href: a.href }));
+        } else {
+          const b = el('button', { textContent: a.text });
+          if (a.danger) b.className = 'danger';
+          if (a.run) b.onclick = a.run;
+          box.append(b);
+        }
+      }
+      return box;
+    }
+    case 'update':
+      return updateControl(r.status, r.recheck);
+    case 'ota':
+      return otaControl();
+  }
+}
+
+function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLElement {
+  const box = el('div', { className: 'upd' });
+  const line = el('div', { className: 'updline' });
+
+  if (status === null) {
+    line.append(el('span', { className: 'updmuted', textContent: 'checking…' }));
+  } else if (status.kind === 'available') {
+    line.append(el('span', { className: 'updnew', textContent: `${status.latest} available` }));
+    line.append(el('a', {
+      className: 'updlink',
+      textContent: 'release notes',
+      href: status.release.html_url,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    }));
+    if (status.asset) {
+      // Downloads the image to the machine running the browser; installing it
+      // is still the deliberate OTA upload below.
+      line.append(el('a', {
+        className: 'updlink',
+        textContent: 'download .bin',
+        href: status.asset.browser_download_url,
+      }));
+    } else {
+      line.append(el('span', { className: 'updmuted', textContent: 'no binary attached yet' }));
+    }
+  } else if (status.kind === 'up-to-date') {
+    line.append(el('span', { className: 'updok', textContent: `up to date (${status.latest})` }));
+  } else {
+    line.append(el('span', { className: 'updmuted', textContent: `unknown — ${status.reason}` }));
+  }
+
+  line.append(el('button', { className: 'updbtn', textContent: 'Check again', onclick: recheck }));
+  box.append(line);
+  return box;
+}
+
+function otaControl(): HTMLElement {
+  const box = el('div');
+  const row = el('div', { id: 'otarow' });
+  const file = el('input', { className: 'fld', id: 'ota_f', type: 'file', accept: '.bin' });
+  const token = el('input', {
+    className: 'fld',
+    id: 'ota_t',
+    type: 'password',
+    placeholder: 'update token',
+    autocomplete: 'off',
+  });
+  const go = el('button', { id: 'ota_go', textContent: 'Upload' });
+  row.append(file, token, go);
+  const msg = el('div', { id: 'otamsg' });
+  box.append(row, msg);
+  show(msg, true);
+  return box;
+}

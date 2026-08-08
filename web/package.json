@@ -1,0 +1,22 @@
+{
+  "name": "garage-fan-console",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript source for the fan console served from the ESP32's flash.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "setup": "npm ci"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "jsdom": "^26.0.0"
+  }
+}
