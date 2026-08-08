@@ -37,8 +37,10 @@
 #include "esp_task_wdt.h"
 #include "config.h"
 #include "system/crashlog.h"
+#include "fan/control.h"
 #include "sensors/battery.h"
-#include "fan/auto_logic.h"
+#include "sensors/climate.h"
+#include "system/timeutil.h"
 #include "generated_page.h"
 #include "system/ota_rollback.h"
 
@@ -49,9 +51,7 @@ static WiFiServer g_sse_srv(8081);
 static WiFiClient g_sse[4];
 // 2.13" mono SSD1680 FeatherWing, landscape; no busy/rst pins wired.
 static Adafruit_SSD1680 g_epd(250, 122, EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
-static Adafruit_BME280 g_bme;
 static Preferences g_prefs;
-static bool g_bme_ok = false;
 static bool g_sd_ok = false;
 static uint8_t g_sd_fails = 0;  // give up retrying after 10; format resets
 static bool g_sd_quarantined = false;
@@ -59,23 +59,9 @@ static char g_last_death[48] = "none";
 static char g_prev_death[48] = "none";  // the boot before this one, from NVS
 static uint32_t g_boots = 0;            // lifetime boot count, NVS
 
-static bool g_rmt_ready = false;
 static bool g_services_up = false;
 static bool g_ever_healthy = false;
 static bool g_ota_authorized = false;
-static bool g_auto_on = false;
-static int g_auto_max = 9;
-static rmt_data_t g_wave;
-static int g_speed = 0;
-static float g_inside_c = NAN;
-static float g_outside_c = NAN;
-static uint32_t g_outside_ms = 0;
-static time_t g_outdoor_epoch = 0;  // bridge's own timestamp topic, if any
-// Board self-heating correction: charging current warms the board-mounted
-// BME280 far more than idle operation does. User-tunable via
-// /api/config?offc=&offi= (Celsius, added to the raw reading).
-static float g_off_chg = -3.0f;
-static float g_off_idle = -1.0f;
 static uint32_t g_last_reconnect_ms = 0;
 static uint32_t g_mqtt_up_ms = 0;
 static uint32_t g_last_sample_ms = 0;
@@ -97,115 +83,26 @@ static bool g_epd_ok = false;
 static uint32_t g_last_epd_ms = 0;
 static int g_epd_speed_shown = -99;
 static char g_token[40];
-static int g_auto_min = 0;                           // rest speed once equalized (0 = off)
-static float g_auto_onf = 2.5f, g_auto_offf = 1.5f;  // engage/release, deg F
-static bool g_auto_high = false;                     // hysteresis latch for fan_auto_decide
-
-static void set_wave(uint16_t high_us) {
-  if (!g_rmt_ready) {
-    if (!rmtInit(FAN_PWM_PIN, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 1000000)) {
-      Serial.println("rmtInit FAILED");
-      return;
-    }
-    g_rmt_ready = true;
-  }
-  if (high_us >= kPeriodUs || high_us == 0) {
-    g_wave.level0 = high_us ? 1 : 0;
-    g_wave.duration0 = kPeriodUs / 2;
-    g_wave.level1 = high_us ? 1 : 0;
-    g_wave.duration1 = kPeriodUs - kPeriodUs / 2;
-  } else {
-    g_wave.level0 = 1;
-    g_wave.duration0 = high_us;
-    g_wave.level1 = 0;
-    g_wave.duration1 = kPeriodUs - high_us;
-  }
-  rmtWriteLooping(FAN_PWM_PIN, &g_wave, 1);
-}
-
-static float fan_watts(int speed) {
-  if (speed <= 0)
-    return 0;
-  const float f = speed / 12.0f;
-  return 5.0f + 100.0f * f * f * f;  // cubic fan law, rough estimate
-}
 
 static void sse_push();
+static void publish_state();
+
+// Thin wrapper deciding manual-ness for fan::apply: an HTTP set is always the
+// human; an MQTT set is the human unless it lands in the retained-replay grace
+// window right after the broker connects.
+static void apply_speed(int v, const char* source) {
+  const bool manual = strcmp(source, "http") == 0 ||
+                      (strcmp(source, "mqtt") == 0 && millis() - g_mqtt_up_ms > kMqttGraceMs);
+  fan::apply(v, source, manual);
+}
 
 static void publish_state() {
   if (!g_mqtt.connected())
     return;
   char buf[4];
-  snprintf(buf, sizeof(buf), "%d", g_speed);
+  snprintf(buf, sizeof(buf), "%d", fan::speed());
   g_mqtt.publish(kTopicState, buf, true);
 }
-
-// source: "boot", "http", "mqtt", "auto". Manual sources disable auto mode
-// (the human explicitly grabbed the wheel); retained-replay right after the
-// broker connects does not count as manual.
-static void apply_speed(int v, const char* source) {
-  if (v < 0 || v > 12 || v == g_speed)
-    return;
-  const bool manual = strcmp(source, "http") == 0 ||
-                      (strcmp(source, "mqtt") == 0 && millis() - g_mqtt_up_ms > kMqttGraceMs);
-  if (manual && g_auto_on) {
-    g_auto_on = false;
-    g_prefs.putBool("auto", false);
-    Serial.println("auto mode off (manual override)");
-  }
-  g_speed = v;
-  set_wave(kHighUs[v]);
-  publish_state();
-  if (strcmp(source, "mqtt") != 0 && g_mqtt.connected()) {
-    char buf[4];
-    snprintf(buf, sizeof(buf), "%d", v);
-    g_mqtt.publish(kTopicSet, buf, true);
-  }
-  g_prefs.putInt("speed", v);  // survives power loss even broker-less
-  sse_push();
-  Serial.printf("speed -> %d via %s\n", v, source);
-}
-
-static bool time_synced();
-
-static bool is_charging() { return battery::charging(); }
-
-static float temp_corrected(float raw) { return raw + (is_charging() ? g_off_chg : g_off_idle); }
-
-static float outside_c_fresh() {
-  // A bridge that publishes its own epoch timestamp gives real freshness --
-  // retained redelivery of an old snapshot reads as stale, as it should.
-  // Feeds without a ts topic fall back to receipt-time freshness.
-  if (g_outdoor_epoch > 0) {
-    if (!time_synced() || time(nullptr) - g_outdoor_epoch > 1800)
-      return NAN;
-    return g_outside_c;
-  }
-  if (g_outside_ms == 0 || millis() - g_outside_ms > kOutdoorStaleMs)
-    return NAN;
-  return g_outside_c;
-}
-
-static void auto_tick() {
-  if (!g_auto_on)
-    return;
-  if (g_bme_ok) {
-    const float t = g_bme.readTemperature();
-    if (!isnan(t))
-      g_inside_c = temp_corrected(t);
-  }
-  FanAutoCfg cfg = kFanAutoDefaults;
-  cfg.min_speed = g_auto_min;
-  cfg.max_speed = g_auto_max;
-  cfg.on_delta_c = g_auto_onf * 5 / 9;  // user thinks in F; logic runs in C
-  cfg.off_delta_c = g_auto_offf * 5 / 9;
-  const int next =
-      fan_auto_decide(g_inside_c, outside_c_fresh(), g_speed < 0 ? 0 : g_speed, &g_auto_high, cfg);
-  if (next != g_speed)
-    apply_speed(next, "auto");
-}
-
-static bool time_synced() { return time(nullptr) > 1700000000; }
 
 static void sd_mount() {
   // Full teardown between attempts, per storage.cpp: a card interrupted
@@ -256,31 +153,19 @@ static void sd_log_sample(time_t now, float t, float h, float p) {
     g_sd_ok = false;  // card yanked; re-detect on reboot
     return;
   }
-  const float out = outside_c_fresh();
+  const float out = climate::outside_c_fresh();
   char line[96];
   int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d\n", (long)now, t, h, p,
-                   isnan(out) ? -999.0f : out, g_speed);
+                   isnan(out) ? -999.0f : out, fan::speed());
   f.write((const uint8_t*)line, n);
   f.close();
   CRUMB_CLEAR();
 }
 
 static void sample_climate() {
-  if (!g_bme_ok) {
-    g_bme_ok = g_bme.begin(0x77, &Wire) || g_bme.begin(0x76, &Wire);
-    if (!g_bme_ok)
-      return;
-    Serial.println("bme280 detected");
-  }
-  const float t_raw = g_bme.readTemperature();
-  const float h = g_bme.readHumidity();
-  const float p = g_bme.readPressure() / 100.0f;
-  if (isnan(t_raw) || isnan(h) || isnan(p)) {
-    g_bme_ok = false;
+  float t, h, p;
+  if (!climate::sample(&t, &h, &p))
     return;
-  }
-  const float t = temp_corrected(t_raw);
-  g_inside_c = t;
   // Battery first so this sample's ring row records the fresh reading and
   // the charging verdict it produced, not the 5-minute-old one.
   battery::sample();
@@ -297,9 +182,9 @@ static void sample_climate() {
   g_ring_t[g_ring_count] = t;
   g_ring_h[g_ring_count] = h;
   g_ring_p[g_ring_count] = p;
-  const float oc = outside_c_fresh();
+  const float oc = climate::outside_c_fresh();
   g_ring_o[g_ring_count] = isnan(oc) ? NAN : oc * 9 / 5 + 32;
-  g_ring_s[g_ring_count] = (int8_t)(g_speed < 0 ? 0 : g_speed);
+  g_ring_s[g_ring_count] = (int8_t)(fan::speed() < 0 ? 0 : fan::speed());
   g_ring_bv[g_ring_count] = battery::kind() ? battery::volts() : NAN;
   g_ring_c[g_ring_count] = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
   g_ring_count++;
@@ -316,7 +201,7 @@ static void sample_climate() {
 
 static void state_json(char* out, size_t cap) {
   const esp_partition_t* run = esp_ota_get_running_partition();
-  const float oc = outside_c_fresh();
+  const float oc = climate::outside_c_fresh();
   char outside[16];
   if (isnan(oc))
     snprintf(outside, sizeof(outside), "null");
@@ -353,11 +238,12 @@ static void state_json(char* out, size_t cap) {
            "\"sd_total_mb\":%lu,"
            "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\"}",
-           g_speed, g_auto_on ? "true" : "false", g_auto_max, g_auto_min, g_auto_onf, g_auto_offf,
-           outside, is_charging() ? g_off_chg : g_off_idle, g_off_chg, g_off_idle, kFwVersion,
-           run ? run->label : "?", ota_rollback_image_confirmed() ? "true" : "false",
-           (unsigned long)ota_rollback_unhealthy_boots(), g_bme_ok ? "true" : "false", g_last_death,
-           (unsigned long)g_boots, g_prev_death, g_sd_quarantined ? "true" : "false",
+           fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
+           fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
+           climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
+           ota_rollback_image_confirmed() ? "true" : "false",
+           (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
+           g_last_death, (unsigned long)g_boots, g_prev_death, g_sd_quarantined ? "true" : "false",
            g_sd_ok ? (unsigned long)(SD.totalBytes() / 1048576) : 0,
            g_sd_ok ? (unsigned long)(SD.usedBytes() / 1048576) : 0, batt, WiFi.RSSI(),
            g_mqtt.connected() ? "true" : "false", millis() / 1000UL,
@@ -446,14 +332,14 @@ static void epd_render() {
     g_epd.printf("RH %.0f%%", rh);
   g_epd.setTextSize(3);
   g_epd.setCursor(158, 8);
-  if (g_speed <= 0)
+  if (fan::speed() <= 0)
     g_epd.print("OFF");
   else
-    g_epd.printf("F%d", g_speed);
+    g_epd.printf("F%d", fan::speed());
   g_epd.setTextSize(1);
   g_epd.setCursor(158, 38);
-  g_epd.print(g_auto_on ? "AUTO ON" : "AUTO OFF");
-  const float oc = outside_c_fresh();
+  g_epd.print(fan::auto_on() ? "AUTO ON" : "AUTO OFF");
+  const float oc = climate::outside_c_fresh();
   g_epd.setCursor(158, 52);
   if (isnan(oc))
     g_epd.print("OUT --");
@@ -471,7 +357,7 @@ static void epd_render() {
   g_epd.display();
   CRUMB_CLEAR();
   g_last_epd_ms = millis();
-  g_epd_speed_shown = g_speed;
+  g_epd_speed_shown = fan::speed();
 }
 
 static void handle_stats() {
@@ -490,7 +376,7 @@ static void handle_stats() {
            "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
            "\"t_avg_f\":%.1f,\"samples\":%u}",
            (unsigned long)g_run_today_s, (unsigned long)g_run_total_s, g_energy_wh,
-           fan_watts(g_speed < 0 ? 0 : g_speed), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
+           fan::watts(fan::speed() < 0 ? 0 : fan::speed()), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
            isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
            g_ring_count ? (tsum / g_ring_count) * 9 / 5 + 32 : 0, g_ring_count);
   g_http.send(200, "application/json", buf);
@@ -634,58 +520,39 @@ static void handle_restart() {
 }
 
 static void handle_config() {
-  if (g_http.hasArg("auto")) {
-    g_auto_on = g_http.arg("auto").toInt() != 0;
-    g_prefs.putBool("auto", g_auto_on);
-    Serial.printf("auto mode %s\n", g_auto_on ? "on" : "off");
-  }
+  if (g_http.hasArg("auto"))
+    fan::set_auto(g_http.arg("auto").toInt() != 0);
   if (g_http.hasArg("max")) {
     const int m = g_http.arg("max").toInt();
-    if (m >= 1 && m <= 12) {
-      g_auto_max = m;
-      g_prefs.putInt("max", m);
-    }
+    if (m >= 1 && m <= 12)
+      fan::set_auto_max(m);
   }
   if (g_http.hasArg("offc")) {
     const float v = g_http.arg("offc").toFloat();
-    if (v >= -15 && v <= 15) {
-      g_off_chg = v;
-      g_prefs.putFloat("offc", v);
-    }
+    if (v >= -15 && v <= 15)
+      climate::set_offset_charging(v);
   }
   if (g_http.hasArg("offi")) {
     const float v = g_http.arg("offi").toFloat();
-    if (v >= -15 && v <= 15) {
-      g_off_idle = v;
-      g_prefs.putFloat("offi", v);
-    }
+    if (v >= -15 && v <= 15)
+      climate::set_offset_idle(v);
   }
   if (g_http.hasArg("min")) {
     const int m = g_http.arg("min").toInt();
-    if (m >= 0 && m <= 12) {
-      g_auto_min = m;
-      g_prefs.putInt("amin", m);
-    }
+    if (m >= 0 && m <= 12)
+      fan::set_auto_min(m);
   }
   if (g_http.hasArg("onf")) {
     const float v = g_http.arg("onf").toFloat();
-    if (v >= 0.5f && v <= 20) {
-      g_auto_onf = v;
-      g_prefs.putFloat("onf", v);
-    }
+    if (v >= 0.5f && v <= 20)
+      fan::set_engage_f(v);
   }
   if (g_http.hasArg("offf")) {
     const float v = g_http.arg("offf").toFloat();
-    if (v >= 0 && v <= 20) {
-      g_auto_offf = v;
-      g_prefs.putFloat("offf", v);
-    }
+    if (v >= 0 && v <= 20)
+      fan::set_release_f(v);
   }
-  // Hysteresis needs release strictly below engage or the latch flaps.
-  if (g_auto_offf >= g_auto_onf) {
-    g_auto_offf = g_auto_onf > 0.5f ? g_auto_onf - 0.5f : 0;
-    g_prefs.putFloat("offf", g_auto_offf);
-  }
+  fan::enforce_hysteresis_gap();
   if (g_http.hasArg("newtoken") && g_http.arg("auth") == g_token) {
     const String nt = g_http.arg("newtoken");
     if (nt.length() >= 6 && nt.length() < 39) {
@@ -699,7 +566,7 @@ static void handle_config() {
 }
 
 static void handle_sensors() {
-  if (!g_bme_ok || g_ring_count == 0) {
+  if (!climate::ok() || g_ring_count == 0) {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
@@ -951,8 +818,7 @@ static void handle_raw() {
     g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
     return;
   }
-  set_wave((uint16_t)((uint32_t)kPeriodUs * pct / 100));
-  g_speed = -1;
+  fan::raw_high_us((uint16_t)((uint32_t)kPeriodUs * pct / 100));
   char buf[48];
   snprintf(buf, sizeof(buf), "{\"raw_high_pct\":%d}", pct);
   g_http.send(200, "application/json", buf);
@@ -968,8 +834,6 @@ static void handle_set() {
     g_http.send(400, "application/json", "{\"error\":\"0-12 only\"}");
     return;
   }
-  if (g_speed == -1 && v == 0)
-    g_speed = -2;  // force off to re-apply after raw
   apply_speed(v, "http");
   handle_state();
 }
@@ -1020,16 +884,14 @@ static void on_message(char* topic, uint8_t* payload, unsigned int len) {
       strncmp(topic, MQTT_SUB_BASE, strlen(MQTT_SUB_BASE)) == 0) {
     const long e = strtol(buf, nullptr, 10);
     if (e > 1700000000)
-      g_outdoor_epoch = e;
+      climate::set_outdoor_epoch(e);
     return;
   }
   if (strcmp(topic, kTopicOutdoor) == 0) {
     char* end = nullptr;
     const float f = strtof(buf, &end);
-    if (end != buf && isfinite(f) && f > -60 && f < 150) {
-      g_outside_c = (f - 32.0f) * 5.0f / 9.0f;
-      g_outside_ms = millis();
-    }
+    if (end != buf && isfinite(f) && f > -60 && f < 150)
+      climate::set_outside_f(f);
     return;
   }
   if (strcmp(topic, kTopicSet) != 0 || len == 0 || len > 2)
@@ -1073,26 +935,26 @@ void setup() {
   Serial.begin(115200);
   ota_rollback_check_at_boot();
   g_prefs.begin("fanctl", false);
-  g_auto_on = g_prefs.getBool("auto", false);
-  g_auto_max = g_prefs.getInt("max", 9);
-  g_off_chg = g_prefs.getFloat("offc", -3.0f);
-  g_off_idle = g_prefs.getFloat("offi", -1.0f);
-  g_auto_min = g_prefs.getInt("amin", 0);
-  g_auto_onf = g_prefs.getFloat("onf", 2.5f);
-  g_auto_offf = g_prefs.getFloat("offf", 1.5f);
   battery::restore(&g_prefs);
+  climate::restore(&g_prefs);
+  // Announce speed changes over whatever transports are up. Registered before
+  // fan::restore so even the boot-time resume publishes once MQTT connects.
+  fan::set_notify([](int speed, bool from_mqtt) {
+    publish_state();
+    if (!from_mqtt && g_mqtt.connected()) {
+      char buf[4];
+      snprintf(buf, sizeof(buf), "%d", speed);
+      g_mqtt.publish(kTopicSet, buf, true);
+    }
+    sse_push();
+  });
+  fan::restore(&g_prefs);
   g_run_total_s = g_prefs.getUInt("runs", 0);
   g_run_today_s = g_prefs.getUInt("runt", 0);
   g_today_ymd = g_prefs.getUInt("ymd", 0);
   g_energy_wh = g_prefs.getFloat("ewh", 0);
   String tk = g_prefs.getString("token", FAN_OTA_TOKEN);
   snprintf(g_token, sizeof(g_token), "%s", tk.c_str());
-  const int saved = g_prefs.getInt("speed", 0);
-  if (saved > 0 && saved <= 12) {
-    g_speed = saved;
-    set_wave(kHighUs[saved]);  // resume before WiFi even exists
-    Serial.printf("restored speed %d from nvs\n", saved);
-  }
   // SD stays OUT of the boot path: the controller comes fully online first,
   // and the first mount attempt happens ~60 s later from loop(). A card that
   // crashes the mount gets quarantined by the sentinel above -- no card can
@@ -1246,10 +1108,10 @@ void loop() {
   // Runtime odometer + energy integration, once per second.
   if (millis() - g_last_count_ms >= 1000) {
     g_last_count_ms = millis();
-    if (g_speed > 0) {
+    if (fan::speed() > 0) {
       g_run_total_s++;
       g_run_today_s++;
-      g_energy_wh += fan_watts(g_speed) / 3600.0f;
+      g_energy_wh += fan::watts(fan::speed()) / 3600.0f;
     }
     if (time_synced()) {
       struct tm lt;
@@ -1271,7 +1133,7 @@ void loop() {
   // E-ink: refresh with each sample cycle, or 60 s after a speed change.
   if (g_epd_ok && g_ring_count &&
       ((millis() - g_last_epd_ms >= kSampleMs) ||
-       (g_speed != g_epd_speed_shown && millis() - g_last_epd_ms >= 60000)))
+       (fan::speed() != g_epd_speed_shown && millis() - g_last_epd_ms >= 60000)))
     epd_render();
   if (g_last_sample_ms == 0 || millis() - g_last_sample_ms >= kSampleMs) {
     g_last_sample_ms = millis();
@@ -1280,7 +1142,7 @@ void loop() {
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
-    auto_tick();
+    fan::tick_auto();
     battery::begin();
     battery::read();
     // First mount attempt ~60 s after boot, then every 5 min, 10-fail cap,
