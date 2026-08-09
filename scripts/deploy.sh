@@ -21,7 +21,18 @@ HOST="${1:-garage-fan.local}"
 ENV="${DEPLOY_ENV:-feather_esp32s2_fan_controller}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERIFY_TIMEOUT="${DEPLOY_VERIFY_TIMEOUT:-300}"
-TOKEN="${FAN_OTA_TOKEN:-iliving-ota}"
+# Token preference order: explicit env var, then whatever the build baked in
+# (gen_device_header.py emits FAN_OTA_TOKEN when .env provides one), then the
+# public default -- with a loud warning, because a device provisioned with the
+# committed constant accepts OTA from anyone on the LAN who read the source.
+HDR="$ROOT/firmware/arduino/src/generated_config.h"
+HDR_TOKEN=$(sed -n 's/^#define FAN_OTA_TOKEN "\(.*\)"$/\1/p' "$HDR" 2>/dev/null | head -1)
+TOKEN="${FAN_OTA_TOKEN:-${HDR_TOKEN:-iliving-ota}}"
+if [ "$TOKEN" = "iliving-ota" ]; then
+  echo "WARNING: using the public default OTA token. Set FAN_OTA_TOKEN in .env"
+  echo "         (and reflash) so token-gated endpoints stop accepting the"
+  echo "         value committed to a public repository."
+fi
 
 pio run -d "$ROOT/firmware/arduino" -e "$ENV"
 
