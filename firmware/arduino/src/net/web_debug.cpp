@@ -19,7 +19,9 @@ WebServer* g_http = nullptr;
 const char* g_token = "";
 
 bool authorized() {
-  if (g_http->arg("token") == g_token)
+  // Same rule as web.cpp's token_ok: an empty configured token authorizes
+  // nothing -- otherwise a missing ?token= argument compares "" == "".
+  if (g_token[0] != '\0' && g_http->arg("token") == g_token)
     return true;
   g_http->send(403, "application/json", "{\"error\":\"bad token\"}");
   return false;
