@@ -99,10 +99,13 @@ while [ $SECONDS -lt $deadline ]; do
       # healthy. Added 2026-08-09 after an OTA upload starved the task watchdog
       # and panicked the board -- the old verify would still have said VERIFIED
       # on the next boot without mentioning the corpse.
-      cause=$(echo "$state" | sed -n 's/.*"last_reset":"\([^"]*\)".*/\1/p')
-      sd_mb=$(echo "$state" | sed -n 's/.*"sd_total_mb":\([0-9]*\).*/\1/p')
-      drops=$(echo "$state" | sed -n 's/.*"drops":\([0-9]*\).*/\1/p')
-      echo "  smoke: boot_cause=$cause sd_total_mb=${sd_mb:-?} wifi_drops=${drops:-?}"
+      # NOSONAR on the $state consumers: S5332 traces these to the plain-HTTP
+      # curl above. The target is a LAN-only ESP32 with no TLS stack; HTTP is
+      # the device's only protocol, not an oversight.
+      cause=$(echo "$state" | sed -n 's/.*"last_reset":"\([^"]*\)".*/\1/p')    # NOSONAR
+      sd_mb=$(echo "$state" | sed -n 's/.*"sd_total_mb":\([0-9]*\).*/\1/p')   # NOSONAR
+      drops=$(echo "$state" | sed -n 's/.*"drops":\([0-9]*\).*/\1/p')         # NOSONAR
+      echo "  smoke: boot_cause=$cause sd_total_mb=${sd_mb:-?} wifi_drops=${drops:-?}"  # NOSONAR
       if [ "$cause" = "panic" ]; then
         echo "SMOKE FAIL: this boot follows a PANIC - the new image crashed once"
         echo "already. Read $HOST/api/events before trusting it."
