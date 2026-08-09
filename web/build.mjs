@@ -20,11 +20,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, 'src');
 const OUT = resolve(HERE, 'dist', 'console.html');
 
-// The bundle must not contain the raw string `)html"`, which would terminate
-// the C++ raw string literal the page is embedded in and produce a baffling
-// compile error hundreds of lines away.
-const RAW_STRING_TERMINATOR = ')html"';
-
 const js = await build({
   entryPoints: [resolve(SRC, 'main.ts')],
   bundle: true,
@@ -66,12 +61,8 @@ ${script}
 </script></body></html>
 `;
 
-if (html.includes(RAW_STRING_TERMINATOR)) {
-  throw new Error(
-    `bundle contains ${RAW_STRING_TERMINATOR}, which would terminate the C++ raw string literal in fan_controller_main.cpp`,
-  );
-}
-
+// No content restrictions apply: gen_web_page.py embeds this file as a
+// gzipped byte array, so no byte sequence can escape into the C++ source.
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, html);
 

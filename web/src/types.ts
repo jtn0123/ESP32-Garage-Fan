@@ -92,7 +92,12 @@ export type Sensors = { ok: false } | { ok: true; temp_c: number; rh: number; hp
  */
 export interface History {
   interval_s: number;
-  end_ts: number; // 0 before SNTP has synced
+  /**
+   * Present (0 before SNTP has synced) on the 24 h ring response; the 7/30-day
+   * SD responses omit it entirely -- their rows are decimated from month files
+   * and carry no anchor timestamp.
+   */
+  end_ts?: number;
   temp_c: (number | null)[];
   rh: (number | null)[];
   hpa: (number | null)[];

@@ -7,7 +7,9 @@
 import type { DeviceInfo, DeviceState, History, Sensors, Stats } from './types.js';
 
 async function json<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  // Timeout so a device that drops off the network mid-request fails the
+  // call (and the poll retries) instead of holding a pending fetch forever.
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return (await res.json()) as T;
 }
@@ -28,7 +30,9 @@ export const setConfig = (query: string): Promise<DeviceState> =>
 
 /** Token-guarded maintenance. Returns the raw body so the caller can show it. */
 async function guarded(path: string, token: string): Promise<string> {
-  const res = await fetch(`${path}?token=${encodeURIComponent(token)}`);
+  // POST to match the firmware: these routes reboot the board or erase the
+  // card, and are registered POST-only so GET prefetchers can never fire them.
+  const res = await fetch(`${path}?token=${encodeURIComponent(token)}`, { method: 'POST' });
   return res.text();
 }
 

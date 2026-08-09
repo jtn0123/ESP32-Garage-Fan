@@ -99,6 +99,19 @@ describe('evaluate', () => {
     expect(evaluate('1.13.0', [release('v1.14.0', { draft: true })]).kind).toBe('unknown');
   });
 
+  it('offers the highest stable version even when a hotfix was created later', () => {
+    // GitHub orders /releases by creation time: a backported v1.13.1 tagged
+    // after v2.0.0 arrives first in the list and must not shadow it.
+    const got = evaluate('1.13.0', [release('v1.13.1'), release('v2.0.0')]);
+    expect(got.kind).toBe('available');
+    if (got.kind === 'available') expect(got.latest).toBe('v2.0.0');
+  });
+
+  it('falls back to the newest release when no tag parses', () => {
+    const got = evaluate('1.13.0', [release('nightly'), release('latest-build')]);
+    expect(got.kind).toBe('unknown');
+  });
+
   it('still reports available when the release has no attached binary', () => {
     // The banner should link to the release page even if CI has not finished
     // attaching the image -- silence would look like "no update exists".

@@ -20,8 +20,12 @@ export interface Series {
   chg: number[];
 }
 
-/** The outdoor column stores -999 rather than null in the CSV path. */
-const OUTDOOR_ABSENT = -100;
+/**
+ * The firmware's CSV path stores -999 when no outdoor reading existed; treat
+ * anything at or below this threshold as absent rather than matching the
+ * sentinel exactly, so a float round-trip cannot sneak it past the filter.
+ */
+const OUTDOOR_ABSENT_MAX = -100;
 
 export function build(h: History): Series {
   const n = h.temp_c?.length ?? 0;
@@ -46,7 +50,7 @@ export function build(h: History): Series {
     ts,
     night,
     tf: (h.temp_c ?? []).map((v) => (v === null ? null : v * 9 / 5 + 32)),
-    of: (h.out_f ?? []).map((v) => (v === null || v <= OUTDOOR_ABSENT ? null : v)),
+    of: (h.out_f ?? []).map((v) => (v === null || v <= OUTDOOR_ABSENT_MAX ? null : v)),
     rh: keep(h.rh),
     hpa: keep(h.hpa),
     spd: h.spd ?? [],

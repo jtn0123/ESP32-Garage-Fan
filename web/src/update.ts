@@ -10,7 +10,7 @@
 // Everything here is pure apart from `fetchLatestRelease`, which takes its
 // fetch implementation as a parameter so the tests never touch the network.
 
-import { isUpgrade, type Comparison } from './version.js';
+import { isUpgrade, versionCode, type Comparison } from './version.js';
 
 export interface ReleaseAsset {
   name: string;
@@ -67,11 +67,21 @@ export function pickChecksumAsset(
  * or a DOM.
  */
 export function evaluate(runningVersion: string, releases: readonly Release[]): UpdateStatus {
-  // Newest first, as GitHub returns them. Skip drafts, and skip pre-releases:
-  // a garage fan should not be offered a release candidate.
+  // GitHub orders by creation time, and a backported hotfix (say v1.13.1
+  // tagged after v2.0.0) would sit first. Compare parsed versions instead and
+  // offer the highest stable one. Drafts and pre-releases are skipped: a
+  // garage fan should not be offered a release candidate.
   const usable = releases.filter((r) => !r.draft && !r.prerelease);
-  const latest = usable[0];
-  if (!latest) return { kind: 'unknown', reason: 'no published releases yet' };
+  if (!usable.length) return { kind: 'unknown', reason: 'no published releases yet' };
+  let latest = usable[0]!;
+  let latestCode = versionCode(latest.tag_name);
+  for (const r of usable.slice(1)) {
+    const code = versionCode(r.tag_name);
+    if (code !== null && (latestCode === null || code > latestCode)) {
+      latest = r;
+      latestCode = code;
+    }
+  }
 
   const verdict: Comparison = isUpgrade(runningVersion, latest.tag_name);
   if (verdict === 'unknown') {

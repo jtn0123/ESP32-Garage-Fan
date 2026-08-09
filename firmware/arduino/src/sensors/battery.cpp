@@ -8,6 +8,7 @@
 #include <Wire.h>
 
 #include <cmath>
+#include <cstring>
 
 namespace battery {
 namespace {
@@ -181,7 +182,10 @@ void sample() {
     memmove(g_v_hist, g_v_hist + 1, 11 * sizeof(float));
     g_pct_n--;
   }
-  g_pct_hist[g_pct_n] = isnan(g_percent) ? 0 : g_percent;
+  // Carry the last known percent through a failed read instead of writing 0:
+  // a spurious zero in the window looks like a huge discharge and flips the
+  // charging verdict, which then swings the temperature offset.
+  g_pct_hist[g_pct_n] = isnan(g_percent) ? (g_pct_n ? g_pct_hist[g_pct_n - 1] : 0) : g_percent;
   g_v_hist[g_pct_n] = g_volts;
   g_pct_n++;
   update_charging();

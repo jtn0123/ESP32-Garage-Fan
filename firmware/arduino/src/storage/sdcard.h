@@ -28,6 +28,13 @@ void set_quarantined(bool q);
 void mount_guarded();
 
 /**
+ * The raw probe endpoint tears down the SD/SPI buses behind this module's
+ * back; it must declare that here so the mount state cannot go stale and
+ * silently drop CSV rows until the retry backoff catches up.
+ */
+void mark_unmounted();
+
+/**
  * Loop-cadence retry: first attempt ~60 s after boot, then every 10th call
  * (~5 min at the auto tick), capped at 10 failures, never while quarantined.
  * /api/sdformat overrides all of it.

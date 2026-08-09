@@ -20,7 +20,8 @@ namespace display {
 namespace {
 
 // 2.13" mono SSD1680 FeatherWing, landscape; no busy/rst pins wired.
-// Heap-constructed in begin() so a build that never calls it pays nothing.
+// Constructed lazily as a function-local static inside begin() so the driver
+// object only exists once the panel is actually initialised.
 Adafruit_SSD1680* g_epd = nullptr;
 bool g_ok = false;
 uint32_t g_last_ms = 0;
