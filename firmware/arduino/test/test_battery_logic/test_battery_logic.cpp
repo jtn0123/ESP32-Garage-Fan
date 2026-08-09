@@ -15,6 +15,8 @@ using battery::judge_charging;
 using battery::kWinLen;
 using battery::Window;
 
+// Unity requires both lifecycle hooks; these tests keep no fixture state,
+// so there is nothing to set up or release between cases.
 void setUp() {}
 void tearDown() {}
 
@@ -103,16 +105,14 @@ static void test_rsoc_rise_enters_charging() {
 
 static void test_window_evicts_at_capacity() {
   Window w;
-  for (int i = 0; i < kWinLen + 2; i++)
-    w.push(3.5f + i * 0.01f, static_cast<float>(i));
+  for (int i = 0; i < kWinLen + 2; i++) w.push(3.5f + i * 0.01f, static_cast<float>(i));
   TEST_ASSERT_EQUAL_UINT8(kWinLen, w.n);
   TEST_ASSERT_EQUAL_FLOAT(2.0f, w.pct[0]);  // the first two points aged out
 }
 
 static void test_eta_needs_six_points_and_discharge() {
   Window w;
-  for (int i = 0; i < 5; i++)
-    w.push(3.9f, 90.0f - i);
+  for (int i = 0; i < 5; i++) w.push(3.9f, 90.0f - i);
   TEST_ASSERT_TRUE(std::isnan(eta_hours(w, 86, false)));  // only 5 points
   w.push(3.9f, 85.0f);
   TEST_ASSERT_TRUE(std::isnan(eta_hours(w, 85, true)));  // charging -> no ETA
@@ -122,12 +122,10 @@ static void test_eta_needs_six_points_and_discharge() {
 
 static void test_eta_flat_or_unknown_rsoc_is_nan() {
   Window flat;
-  for (int i = 0; i < 8; i++)
-    flat.push(3.9f, 80.0f);  // no drain at all
+  for (int i = 0; i < 8; i++) flat.push(3.9f, 80.0f);  // no drain at all
   TEST_ASSERT_TRUE(std::isnan(eta_hours(flat, 80, false)));
   Window unknown;
-  for (int i = 0; i < 8; i++)
-    unknown.push(3.9f, NAN);  // RSOC never answered
+  for (int i = 0; i < 8; i++) unknown.push(3.9f, NAN);  // RSOC never answered
   TEST_ASSERT_TRUE(std::isnan(eta_hours(unknown, 80, false)));
 }
 

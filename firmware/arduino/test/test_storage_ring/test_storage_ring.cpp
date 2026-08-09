@@ -11,6 +11,8 @@
 using history::Ring;
 using history::Sample;
 
+// Unity requires both lifecycle hooks; these tests keep no fixture state,
+// so there is nothing to set up or release between cases.
 void setUp() {}
 void tearDown() {}
 
@@ -39,8 +41,7 @@ static void test_fills_in_order() {
 
 static void test_evicts_oldest_once_full() {
   Ring<4> r;
-  for (int i = 0; i < 6; i++)
-    r.append(row(20 + i, (int8_t)i));
+  for (int i = 0; i < 6; i++) r.append(row(20 + i, (int8_t)i));
   TEST_ASSERT_EQUAL_UINT16(4, r.n);  // never exceeds capacity
   TEST_ASSERT_EQUAL_FLOAT(22, r.t[0]);
   TEST_ASSERT_EQUAL_FLOAT(25, r.t[3]);  // newest at the end
@@ -50,8 +51,7 @@ static void test_all_columns_move_together() {
   // The eviction is seven separate memmoves; a missed column would silently
   // pair sample i's temperature with sample i+1's speed forever after.
   Ring<3> r;
-  for (int i = 0; i < 5; i++)
-    r.append(row(10 + i, (int8_t)(i)));
+  for (int i = 0; i < 5; i++) r.append(row(10 + i, (int8_t)(i)));
   for (uint16_t i = 0; i < r.n; i++) {
     TEST_ASSERT_EQUAL_FLOAT(r.t[i] + 40, r.h[i]);
     TEST_ASSERT_EQUAL_FLOAT(r.t[i] + 900, r.p[i]);

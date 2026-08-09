@@ -307,7 +307,11 @@ export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number)
   while (i < s.n) {
     if (s.chg[i] === 1) {
       let j = i;
-      while (j < s.n && s.chg[j] === 1) j++;
+      // A shading run ends at an outage gap: whether the charger ran while
+      // the device was dark is unknown, so the tint must not claim it did.
+      // (Night shading deliberately differs -- night is clock-derived and
+      // true regardless of whether the device was awake to record it.)
+      while (j < s.n && s.chg[j] === 1 && (j === i || !s.gap[j])) j++;
       const x0 = xAt(s, i, W);
       c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
       i = j;

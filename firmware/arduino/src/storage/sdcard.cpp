@@ -28,6 +28,7 @@ constexpr uint32_t kEventsRotateBytes = 512 * 1024;
 // This rig's SPI wiring is marginal at speed: a card that ignores 4 MHz often
 // answers at 1 MHz or 400 kHz, so every begin() walks this ladder.
 static const uint32_t kFreqs[] = {4000000, 1000000, 400000};
+constexpr size_t kFreqCount = sizeof(kFreqs) / sizeof(kFreqs[0]);
 
 // Full teardown between attempts, per storage.cpp: a card interrupted
 // mid-transaction by a reset stops answering until the bus restarts from
@@ -51,7 +52,7 @@ static bool begin_attempt(uint32_t freq, bool format_if_failed) {
 }
 
 static void mount() {
-  for (size_t i = 0; i < 3; i++) {
+  for (size_t i = 0; i < kFreqCount; i++) {
     if (i > 0)
       bus_restart();
     if (begin_attempt(kFreqs[i], false)) {
@@ -191,7 +192,7 @@ bool format() {
   // 4 MHz returned 500 on a healthy 32 GB card (2026-08-09) that the ladder
   // handshakes fine -- the failure was the bus speed, not the card.
   bool ok = false;
-  for (size_t i = 0; i < 3 && !ok; i++) {
+  for (size_t i = 0; i < kFreqCount && !ok; i++) {
     bus_restart();
     ok = begin_attempt(kFreqs[i], true);
   }
@@ -239,8 +240,10 @@ bool append_event_line(const char* line) {
 }
 
 uint32_t tail_events(char* buf, uint32_t cap) {
+  if (!buf || cap < 2)
+    return 0;  // nothing writable; do not touch the buffer at all
   buf[0] = '\0';
-  if (!g_ok || cap < 2)
+  if (!g_ok)
     return 0;
   CRUMB("sd_evt_r");
   File f = SD.open(kEventsPath, FILE_READ);

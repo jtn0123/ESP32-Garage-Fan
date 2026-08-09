@@ -43,7 +43,13 @@ void handle_upload() {
 }
 
 void handle_done() {
-  if (!g_authorized) {
+  // Consume the flag: module state outlives requests, and a body-less POST
+  // never runs the upload handler at all -- without this, one authorized
+  // upload that failed mid-flash would let the NEXT caller reboot the board
+  // tokenless.
+  const bool authorized = g_authorized;
+  g_authorized = false;
+  if (!authorized) {
     g_http->send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }

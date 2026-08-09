@@ -46,17 +46,27 @@ void flush_tick() {
   // event burst from turning one tick into a run of SD writes.
   for (int i = 0; i < 8; i++) {
     char line[104];
+    uint32_t seq = 0;
     portENTER_CRITICAL(&g_mux);
     const uint16_t pending = g_ring.unflushed();
-    if (pending)
+    if (pending) {
+      // The ledger IS the sequence: `flushed` is the lifetime index of the
+      // first unflushed line, i.e. of the line copied here.
+      seq = g_ring.flushed;
       snprintf(line, sizeof(line), "%s", g_ring.line(g_ring.first_unflushed()));
+    }
     portEXIT_CRITICAL(&g_mux);
     if (!pending)
       return;
     if (!sdcard::append_event_line(line))
       return;  // write failed and dropped the mount; retry after the remount
     portENTER_CRITICAL(&g_mux);
-    g_ring.mark_flushed(1);
+    // Acknowledge only if the ledger still points at the line just written.
+    // An event burst during the SD write can wrap the ring past it (append's
+    // guard advances `flushed` and counts it lost); blindly marking one
+    // flushed here would then skip a line that never reached the file.
+    if (g_ring.flushed == seq)
+      g_ring.mark_flushed(1);
     portEXIT_CRITICAL(&g_mux);
   }
 }
