@@ -68,8 +68,9 @@ void handle_sd_test() {
   uint8_t r1_cmd8 = 0xFF;
   if (r1_cmd0 == 0x01) {  // idle: CMD8 (SDv2 voltage check, echoes 0x1AA)
     r1_cmd8 = sd_cmd(8, 0x000001AA, 0x87);
-    if (r1_cmd8 == 0x01)
+    if (r1_cmd8 == 0x01) {
       for (int i = 0; i < 4; i++) r7[i] = SPI.transfer(0xFF);
+    }
   }
 
   // ACMD41 wake-up loop with HCS: this is where marginal power dies -- the
@@ -93,8 +94,9 @@ void handle_sd_test() {
   uint8_t r1_cmd58 = 0xFF;
   if (r1_acmd41 == 0x00) {
     r1_cmd58 = sd_cmd(58, 0, 0xFF);
-    if (r1_cmd58 <= 0x01)
+    if (r1_cmd58 <= 0x01) {
       for (int i = 0; i < 4; i++) ocr[i] = SPI.transfer(0xFF);
+    }
   }
 
   // Block 0 read: the decisive stage. If this returns the MBR signature the
