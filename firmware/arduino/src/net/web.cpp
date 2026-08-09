@@ -5,7 +5,6 @@
 #include <Arduino.h>
 #include <SD.h>
 #include <SPI.h>
-#include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <Wire.h>
@@ -24,11 +23,14 @@
 #include "net/mqtt_link.h"
 #include "net/sse.h"
 #include "net/web_debug.h"
+#include "net/web_ota.h"
+#include "net/wifi_link.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
 #include "system/crashlog.h"
+#include "system/eventlog.h"
 #include "system/odometer.h"
 #include "system/ota_rollback.h"
 #include "system/timeutil.h"
@@ -57,7 +59,6 @@ namespace {
 WebServer g_http(80);
 Preferences* g_prefs = nullptr;
 char g_token[40];
-bool g_ota_authorized = false;
 
 // An empty configured token must never authorize anything: with g_token ""
 // and no ?token= argument, arg() returns "" and a bare equality check would
@@ -105,7 +106,7 @@ void state_json(char* out, size_t cap) {
            "\"boots\":%lu,\"prev_death\":\"%s\","
            "\"sd_q\":%s,"
            "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"mqtt\":%s,"
+           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\"}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
@@ -114,7 +115,7 @@ void state_json(char* out, size_t cap) {
            (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
            crashlog::last_death(), (unsigned long)crashlog::boots(), crashlog::prev_death(),
            sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),
-           (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(),
+           (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(), (unsigned long)wifi_link::drops(),
            mqtt_link::connected() ? "true" : "false", millis() / 1000UL,
            WiFi.localIP().toString().c_str());
 }
@@ -207,6 +208,8 @@ static void handle_restart() {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
+  eventlog::log("web", "restart requested");
+  eventlog::flush_tick();  // best effort: land the reason on SD first
   g_http.send(200, "application/json", "{\"ok\":true,\"note\":\"restarting\"}");
   delay(150);  // let the response drain before the reset takes the socket
   esp_restart();
@@ -355,10 +358,11 @@ static void handle_sd_format() {
     return;
   }
   const bool ok = sdcard::format();
+  eventlog::log("sd", "format %s (%lu MB)", ok ? "ok" : "FAILED",
+                (unsigned long)sdcard::total_mb());
   char buf[80];
   snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}", ok ? "true" : "false",
            (unsigned long)sdcard::total_mb());
-  Serial.printf("[SD] format result: %s\n", buf);
   g_http.send(ok ? 200 : 500, "application/json", buf);
 }
 
@@ -393,40 +397,25 @@ static void handle_set() {
   handle_state();
 }
 
-static void handle_update_upload() {
-  HTTPUpload& up = g_http.upload();
-  if (up.status == UPLOAD_FILE_START) {
-    g_ota_authorized = token_ok(g_http.arg("token"));
-    if (!g_ota_authorized) {
-      Serial.println("[OTA] rejected: bad token");
-      return;
-    }
-    Serial.printf("[OTA] receiving %s\n", up.filename.c_str());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
-      Update.printError(Serial);
-  } else if (up.status == UPLOAD_FILE_WRITE && g_ota_authorized) {
-    if (Update.write(up.buf, up.currentSize) != up.currentSize)
-      Update.printError(Serial);
-  } else if (up.status == UPLOAD_FILE_END && g_ota_authorized) {
-    if (Update.end(true))
-      Serial.printf("[OTA] received %u bytes ok\n", up.totalSize);
-    else
-      Update.printError(Serial);
-  }
-}
-
-static void handle_update_done() {
-  if (!g_ota_authorized) {
-    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+// The flight recorder. The RAM ring by default (works with no card, this
+// boot only); ?sd=1 tails /events.log for the record that survives reboots.
+static void handle_events() {
+  if (g_http.hasArg("sd")) {
+    static char buf[4096];  // static: 4 KB does not belong on the loop stack
+    const uint32_t n = sdcard::tail_events(buf, sizeof(buf));
+    http_tx::send_big(g_http.client(), "text/plain", buf, n);
     return;
   }
-  if (Update.hasError()) {
-    g_http.send(500, "application/json", "{\"error\":\"update failed\"}");
-    return;
+  String out;
+  out.reserve(2048);
+  char line[104];
+  const uint16_t n = eventlog::count();
+  for (uint16_t i = 0; i < n; i++) {
+    eventlog::copy_line(i, line, sizeof(line));
+    out += line;
+    out += '\n';
   }
-  g_http.send(200, "application/json", "{\"ok\":true,\"note\":\"rebooting into new slot\"}");
-  delay(300);
-  esp_restart();
+  http_tx::send_big(g_http.client(), "text/plain", out.c_str(), out.length());
 }
 
 }  // namespace
@@ -462,8 +451,9 @@ void begin(Preferences* prefs) {
     http_tx::send_big(g_http.client(), "image/svg+xml", kIcon, sizeof(kIcon) - 1);
   });
   g_http.on("/api/sdformat", HTTP_POST, handle_sd_format);
+  g_http.on("/api/events", handle_events);
   web_debug::register_routes(g_http, g_token);
-  g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
+  web_ota::register_routes(g_http, g_token);
   g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
 }
 

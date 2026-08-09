@@ -45,6 +45,16 @@ void retry_tick();
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed);
 
 /**
+ * Append one flight-recorder line (newline added) to /events.log, rotating
+ * to /events.old at ~512 KB. False -- and the mount dropped, like
+ * log_sample -- when the write fails.
+ */
+bool append_event_line(const char* line);
+
+/** Copy the tail of /events.log into buf, NUL-terminated. Bytes copied. */
+uint32_t tail_events(char* buf, uint32_t cap);
+
+/**
  * Read [cutoff, now] from the month files, decimated by stride into the
  * caller's arrays. Returns rows kept.
  */

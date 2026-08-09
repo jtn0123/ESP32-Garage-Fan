@@ -21,25 +21,40 @@ bool g_ok = false;
 uint8_t g_fails = 0;  // give up retrying after 10; format resets
 bool g_quarantined = false;
 
+constexpr const char* kEventsPath = "/events.log";
+constexpr const char* kEventsOldPath = "/events.old";
+constexpr uint32_t kEventsRotateBytes = 512 * 1024;
+
+// This rig's SPI wiring is marginal at speed: a card that ignores 4 MHz often
+// answers at 1 MHz or 400 kHz, so every begin() walks this ladder.
+static const uint32_t kFreqs[] = {4000000, 1000000, 400000};
+
+// Full teardown between attempts, per storage.cpp: a card interrupted
+// mid-transaction by a reset stops answering until the bus restarts from
+// silence.
+static void bus_restart() {
+  SD.end();
+  SPI.end();
+  delay(50);
+  SPI.begin();
+}
+
+static bool begin_attempt(uint32_t freq, bool format_if_failed) {
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
+  pinMode(SRAM_CS_PIN, OUTPUT);
+  digitalWrite(SRAM_CS_PIN, HIGH);
+  pinMode(EPD_CS_PIN, OUTPUT);
+  digitalWrite(EPD_CS_PIN, HIGH);
+  return format_if_failed ? SD.begin(SD_CS_PIN, SPI, freq, "/sd", 5, true)
+                          : SD.begin(SD_CS_PIN, SPI, freq);
+}
+
 static void mount() {
-  // Full teardown between attempts, per storage.cpp: a card interrupted
-  // mid-transaction by a reset stops answering until the bus restarts from
-  // silence. Called at boot and retried from loop() until a card appears.
-  static const uint32_t kFreqs[] = {4000000, 1000000, 400000};
   for (size_t i = 0; i < 3; i++) {
-    if (i > 0) {
-      SD.end();
-      SPI.end();
-      delay(50);
-      SPI.begin();
-    }
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
-    pinMode(SRAM_CS_PIN, OUTPUT);
-    digitalWrite(SRAM_CS_PIN, HIGH);
-    pinMode(EPD_CS_PIN, OUTPUT);
-    digitalWrite(EPD_CS_PIN, HIGH);
-    if (SD.begin(SD_CS_PIN, SPI, kFreqs[i])) {
+    if (i > 0)
+      bus_restart();
+    if (begin_attempt(kFreqs[i], false)) {
       g_ok = true;
       Serial.printf("sd mounted at %lu Hz: %.1f/%.1f MB used\n", (unsigned long)kFreqs[i],
                     SD.usedBytes() / 1048576.0, SD.totalBytes() / 1048576.0);
@@ -172,23 +187,77 @@ bool format() {
   g_quarantined = false;      // manual override un-quarantines
   crashlog::rtc_sd_sentinel = crashlog::kSdSentinelMagic;
   CRUMB("sd_format");
-  SD.end();
-  SPI.end();
-  delay(50);
-  SPI.begin();
-  pinMode(SD_CS_PIN, OUTPUT);
-  digitalWrite(SD_CS_PIN, HIGH);
-  pinMode(SRAM_CS_PIN, OUTPUT);
-  digitalWrite(SRAM_CS_PIN, HIGH);
-  pinMode(EPD_CS_PIN, OUTPUT);
-  digitalWrite(EPD_CS_PIN, HIGH);
-  const bool ok = SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", 5, true);
+  // The same frequency ladder as mount(): a format that only ever tried
+  // 4 MHz returned 500 on a healthy 32 GB card (2026-08-09) that the ladder
+  // handshakes fine -- the failure was the bus speed, not the card.
+  bool ok = false;
+  for (size_t i = 0; i < 3 && !ok; i++) {
+    bus_restart();
+    ok = begin_attempt(kFreqs[i], true);
+  }
   crashlog::rtc_sd_sentinel = 0;
   CRUMB_CLEAR();
   esp_task_wdt_add(NULL);
   g_ok = ok;
   g_fails = 0;
   return ok;
+}
+
+bool append_event_line(const char* line) {
+  if (!g_ok)
+    return false;
+  CRUMB("sd_evt_w");
+  File f = SD.open(kEventsPath, FILE_APPEND);
+  if (!f) {
+    CRUMB_CLEAR();
+    g_ok = false;  // card yanked; re-detect via the retry ladder
+    return false;
+  }
+  if (f.size() > kEventsRotateBytes) {
+    // One rotation generation: half a MB of events is weeks of history, and
+    // the pulled-card reader gets at most two bounded files to think about.
+    f.close();
+    SD.remove(kEventsOldPath);
+    SD.rename(kEventsPath, kEventsOldPath);
+    f = SD.open(kEventsPath, FILE_APPEND);
+    if (!f) {
+      CRUMB_CLEAR();
+      g_ok = false;
+      return false;
+    }
+  }
+  const size_t len = strlen(line);
+  size_t written = f.write(reinterpret_cast<const uint8_t*>(line), len);
+  written += f.write('\n');
+  f.close();
+  CRUMB_CLEAR();
+  if (written != len + 1) {
+    g_ok = false;  // failing writes; remount rather than lose lines silently
+    return false;
+  }
+  return true;
+}
+
+uint32_t tail_events(char* buf, uint32_t cap) {
+  buf[0] = '\0';
+  if (!g_ok || cap < 2)
+    return 0;
+  CRUMB("sd_evt_r");
+  File f = SD.open(kEventsPath, FILE_READ);
+  if (!f) {
+    CRUMB_CLEAR();
+    return 0;
+  }
+  const uint32_t size = f.size();
+  const uint32_t want = cap - 1;
+  if (size > want)
+    f.seek(size - want);
+  const int got = f.read(reinterpret_cast<uint8_t*>(buf), want);
+  f.close();
+  CRUMB_CLEAR();
+  const uint32_t n = got > 0 ? static_cast<uint32_t>(got) : 0;
+  buf[n] = '\0';
+  return n;
 }
 
 bool ok() { return g_ok; }

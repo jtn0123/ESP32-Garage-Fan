@@ -23,7 +23,6 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <SPI.h>
-#include <WiFi.h>
 #include <Wire.h>
 
 #include <cmath>
@@ -33,11 +32,13 @@
 #include "fan/control.h"
 #include "net/mqtt_link.h"
 #include "net/web.h"
+#include "net/wifi_link.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
 #include "system/crashlog.h"
+#include "system/eventlog.h"
 #include "system/odometer.h"
 #include "system/ota_rollback.h"
 #include "system/timeutil.h"
@@ -87,6 +88,7 @@ void setup() {
   // Announce speed changes over whatever transports are up. Registered before
   // fan::restore so even the boot-time resume publishes once MQTT connects.
   fan::set_notify([](int speed, bool from_mqtt) {
+    eventlog::log("fan", "speed=%d src=%s", speed, from_mqtt ? "mqtt" : "local");
     mqtt_link::publish_state(speed);
     if (!from_mqtt)
       mqtt_link::echo_set(speed);
@@ -98,8 +100,12 @@ void setup() {
   // and the first mount attempt happens ~60 s later from loop(). A card that
   // crashed a previous boot is quarantined here and never retried.
   sdcard::set_quarantined(crashlog::examine_boot(&g_prefs));
+  // The flight recorder's first line: what killed the previous run. This is
+  // the line that turns "it randomly rebooted overnight" into a diagnosis.
+  eventlog::log("boot", "fw=%s cause=%s prev=%s boots=%lu", kFwVersion, crashlog::last_death(),
+                crashlog::prev_death(), (unsigned long)crashlog::boots());
   if (sdcard::quarantined())
-    Serial.println("[SD] previous boot died in an SD op -- card quarantined");
+    eventlog::log("sd", "previous boot died in an SD op -- card quarantined");
   // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
   // in 60 s instead of hanging dark forever. The fan rides through on RMT.
   // 60 s tolerates worst-case framework writes to one stalled peer (10 s per
@@ -112,33 +118,22 @@ void setup() {
   Wire.begin();
   SPI.begin();
   display::begin();
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.setHostname(FAN_HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  configTime(0, 0, "pool.ntp.org");
+  wifi_link::begin();
   mqtt_link::init();
   web::begin(&g_prefs);
   Serial.printf("garage fan controller %s: waiting for wifi\n", kFwVersion);
 }
 
 void loop() {
-  static wl_status_t last_wifi = WL_NO_SHIELD;
-  const wl_status_t now = WiFi.status();
-  if (now != last_wifi) {
-    last_wifi = now;
-    if (now == WL_CONNECTED) {
-      Serial.printf("wifi up: %s\n", WiFi.localIP().toString().c_str());
-      if (!g_services_up) {
-        g_services_up = true;
-        MDNS.begin(FAN_HOSTNAME);
-        MDNS.addService("http", "tcp", 80);
-        web::start();
-        Serial.printf("web ui: http://%s.local/\n", FAN_HOSTNAME);
-      }
-    }
+  if (wifi_link::connected() && !g_services_up) {
+    g_services_up = true;
+    MDNS.begin(FAN_HOSTNAME);
+    MDNS.addService("http", "tcp", 80);
+    web::start();
+    Serial.printf("web ui: http://%s.local/\n", FAN_HOSTNAME);
   }
   esp_task_wdt_reset();
+  wifi_link::tick();
   mqtt_link::tick();
   web::handle();
   odometer::tick(fan::speed(), fan::watts(fan::speed()));
@@ -147,6 +142,12 @@ void loop() {
     g_last_sample_ms = millis();
     sample_climate();
     web::push_state();
+    // The heartbeat the disconnect forensics read backwards from: the last
+    // health line before a gap dates the death and carries the vitals
+    // (signal, heap) that usually explain it.
+    eventlog::log("health", "rssi=%d heap=%lu min_heap=%lu drops=%lu", wifi_link::rssi(),
+                  (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
+                  (unsigned long)wifi_link::drops());
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
@@ -154,6 +155,7 @@ void loop() {
     battery::begin();
     battery::read();
     sdcard::retry_tick();
+    eventlog::flush_tick();
   }
   if (!mqtt_link::ever_connected() && !ota_rollback_image_confirmed() &&
       millis() > kUnconfirmedDeadlineMs) {

@@ -13,6 +13,7 @@
 #include "config.h"
 #include "fan/control.h"
 #include "sensors/climate.h"
+#include "system/eventlog.h"
 #include "system/ota_rollback.h"
 #include "system/timeutil.h"
 
@@ -94,7 +95,7 @@ static void ensure_connected() {
   char id[24];
   snprintf(id, sizeof(id), "garage-fan-%06llx", ESP.getEfuseMac() & 0xffffff);
   if (g_mqtt.connect(id, MQTT_USER, MQTT_PASS, kTopicAvail, 0, true, "offline")) {
-    Serial.println("mqtt connected");
+    eventlog::log("mqtt", "up");
     g_up_ms = millis();
     g_ever = true;
     ota_rollback_mark_healthy();
@@ -118,6 +119,13 @@ void init() {
 void tick() {
   ensure_connected();
   g_mqtt.loop();
+  // The down edge, for the flight recorder. state() at this moment still
+  // carries the failure that took the session (rc<0 transport, rc>0 broker).
+  static bool was_up = false;
+  const bool up = g_mqtt.connected();
+  if (was_up && !up)
+    eventlog::log("mqtt", "down rc=%d", g_mqtt.state());
+  was_up = up;
 }
 
 bool connected() { return g_mqtt.connected(); }
