@@ -141,7 +141,11 @@ static void update_charging() {
     return;  // not enough history to judge; hold
   const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
   const float mvh = (g_volts - g_v_hist[0]) * 1000.0f / hours;
-  const float dpct = g_pct_hist[0] - g_pct_hist[g_pct_n - 1];  // + = draining
+  // NAN endpoints (RSOC never answered) contribute no percent signal; the
+  // voltage slope alone drives the verdict then.
+  const float p_old = g_pct_hist[0];
+  const float p_new = g_pct_hist[g_pct_n - 1];
+  const float dpct = (isnan(p_old) || isnan(p_new)) ? 0.0f : p_old - p_new;  // + = draining
   // +5 mV/h is unmistakably inbound power on a big pack; 4.17 V is float.
   bool next = g_chg;
   if (mvh >= 5.0f || g_volts >= 4.17f || dpct < -0.3f)
@@ -164,7 +168,11 @@ void eta(bool* charging, float* eta_h) {
   if (g_pct_n < 6 || *charging)
     return;
   const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
-  const float delta = g_pct_hist[0] - g_pct_hist[g_pct_n - 1];  // + = draining
+  const float p_old = g_pct_hist[0];
+  const float p_new = g_pct_hist[g_pct_n - 1];
+  if (isnan(p_old) || isnan(p_new))
+    return;                           // no RSOC across the window; no meaningful slope
+  const float delta = p_old - p_new;  // + = draining
   if (delta > 0.2f)
     *eta_h = g_percent / (delta / hours);
 }
@@ -182,10 +190,12 @@ void sample() {
     memmove(g_v_hist, g_v_hist + 1, 11 * sizeof(float));
     g_pct_n--;
   }
-  // Carry the last known percent through a failed read instead of writing 0:
-  // a spurious zero in the window looks like a huge discharge and flips the
-  // charging verdict, which then swings the temperature offset.
-  g_pct_hist[g_pct_n] = isnan(g_percent) ? (g_pct_n ? g_pct_hist[g_pct_n - 1] : 0) : g_percent;
+  // Never write a real number for an unknown percent: carry the last known
+  // value through a transient failed read, and seed with NAN when RSOC has
+  // not answered yet. A fabricated 0 in the window reads as a huge charge or
+  // discharge and flips the sticky verdict, which swings the temperature
+  // offset. The delta consumers treat NAN endpoints as "no signal".
+  g_pct_hist[g_pct_n] = isnan(g_percent) ? (g_pct_n ? g_pct_hist[g_pct_n - 1] : NAN) : g_percent;
   g_v_hist[g_pct_n] = g_volts;
   g_pct_n++;
   update_charging();
