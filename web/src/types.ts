@@ -37,6 +37,7 @@ export interface DeviceState {
   sd_used_mb: number;
   batt: BatteryState | null;
   rssi: number;
+  drops: number; // WiFi disconnects since boot -- the flight recorder's counter
   mqtt: boolean;
   uptime_s: number;
   ip: string;
