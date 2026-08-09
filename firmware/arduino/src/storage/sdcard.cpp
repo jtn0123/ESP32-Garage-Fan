@@ -87,8 +87,8 @@ static void mount() {
   // "why is the card not logging" undiagnosable from the network. Heap
   // numbers included because the 2026-08-09 failure was esp_vfs_fat_register
   // returning NO_MEM -- the card was never the problem, the allocator was.
-  eventlog::log("sd", "mount failed at all %u freqs (heap=%lu largest=%lu)",
-                (unsigned)kFreqCount, (unsigned long)ESP.getFreeHeap(),
+  eventlog::log("sd", "mount failed at all %u freqs (heap=%lu largest=%lu)", (unsigned)kFreqCount,
+                (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 

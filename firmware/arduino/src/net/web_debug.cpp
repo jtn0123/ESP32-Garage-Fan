@@ -129,15 +129,15 @@ void handle_sd_test() {
   SPI.transfer(0xFF);
   SPI.endTransaction();
 
-  const char* verdict =
-      r1_cmd0 == 0xFF     ? "no response - card absent, unseated, or bad contact"
-      : r1_cmd0 != 0x01   ? "CMD0 abnormal - card answered but not idle"
-      : r1_cmd8 != 0x01   ? "CMD8 rejected - SDv1 or protocol trouble"
-      : r1_acmd41 != 0x00 ? "init stalls at ACMD41 - power sag or card incompatibility"
-      : r1_cmd58 > 0x01   ? "OCR read failed after init - bus integrity"
-      : token != 0xFE     ? "block read token missing - bus or card data path"
-      : mbr_sig           ? "FULL INIT + BLOCK READ OK - failure is in the SD library layer"
-                          : "block read corrupt - MISO integrity";
+  const char* verdict = r1_cmd0 == 0xFF   ? "no response - card absent, unseated, or bad contact"
+                        : r1_cmd0 != 0x01 ? "CMD0 abnormal - card answered but not idle"
+                        : r1_cmd8 != 0x01 ? "CMD8 rejected - SDv1 or protocol trouble"
+                        : r1_acmd41 != 0x00
+                            ? "init stalls at ACMD41 - power sag or card incompatibility"
+                        : r1_cmd58 > 0x01 ? "OCR read failed after init - bus integrity"
+                        : token != 0xFE   ? "block read token missing - bus or card data path"
+                        : mbr_sig ? "FULL INIT + BLOCK READ OK - failure is in the SD library layer"
+                                  : "block read corrupt - MISO integrity";
 
   char buf[512];
   snprintf(buf, sizeof(buf),
@@ -147,11 +147,10 @@ void handle_sd_test() {
            "\"read0\":{\"r1\":\"0x%02X\",\"token\":\"0x%02X\",\"mbr_sig\":%s,"
            "\"first8\":\"%02X%02X%02X%02X%02X%02X%02X%02X\"},"
            "\"verdict\":\"%s\"}",
-           r1_cmd0, r1_cmd8, r7[0], r7[1], r7[2], r7[3], r1_acmd41, iters,
-           (unsigned long)acmd_ms, ocr[0], ocr[1], ocr[2], ocr[3],
-           (ocr[0] & 0x40) ? "true" : "false", r1_cmd17, token, mbr_sig ? "true" : "false",
-           first8[0], first8[1], first8[2], first8[3], first8[4], first8[5], first8[6], first8[7],
-           verdict);
+           r1_cmd0, r1_cmd8, r7[0], r7[1], r7[2], r7[3], r1_acmd41, iters, (unsigned long)acmd_ms,
+           ocr[0], ocr[1], ocr[2], ocr[3], (ocr[0] & 0x40) ? "true" : "false", r1_cmd17, token,
+           mbr_sig ? "true" : "false", first8[0], first8[1], first8[2], first8[3], first8[4],
+           first8[5], first8[6], first8[7], verdict);
   Serial.printf("[SD] probe: %s\n", buf);
   // The probe tore down the SD/SPI buses; tell the owning module and remount
   // so the next 5-minute sample does not silently drop its CSV row.
