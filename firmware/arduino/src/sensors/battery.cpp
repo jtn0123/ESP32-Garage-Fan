@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstring>
 
+#include "sensors/battery_logic.h"
+
 namespace battery {
 namespace {
 
@@ -18,10 +20,8 @@ Adafruit_LC709203F g_lc;
 Preferences* g_prefs = nullptr;
 uint8_t g_kind = 0;
 float g_volts = NAN, g_percent = NAN;
-float g_pct_hist[12];
-float g_v_hist[12];
-uint8_t g_pct_n = 0;  // 5-min cadence -> 1 h sliding window
-bool g_chg = false;   // sticky charging verdict, NVS-persisted
+Window g_win;        // 5-min points; all the judgment calls live in battery_logic.h
+bool g_chg = false;  // sticky charging verdict, NVS-persisted
 
 }  // namespace
 
@@ -36,12 +36,7 @@ void restore(Preferences* prefs) {
     g_chg = prefs->getBool("chg", false);
 }
 
-float slope_mv_per_h() {
-  if (g_pct_n < 3)
-    return NAN;
-  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
-  return (g_volts - g_v_hist[0]) * 1000.0f / hours;
-}
+float slope_mv_per_h() { return g_win.slope_mv_per_h(g_volts); }
 
 // Raw LC709203F access, bypassing the Adafruit library's begin() (whose IC
 // version check fails on this board's chip even though it ACKs). CRC-8/ATM
@@ -130,28 +125,11 @@ void read() {
   }
 }
 
-// Sticky charging verdict, updated once per 5-min battery sample: enter on a
-// clearly rising voltage slope, leave only on a clearly falling one. In the
-// plateau between (trickle charge, jitter) the last verdict stands -- a
-// flapping detector swings the temperature offset by ~12 C and poisons every
-// consumer of garage temp (tiles, ring, auto mode). Persisted so a reboot
-// mid-charge keeps the right offset.
+// Re-judge the sticky charging verdict (battery_logic.h owns the thresholds
+// and the why); this side persists a flip to NVS so a reboot mid-charge keeps
+// the right temperature offset.
 static void update_charging() {
-  if (g_pct_n < 3)
-    return;  // not enough history to judge; hold
-  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
-  const float mvh = (g_volts - g_v_hist[0]) * 1000.0f / hours;
-  // NAN endpoints (RSOC never answered) contribute no percent signal; the
-  // voltage slope alone drives the verdict then.
-  const float p_old = g_pct_hist[0];
-  const float p_new = g_pct_hist[g_pct_n - 1];
-  const float dpct = (isnan(p_old) || isnan(p_new)) ? 0.0f : p_old - p_new;  // + = draining
-  // +5 mV/h is unmistakably inbound power on a big pack; 4.17 V is float.
-  bool next = g_chg;
-  if (mvh >= 5.0f || g_volts >= 4.17f || dpct < -0.3f)
-    next = true;
-  else if (mvh <= -5.0f || dpct > 0.3f)
-    next = false;
+  const bool next = judge_charging(g_win, g_volts, g_chg);
   if (next != g_chg) {
     g_chg = next;
     if (g_prefs)
@@ -164,17 +142,7 @@ static void update_charging() {
 // Rising charge or a flat line means no meaningful ETA.
 void eta(bool* charging, float* eta_h) {
   *charging = g_chg;
-  *eta_h = NAN;
-  if (g_pct_n < 6 || *charging)
-    return;
-  const float hours = (g_pct_n - 1) * 5.0f / 60.0f;
-  const float p_old = g_pct_hist[0];
-  const float p_new = g_pct_hist[g_pct_n - 1];
-  if (isnan(p_old) || isnan(p_new))
-    return;                           // no RSOC across the window; no meaningful slope
-  const float delta = p_old - p_new;  // + = draining
-  if (delta > 0.2f)
-    *eta_h = g_percent / (delta / hours);
+  *eta_h = eta_hours(g_win, g_percent, g_chg);
 }
 
 // One 5-minute history point, then re-judge the charging verdict. Lifted out of
@@ -185,19 +153,7 @@ void sample() {
   read();
   if (isnan(g_volts))
     return;
-  if (g_pct_n == 12) {
-    memmove(g_pct_hist, g_pct_hist + 1, 11 * sizeof(float));
-    memmove(g_v_hist, g_v_hist + 1, 11 * sizeof(float));
-    g_pct_n--;
-  }
-  // Never write a real number for an unknown percent: carry the last known
-  // value through a transient failed read, and seed with NAN when RSOC has
-  // not answered yet. A fabricated 0 in the window reads as a huge charge or
-  // discharge and flips the sticky verdict, which swings the temperature
-  // offset. The delta consumers treat NAN endpoints as "no signal".
-  g_pct_hist[g_pct_n] = isnan(g_percent) ? (g_pct_n ? g_pct_hist[g_pct_n - 1] : NAN) : g_percent;
-  g_v_hist[g_pct_n] = g_volts;
-  g_pct_n++;
+  g_win.push(g_volts, g_percent);
   update_charging();
 }
 
