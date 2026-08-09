@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <Update.h>
 
+#include "esp_task_wdt.h"
 #include "system/eventlog.h"
 
 namespace web_ota {
@@ -32,6 +33,11 @@ void handle_upload() {
     if (!Update.begin(UPDATE_SIZE_UNKNOWN))
       Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE && g_authorized) {
+    // handleClient() consumes the whole upload in one call, so loop() cannot
+    // feed the task watchdog until the flash finishes. A slow WiFi upload
+    // (>60 s) then panics the board mid-OTA (seen 2026-08-09). Chunks still
+    // arriving means progress, so feed it here.
+    esp_task_wdt_reset();
     if (Update.write(up.buf, up.currentSize) != up.currentSize)
       Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_END && g_authorized) {

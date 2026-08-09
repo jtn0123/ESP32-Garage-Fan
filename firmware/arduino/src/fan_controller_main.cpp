@@ -81,6 +81,7 @@ void setup() {
   pinMode(FAN_SPARE_PIN, OUTPUT);
   digitalWrite(FAN_SPARE_PIN, HIGH);
   Serial.begin(115200);
+  eventlog::capture_esp_logs();
   ota_rollback_check_at_boot();
   g_prefs.begin("fanctl", false);
   battery::restore(&g_prefs);
@@ -96,9 +97,6 @@ void setup() {
   });
   fan::restore(&g_prefs);
   odometer::restore(&g_prefs);
-  // SD stays OUT of the boot path: the controller comes fully online first,
-  // and the first mount attempt happens ~60 s later from loop(). A card that
-  // crashed a previous boot is quarantined here and never retried.
   sdcard::set_quarantined(crashlog::examine_boot(&g_prefs));
   // The flight recorder's first line: what killed the previous run. This is
   // the line that turns "it randomly rebooted overnight" into a diagnosis.
@@ -118,6 +116,12 @@ void setup() {
   Wire.begin();
   SPI.begin();
   display::begin();
+  // SD stays OUT of the boot path (first mount ~60 s later from loop): a
+  // 1.14.3 experiment mounted here, before WiFi, to give esp_vfs_fat_register
+  // its contiguous slab -- and the radio then failed to come up at all; the
+  // board needed the boot-health rollback to recover (2026-08-09). The heap
+  // is a fixed pie: the mount's slab comes from trimmed buffers (eventlog
+  // ring, /api/events bounce buffer), not from boot-order games.
   wifi_link::begin();
   mqtt_link::init();
   web::begin(&g_prefs);
@@ -127,6 +131,10 @@ void setup() {
 void loop() {
   if (wifi_link::connected() && !g_services_up) {
     g_services_up = true;
+    // Mount the card before the web server takes clients: sdcard.h explains
+    // why this exact moment -- after the radio (1.14.3's lesson), before web
+    // traffic fragments the heap past the filesystem's contiguous need.
+    sdcard::on_network_up();
     MDNS.begin(FAN_HOSTNAME);
     MDNS.addService("http", "tcp", 80);
     web::start();
@@ -145,9 +153,12 @@ void loop() {
     // The heartbeat the disconnect forensics read backwards from: the last
     // health line before a gap dates the death and carries the vitals
     // (signal, heap) that usually explain it.
-    eventlog::log("health", "rssi=%d heap=%lu min_heap=%lu drops=%lu", wifi_link::rssi(),
-                  (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
-                  (unsigned long)wifi_link::drops());
+    // largest = biggest contiguous free block. Free heap alone lies on this
+    // board: 20 KB "free" could not fit the SD filesystem's 13 KB (2026-08-09).
+    eventlog::log("health", "rssi=%d heap=%lu largest=%lu min_heap=%lu drops=%lu",
+                  wifi_link::rssi(), (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                  (unsigned long)ESP.getMinFreeHeap(), (unsigned long)wifi_link::drops());
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();

@@ -33,4 +33,12 @@ void copy_line(uint16_t i, char* dst, uint32_t cap);
 /** Lines overwritten before they could reach the SD file. */
 uint32_t lost();
 
+/**
+ * Route the framework's esp_log/ARDUHAL warnings (SD driver failures, WiFi
+ * stack complaints) onto this tape. Rate-limited so a chatty subsystem cannot
+ * wash out the flight recorder. Call once from setup(), before anything that
+ * might fail quietly.
+ */
+void capture_esp_logs();
+
 }  // namespace eventlog

@@ -401,7 +401,10 @@ static void handle_set() {
 // boot only); ?sd=1 tails /events.log for the record that survives reboots.
 static void handle_events() {
   if (g_http.hasArg("sd")) {
-    static char buf[4096];  // static: 4 KB does not belong on the loop stack
+    // 2 KB, static (does not belong on the loop stack): ~20 recent lines of
+    // tail is plenty for remote triage, and this board's heap is tight
+    // enough that every resident KB fights the SD mount for its slab.
+    static char buf[2048];
     const uint32_t n = sdcard::tail_events(buf, sizeof(buf));
     http_tx::send_big(g_http.client(), "text/plain", buf, n);
     return;

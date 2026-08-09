@@ -3,9 +3,11 @@
 // ranges. Owns the mount state, the crash quarantine, and the retry backoff.
 //
 // Hard-won rules encoded here (see the crashlog sentinel for the receipts):
-//  * SD stays OUT of the boot path. First mount attempt is ~60 s after boot,
-//    from the loop -- a card that crashes the mount gets quarantined and can
-//    never take fan control down with it.
+//  * SD stays OUT of the boot path. First mount attempt fires from the loop
+//    the moment WiFi associates (freshest post-radio heap; the mount needs
+//    one contiguous ~13 KB block and fragmentation only grows from there) --
+//    a card that crashes the mount gets quarantined and can never take fan
+//    control down with it.
 //  * Every mount and write is bracketed by the crashlog breadcrumb, so a
 //    death inside an SD op is attributable on the next boot.
 //  * Formatting is never automatic. A flaky-but-full card must not be
@@ -35,11 +37,17 @@ void mount_guarded();
 void mark_unmounted();
 
 /**
- * Loop-cadence retry: first attempt ~60 s after boot, then every 10th call
- * (~5 min at the auto tick), capped at 10 failures, never while quarantined.
- * /api/sdformat overrides all of it.
+ * Loop-cadence retry: first attempt when WiFi comes up (60 s fallback), then
+ * every 10th call (~5 min at the auto tick), capped at 10 failures, never
+ * while quarantined. /api/sdformat overrides all of it.
  */
 void retry_tick();
+
+/**
+ * WiFi just associated: mount now, while the post-radio heap still has a
+ * contiguous block big enough for the filesystem (see retry_tick's comment).
+ */
+void on_network_up();
 
 /** Append one sample row to this month's CSV. Drops the mount on failure. */
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed);
