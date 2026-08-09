@@ -52,10 +52,13 @@ static uint32_t g_last_auto_ms = 0;
 // belongs in the same row (battery first, so the row records the verdict this
 // reading produced), then fan it out to the ring, the card and the broker.
 static void sample_climate() {
+  // Battery first and unconditionally: the charging verdict feeds the climate
+  // correction (climate.h documents the dependency), so a wedged BME280 must
+  // not freeze the hysteresis, the voltage slope or the runtime estimate.
+  battery::sample();
   float t, h, p;
   if (!climate::sample(&t, &h, &p))
     return;
-  battery::sample();
   const float oc = climate::outside_c_fresh();
   history::Sample row;
   row.t = t;

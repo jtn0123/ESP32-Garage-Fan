@@ -8,4 +8,9 @@
 
 #include <ctime>
 
-inline bool time_synced() { return time(nullptr) > 1700000000; }
+// Any epoch below this is a clock that has not synced (the value is simply
+// "well after this firmware was written"). Shared so the MQTT layer's bridge
+// timestamp sanity check cannot drift from the local clock's.
+inline constexpr time_t kEpochSanityFloor = 1700000000;
+
+inline bool time_synced() { return time(nullptr) > kEpochSanityFloor; }

@@ -71,14 +71,19 @@ void restore(Preferences* prefs) {
 // source: "boot", "http", "mqtt", "auto" -- log flavour only; `manual` is the
 // decision (the human explicitly grabbed the wheel, so auto lets go).
 void apply(int v, const char* source, bool manual) {
-  if (v < 0 || v > 12 || v == g_speed)
+  if (v < 0 || v > 12)
     return;
+  // Manual override first: selecting the speed the fan already runs at is
+  // still the human grabbing the wheel, so auto lets go even though the
+  // waveform does not change.
   if (manual && g_auto_on) {
     g_auto_on = false;
     if (g_prefs)
       g_prefs->putBool("auto", false);
     Serial.println("auto mode off (manual override)");
   }
+  if (v == g_speed)
+    return;
   g_speed = v;
   set_wave(kHighUs[v]);
   if (g_prefs)

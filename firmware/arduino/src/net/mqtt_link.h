@@ -11,7 +11,7 @@
 namespace mqtt_link {
 
 void init();  // set server + callback (before WiFi is even up)
-void tick();  // reconnect-with-backoff + client loop; call every loop()
+void tick();  // fixed 3 s reconnect retry + client loop; call every loop()
 bool connected();
 
 /** Did this boot ever reach the broker? Feeds the rollback deadline. */

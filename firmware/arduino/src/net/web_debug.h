@@ -8,6 +8,12 @@
 
 namespace web_debug {
 
-void register_routes(WebServer& http);
+/**
+ * `token` is the same OTA/update token web.cpp guards /api/restart and
+ * /api/sdformat with. Every diagnostic here requires it: /api/battdebug
+ * writes fuel-gauge registers and /api/sdtest tears down the SD/SPI buses,
+ * so reaching the page must not be enough to poke the hardware.
+ */
+void register_routes(WebServer& http, const char* token);
 
 }  // namespace web_debug

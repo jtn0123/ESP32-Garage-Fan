@@ -438,7 +438,9 @@ void begin(Preferences* prefs) {
   });
   g_http.on("/api/state", handle_state);
   g_http.on("/api/device", handle_device);
-  g_http.on("/api/restart", handle_restart);
+  // POST-only: token-guarded AND destructive; a GET must never reboot the
+  // board (link prefetchers and crawlers issue GETs).
+  g_http.on("/api/restart", HTTP_POST, handle_restart);
   g_http.on("/api/set", handle_set);
   g_http.on("/api/raw", handle_raw);
   g_http.on("/api/config", handle_config);
@@ -452,8 +454,8 @@ void begin(Preferences* prefs) {
   g_http.on("/icon.svg", []() {
     http_tx::send_big(g_http.client(), "image/svg+xml", kIcon, sizeof(kIcon) - 1);
   });
-  g_http.on("/api/sdformat", handle_sd_format);
-  web_debug::register_routes(g_http);
+  g_http.on("/api/sdformat", HTTP_POST, handle_sd_format);
+  web_debug::register_routes(g_http, g_token);
   g_http.on("/update", HTTP_POST, handle_update_done, handle_update_upload);
   g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
 }

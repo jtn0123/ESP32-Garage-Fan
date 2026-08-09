@@ -168,7 +168,7 @@ export function drawScope(
       c.fillRect(x - 1, top, 2, bottom - top);
       c.fillStyle = '#eaf3ff';
       c.beginPath();
-      c.arc(x, top, 2.1, 0, 7);
+      c.arc(x, top, 2.1, 0, Math.PI * 2);
       c.fill();
     }
   }

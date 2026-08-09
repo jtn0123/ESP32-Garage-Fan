@@ -42,8 +42,8 @@ It is a SEPARATE project now.
 - The whole repo is the fan now. The inherited ESP32-Temp-Sensor room-node
   subsystems — e-ink display firmware, UI-spec codegen, web simulator, device
   manager, icon pipeline, CAD, ESPHome, Rust stub — were deleted in the
-  fan-only cleanup. `firmware/arduino/src` holds five files. Do not resurrect
-  any of it without an explicit request; port from upstream instead.
+  fan-only cleanup. Do not resurrect any of it without an explicit request;
+  port from upstream instead.
 - Protocol ground truth: `docs/fan_protocol/PROTOCOL.md` + raw `.sr` captures.
   The duty table is measured, not derived — do not "clean it up". There is no
   tach or feedback line: D− was measured idling high, so anything needing RPM

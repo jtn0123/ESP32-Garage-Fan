@@ -75,6 +75,11 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed) {
   char line[96];
   int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d\n", (long)now, t, h, p,
                    isnan(out_f) ? -999.0f : out_f, speed);
+  if (n < 0 || n >= static_cast<int>(sizeof(line))) {
+    f.close();  // a truncated row would corrupt the CSV for every later reader
+    CRUMB_CLEAR();
+    return;
+  }
   f.write((const uint8_t*)line, n);
   f.close();
   CRUMB_CLEAR();
@@ -111,7 +116,12 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
       // Line-buffered scan; lines are short and epoch-prefixed.
       char line[96];
       size_t ll = 0;
+      uint32_t fed = 0;
       while (f.available()) {
+        // Two passes over up to two month files is normally ~3 s, but a
+        // corrupt oversized file must not ride into the 60 s task watchdog.
+        if ((++fed & 0x3FF) == 0)
+          esp_task_wdt_reset();
         const char c = static_cast<char>(f.read());
         if (c != '\n') {
           if (ll < sizeof(line) - 1)
@@ -182,6 +192,7 @@ bool format() {
 bool ok() { return g_ok; }
 bool quarantined() { return g_quarantined; }
 void set_quarantined(bool q) { g_quarantined = q; }
+void mark_unmounted() { g_ok = false; }
 uint32_t total_mb() { return g_ok ? static_cast<uint32_t>(SD.totalBytes() / 1048576) : 0; }
 uint32_t used_mb() { return g_ok ? static_cast<uint32_t>(SD.usedBytes() / 1048576) : 0; }
 

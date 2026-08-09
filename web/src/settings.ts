@@ -274,15 +274,18 @@ function control(r: Row): HTMLElement {
   switch (r.kind) {
     case 'step': {
       const box = el('div', { className: 'stp' });
-      box.append(
-        el('button', { textContent: '−', onclick: r.dec }),
-        el('span', { textContent: r.value }),
-        el('button', { textContent: '+', onclick: r.inc }),
-      );
+      const dec = el('button', { textContent: '−', onclick: r.dec });
+      dec.setAttribute('aria-label', `decrease ${r.label}`);
+      const inc = el('button', { textContent: '+', onclick: r.inc });
+      inc.setAttribute('aria-label', `increase ${r.label}`);
+      box.append(dec, el('span', { textContent: r.value }), inc);
       return box;
     }
     case 'toggle': {
       const b = el('button', { className: `tgl${r.on ? ' on' : ''}`, onclick: r.toggle });
+      b.setAttribute('role', 'switch');
+      b.setAttribute('aria-checked', r.on ? 'true' : 'false');
+      b.setAttribute('aria-label', r.label);
       b.append(el('i'));
       return b;
     }
@@ -350,6 +353,7 @@ function otaControl(): HTMLElement {
   const box = el('div');
   const row = el('div', { id: 'otarow' });
   const file = el('input', { className: 'fld', id: 'ota_f', type: 'file', accept: '.bin' });
+  file.setAttribute('aria-label', 'firmware image file');
   const token = el('input', {
     className: 'fld',
     id: 'ota_t',

@@ -10,16 +10,27 @@
 
 #include "config.h"
 #include "sensors/battery.h"
+#include "storage/sdcard.h"
 
 namespace web_debug {
 namespace {
 
 WebServer* g_http = nullptr;
+const char* g_token = "";
+
+bool authorized() {
+  if (g_http->arg("token") == g_token)
+    return true;
+  g_http->send(403, "application/json", "{\"error\":\"bad token\"}");
+  return false;
+}
 
 // Raw SD probe: bit-level CMD0/CMD8 handshake at 400 kHz, reporting each
 // step, so "card not seated", "card dead", and "card incompatible" stop
 // looking identical. Read-only; safe on any card.
 void handle_sd_test() {
+  if (!authorized())
+    return;
   SD.end();
   SPI.end();
   delay(50);
@@ -60,15 +71,22 @@ void handle_sd_test() {
                                                           : "card alive but CMD8 odd")
                         : "card answered abnormally");
   Serial.printf("[SD] probe: %s\n", buf);
+  // The probe tore down the SD/SPI buses; tell the owning module and remount
+  // so the next 5-minute sample does not silently drop its CSV row.
+  sdcard::mark_unmounted();
+  sdcard::mount_guarded();
   g_http->send(200, "application/json", buf);
 }
 
 }  // namespace
 
-void register_routes(WebServer& http) {
+void register_routes(WebServer& http, const char* token) {
   g_http = &http;
+  g_token = token;
   http.on("/api/sdtest", handle_sd_test);
   http.on("/api/battdebug", []() {
+    if (!authorized())
+      return;
     char out[512];
     const bool w15 = battery::write_reg(0x15, 0x0001);
     const bool w0b = battery::write_reg(0x0B, 0x0056);
@@ -101,6 +119,8 @@ void register_routes(WebServer& http) {
     g_http->send(200, "application/json", full);
   });
   http.on("/api/i2cscan", []() {
+    if (!authorized())
+      return;
     String out = "{\"found\":[";
     bool first = true;
     for (uint8_t a = 1; a < 127; a++) {

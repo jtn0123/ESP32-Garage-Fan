@@ -31,12 +31,15 @@ void restore(Preferences* prefs) {
 }
 
 void tick(int speed, float watts) {
-  if (millis() - g_last_count_ms >= 1000) {
-    g_last_count_ms = millis();
+  // Credit whole elapsed seconds rather than one per wakeup: a loop stalled
+  // in an SD format for two minutes must not count as one second of runtime.
+  const uint32_t elapsed_s = (millis() - g_last_count_ms) / 1000;
+  if (elapsed_s >= 1) {
+    g_last_count_ms += elapsed_s * 1000;
     if (speed > 0) {
-      g_run_total_s++;
-      g_run_today_s++;
-      g_energy_wh += watts / 3600.0f;
+      g_run_total_s += elapsed_s;
+      g_run_today_s += elapsed_s;
+      g_energy_wh += watts * elapsed_s / 3600.0f;
     }
     if (time_synced()) {
       struct tm lt;

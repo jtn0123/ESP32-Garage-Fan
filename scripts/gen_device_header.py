@@ -304,6 +304,13 @@ def main():
         # Optional country code to constrain scan band and speeds join
         if wifi_country:
             f.write(f"#define WIFI_COUNTRY {c_string(wifi_country)}\n")
+        # OTA/update token: per-device secret from the gitignored .env. The
+        # firmware's config.h keeps a compile-time fallback for bench builds
+        # with no .env, and the device persists a runtime override in NVS, but
+        # a provisioned build should never ship the public default.
+        ota_token = str(os.getenv("FAN_OTA_TOKEN") or "")
+        if ota_token:
+            f.write(f"#define FAN_OTA_TOKEN {c_string(ota_token)}\n")
         f.write(f"#define MQTT_HOST {c_string(mqtt_host)}\n")
         f.write(f"#define MQTT_PORT {mqtt_port}\n")
         f.write(f"#define MQTT_PUB_BASE {c_string(mqtt_pub)}\n")

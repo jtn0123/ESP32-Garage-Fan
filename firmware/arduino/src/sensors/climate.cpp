@@ -96,6 +96,13 @@ void set_offset_idle(float c) {
 void set_outside_f(float f) {
   g_outside_c = (f - 32.0f) * 5.0f / 9.0f;
   g_outside_ms = millis();
+  // Each temperature clears the bridge timestamp; a feed that publishes /ts
+  // re-sends it alongside every sample, so epoch mode re-arms immediately.
+  // A bridge that STOPS publishing /ts (config change) falls back to
+  // receipt-time freshness instead of gating on a fossil epoch forever, and
+  // retained replay still reads stale: the redelivered old /ts re-arms epoch
+  // mode with its old value.
+  g_outdoor_epoch = 0;
 }
 
 void set_outdoor_epoch(long epoch) { g_outdoor_epoch = epoch; }

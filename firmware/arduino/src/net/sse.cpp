@@ -49,6 +49,8 @@ void push() {
   char frame[832];
   g_source(st, sizeof(st));
   const int n = snprintf(frame, sizeof(frame), "data: %s\n\n", st);
+  if (n < 0 || n >= static_cast<int>(sizeof(frame)))
+    return;  // snprintf reports intended length; a truncated frame is torn JSON
   for (auto& c : g_peers) {
     if (c && c.connected())
       sse_send(c, frame, n);
@@ -73,6 +75,8 @@ void accept() {
                              "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
                              "Connection: keep-alive\r\n\r\nretry: 3000\n\ndata: %s\n\n",
                              st);
+      if (n < 0 || n >= static_cast<int>(sizeof(frame)))
+        return;
       sse_send(c, frame, n);
       return;
     }

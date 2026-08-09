@@ -202,11 +202,11 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
       const y = yAt(value, H, sc);
       c.fillStyle = '#0b0e13';
       c.beginPath();
-      c.arc(x, y, 5, 0, 7);
+      c.arc(x, y, 5, 0, Math.PI * 2);
       c.fill();
       c.fillStyle = colour;
       c.beginPath();
-      c.arc(x, y, 3.5, 0, 7);
+      c.arc(x, y, 3.5, 0, Math.PI * 2);
       c.fill();
     }
   }

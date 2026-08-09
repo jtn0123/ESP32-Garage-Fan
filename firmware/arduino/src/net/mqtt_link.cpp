@@ -14,6 +14,7 @@
 #include "fan/control.h"
 #include "sensors/climate.h"
 #include "system/ota_rollback.h"
+#include "system/timeutil.h"
 
 namespace mqtt_link {
 namespace {
@@ -33,7 +34,7 @@ void on_message(char* topic, uint8_t* payload, unsigned int len) {
   if (strstr(topic, "/ts") != nullptr &&
       strncmp(topic, MQTT_SUB_BASE, strlen(MQTT_SUB_BASE)) == 0) {
     const long e = strtol(buf, nullptr, 10);
-    if (e > 1700000000)
+    if (e > kEpochSanityFloor)
       climate::set_outdoor_epoch(e);
     return;
   }
