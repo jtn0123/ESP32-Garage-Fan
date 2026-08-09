@@ -105,12 +105,12 @@ while [ $SECONDS -lt $deadline ]; do
       echo "  smoke: boot_cause=$cause sd_total_mb=${sd_mb:-?} wifi_drops=${drops:-?}"
       if [ "$cause" = "panic" ]; then
         echo "SMOKE FAIL: this boot follows a PANIC - the new image crashed once"
-        echo "already. Read http://$HOST/api/events before trusting it."
+        echo "already. Read $HOST/api/events before trusting it."
         exit 1
       fi
       if [ "${sd_mb:-0}" -eq 0 ]; then
         echo "SMOKE WARN: SD card not mounted - the flight recorder has no"
-        echo "persistence; check http://$HOST/api/events for the mount failure line."
+        echo "persistence; check $HOST/api/events for the mount failure line."
       fi
       exit 0
     elif [ "$fw" = "$EXPECTED_FW" ]; then
