@@ -61,8 +61,10 @@ function scale(min: number, max: number): Scale {
   return { min, max, ticks: [min, (min + max) / 2, max] };
 }
 
-const xAt = (i: number, W: number, n: number): number =>
-  L + (i * (W - L - R)) / Math.max(n - 1, 1);
+// Position by the sample's time fraction, not its index: after a merge with
+// holes in it (reboots, outages), equal index spacing would compress the
+// missing stretch and every slope around it would lie.
+const xAt = (s: Series, i: number, W: number): number => L + (s.frac[i] ?? 0) * (W - L - R);
 
 const yAt = (v: number, H: number, s: Scale): number =>
   H - 6 - ((v - s.min) * (H - 16)) / (s.max - s.min);
@@ -82,8 +84,8 @@ function frame(
       if (s.night[i]) {
         let j = i;
         while (j < s.n && s.night[j]) j++;
-        const x0 = xAt(i, W, s.n);
-        c.fillRect(x0, 0, xAt(j - 1, W, s.n) - x0 || 1, H - 2);
+        const x0 = xAt(s, i, W);
+        c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
         i = j;
       } else {
         i++;
@@ -126,7 +128,8 @@ function line(
       drawing = false;
       continue;
     }
-    const x = xAt(i, W, s.n);
+    if (s.gap[i]) drawing = false; // outage: leave a hole, not a bridge
+    const x = xAt(s, i, W);
     const y = yAt(v, H, sc);
     if (drawing) c.lineTo(x, y);
     else c.moveTo(x, y);
@@ -140,7 +143,7 @@ function crosshair({ c, W, H }: Surface, s: Series, index: number): void {
   if (index < 0) return;
   c.strokeStyle = 'rgba(230,233,237,.5)';
   c.lineWidth = 1;
-  const x = xAt(index, W, s.n) + 0.5;
+  const x = xAt(s, index, W) + 0.5;
   c.beginPath();
   c.moveTo(x, 0);
   c.lineTo(x, H - 2);
@@ -178,11 +181,12 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
     const oa = at(s.of, i);
     const ob = at(s.of, i + 1);
     if (a === null || b === null || oa === null || ob === null) continue;
+    if (s.gap[i + 1]) continue; // the pair straddles an outage; nothing to tint
     c.beginPath();
-    c.moveTo(xAt(i, W, s.n), yAt(a, H, sc));
-    c.lineTo(xAt(i + 1, W, s.n), yAt(b, H, sc));
-    c.lineTo(xAt(i + 1, W, s.n), yAt(ob, H, sc));
-    c.lineTo(xAt(i, W, s.n), yAt(oa, H, sc));
+    c.moveTo(xAt(s, i, W), yAt(a, H, sc));
+    c.lineTo(xAt(s, i + 1, W), yAt(b, H, sc));
+    c.lineTo(xAt(s, i + 1, W), yAt(ob, H, sc));
+    c.lineTo(xAt(s, i, W), yAt(oa, H, sc));
     c.closePath();
     c.fillStyle = (a + b) / 2 >= (oa + ob) / 2 ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
     c.fill();
@@ -198,7 +202,7 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
       [at(s.of, index), OUT],
     ] as const) {
       if (value === null) continue;
-      const x = xAt(index, W, s.n);
+      const x = xAt(s, index, W);
       const y = yAt(value, H, sc);
       c.fillStyle = '#0b0e13';
       c.beginPath();
@@ -223,30 +227,38 @@ export function drawFanSpeed(canvas: HTMLCanvasElement, s: Series, index: number
   const sc = scale(0, 12);
   frame(surf, s, sc, (v) => v.toFixed(0), false);
 
-  // Step plot, not a line: the speed holds between samples rather than ramping.
+  // Step plot, not a line: the speed holds between samples rather than
+  // ramping. One polygon per contiguous run, so an outage leaves a hole
+  // instead of fabricating a plateau across the time the device was dark.
   const speed = (i: number): number => s.spd[i] ?? 0;
   c.fillStyle = 'rgba(59,130,246,.28)';
   c.strokeStyle = AC;
   c.lineWidth = 1.6;
-  c.beginPath();
-  c.moveTo(xAt(0, W, s.n), yAt(0, H, sc));
-  for (let i = 0; i < s.n; i++) {
-    c.lineTo(xAt(i, W, s.n), yAt(speed(i), H, sc));
-    if (i + 1 < s.n) c.lineTo(xAt(i + 1, W, s.n), yAt(speed(i), H, sc));
-  }
-  c.lineTo(xAt(s.n - 1, W, s.n), yAt(0, H, sc));
-  c.closePath();
-  c.fill();
+  let a = 0;
+  for (let i = 1; i <= s.n; i++) {
+    if (i < s.n && !s.gap[i]) continue;
+    const b = i - 1;
+    c.beginPath();
+    c.moveTo(xAt(s, a, W), yAt(0, H, sc));
+    for (let k = a; k <= b; k++) {
+      c.lineTo(xAt(s, k, W), yAt(speed(k), H, sc));
+      if (k < b) c.lineTo(xAt(s, k + 1, W), yAt(speed(k), H, sc));
+    }
+    c.lineTo(xAt(s, b, W), yAt(0, H, sc));
+    c.closePath();
+    c.fill();
 
-  c.beginPath();
-  let prev = speed(0);
-  c.moveTo(xAt(0, W, s.n), yAt(prev, H, sc));
-  for (let i = 1; i < s.n; i++) {
-    c.lineTo(xAt(i, W, s.n), yAt(prev, H, sc));
-    c.lineTo(xAt(i, W, s.n), yAt(speed(i), H, sc));
-    prev = speed(i);
+    c.beginPath();
+    let prev = speed(a);
+    c.moveTo(xAt(s, a, W), yAt(prev, H, sc));
+    for (let k = a + 1; k <= b; k++) {
+      c.lineTo(xAt(s, k, W), yAt(prev, H, sc));
+      c.lineTo(xAt(s, k, W), yAt(speed(k), H, sc));
+      prev = speed(k);
+    }
+    c.stroke();
+    a = i;
   }
-  c.stroke();
   crosshair(surf, s, index);
 }
 
@@ -296,8 +308,8 @@ export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number)
     if (s.chg[i] === 1) {
       let j = i;
       while (j < s.n && s.chg[j] === 1) j++;
-      const x0 = xAt(i, W, s.n);
-      c.fillRect(x0, 0, xAt(j - 1, W, s.n) - x0 || 1, H - 2);
+      const x0 = xAt(s, i, W);
+      c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
       i = j;
     } else {
       i++;
@@ -320,6 +332,9 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
   // tighter on a phone, never fewer than three.
   const perLabel = W < 520 ? 70 : 120;
   const step = Math.max(1, Math.ceil(s.n / Math.max(3, Math.floor((W - L - R) / perLabel))));
+  // Time-proportional x means index steps can land labels unevenly around a
+  // gap; the lastX guard drops any label that would crowd its neighbour.
+  let lastX = -Infinity;
   for (let i = 0; i < s.n; i += step) {
     const t = s.ts(i);
     if (t === null) continue;
@@ -330,7 +345,10 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
       days === 1
         ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
         : `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}h`;
-    c.fillText(label, Math.min(Math.max(xAt(i, W, s.n), 22), W - 24), 14);
+    const x = Math.min(Math.max(xAt(s, i, W), 22), W - 24);
+    if (x - lastX < perLabel * 0.6) continue;
+    lastX = x;
+    c.fillText(label, x, 14);
   }
 }
 

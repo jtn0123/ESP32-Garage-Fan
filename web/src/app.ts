@@ -186,8 +186,18 @@ function scrubAt(clientX: number): void {
   if (!s || s.n < 2) return;
   const rect = $<HTMLCanvasElement>('cv_t').getBoundingClientRect();
   const fraction = (clientX - rect.left - L) / (rect.width - L - R);
-  const i = Math.round(fraction * (s.n - 1));
-  const next = i < 0 || i >= s.n || fraction < -0.02 || fraction > 1.02 ? -1 : i;
+  // Nearest sample by its time position, not index arithmetic: around a gap
+  // the two disagree, and the crosshair must land on a sample that exists.
+  let i = 0;
+  let best = Infinity;
+  for (let k = 0; k < s.n; k++) {
+    const d = Math.abs((s.frac[k] ?? 0) - fraction);
+    if (d < best) {
+      best = d;
+      i = k;
+    }
+  }
+  const next = fraction < -0.02 || fraction > 1.02 ? -1 : i;
   if (next === view.scrub) return;
   view.scrub = next;
   drawAll();
@@ -254,9 +264,15 @@ function buildCaptureTable(): void {
 async function loadHistory(): Promise<void> {
   try {
     const raw = await api.getHistory(view.days);
-    const merged = view.days === 1 ? mergeCache(raw) : raw;
-    view.history = merged;
-    view.series = build(merged);
+    let hist = raw;
+    let stamps: number[] | null = null;
+    if (view.days === 1) {
+      const merged = mergeCache(raw);
+      hist = merged.h;
+      stamps = merged.ts; // the union's real epochs -- holes and all
+    }
+    view.history = hist;
+    view.series = build(hist, stamps ?? undefined);
     drawAll();
     paintHero();
   } catch {
