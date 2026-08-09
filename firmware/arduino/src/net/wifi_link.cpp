@@ -54,7 +54,8 @@ void on_event(WiFiEvent_t ev, WiFiEventInfo_t info) {
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       g_drops++;
-      eventlog::log("wifi", "drop reason=%u(%s) n=%lu", info.wifi_sta_disconnected.reason,
+      eventlog::log("wifi", "drop reason=%u(%s) n=%lu",
+                    static_cast<unsigned>(info.wifi_sta_disconnected.reason),
                     reason_str(info.wifi_sta_disconnected.reason), (unsigned long)g_drops);
       break;
     default:

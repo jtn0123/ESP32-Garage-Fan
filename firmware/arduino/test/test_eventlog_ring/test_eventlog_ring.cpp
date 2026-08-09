@@ -9,6 +9,8 @@
 
 using eventlog::LineRing;
 
+// Unity requires both lifecycle hooks; these tests keep no fixture state,
+// so there is nothing to set up or release between cases.
 void setUp() {}
 void tearDown() {}
 
@@ -59,8 +61,7 @@ static void test_overwriting_unflushed_lines_counts_as_lost() {
   // The ledger must advance past them (they are gone) and record the loss,
   // and unflushed() must never exceed what the ring still holds.
   LineRing<3, 16> r;
-  for (int i = 0; i < 7; i++)
-    r.append("x");
+  for (int i = 0; i < 7; i++) r.append("x");
   TEST_ASSERT_EQUAL_UINT16(3, r.unflushed());
   TEST_ASSERT_EQUAL_UINT32(4, r.lost);
   TEST_ASSERT_EQUAL_UINT16(0, r.first_unflushed());

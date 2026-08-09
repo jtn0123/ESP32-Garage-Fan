@@ -407,9 +407,9 @@ static void handle_events() {
     return;
   }
   String out;
-  out.reserve(2048);
   char line[104];
   const uint16_t n = eventlog::count();
+  out.reserve(static_cast<size_t>(n) * sizeof(line) + 64);
   for (uint16_t i = 0; i < n; i++) {
     eventlog::copy_line(i, line, sizeof(line));
     out += line;
