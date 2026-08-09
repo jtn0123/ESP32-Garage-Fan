@@ -162,6 +162,13 @@ void loop() {
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();
+    // Serial-only heap trace: the 5-minute health line is the tape record;
+    // this is the bench view for catching a leak's slope between heartbeats.
+    // CDC drops it silently when no terminal is attached.
+    Serial.printf("[heap] free=%lu largest=%lu min=%lu psram=%lu\n",
+                  (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                  (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getPsramSize());
     fan::tick_auto();
     battery::begin();
     battery::read();

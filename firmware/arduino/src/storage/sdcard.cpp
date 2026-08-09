@@ -59,14 +59,27 @@ static bool begin_attempt(uint32_t freq, bool format_if_failed) {
                           : SD.begin(SD_CS_PIN, SPI, freq, "/sd", 2);
 }
 
+// Reachability outranks persistence. The first time the card ever mounted
+// (1.14.6), its ~13 KB filesystem context left the largest free block at
+// 1.5 KB -- no socket could allocate, and the board vanished from the network
+// while "working". If a mount leaves less than this contiguous, undo it.
+constexpr uint32_t kMinLargestAfterMount = 10 * 1024;
+
 static void mount() {
   for (size_t i = 0; i < kFreqCount; i++) {
     if (i > 0)
       bus_restart();
     if (begin_attempt(kFreqs[i], false)) {
+      const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      if (largest < kMinLargestAfterMount) {
+        SD.end();
+        eventlog::log("sd", "mount undone: leaves largest=%lu (<%lu); network first",
+                      (unsigned long)largest, (unsigned long)kMinLargestAfterMount);
+        return;
+      }
       g_ok = true;
-      eventlog::log("sd", "mounted at %lu Hz: %lu MB", (unsigned long)kFreqs[i],
-                    (unsigned long)(SD.totalBytes() / 1048576));
+      eventlog::log("sd", "mounted at %lu Hz: %lu MB (largest=%lu)", (unsigned long)kFreqs[i],
+                    (unsigned long)(SD.totalBytes() / 1048576), (unsigned long)largest);
       return;
     }
   }
