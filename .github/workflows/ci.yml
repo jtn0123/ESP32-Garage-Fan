@@ -179,6 +179,10 @@ jobs:
   tests-python:
     name: Python tests
     runs-on: ubuntu-latest
+    # Job-level so the step-level `if` below can see it: the `secrets` context
+    # is not allowed in step conditions, but `env` is.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -214,14 +218,16 @@ jobs:
       # failing test still gets measured instead of leaving the gate at 0%.
       # Dependabot PRs cannot read SONAR_TOKEN, so the scan is skipped for them
       # rather than reporting a misleading red check.
+      # Skipped entirely while SONAR_TOKEN is unset: an empty token fails the
+      # scanner with "Not authorized", which turned every run of this job red
+      # even though pytest itself passed. When the secret is configured the
+      # scan resumes on its own; until then pytest's result IS the job result.
       # Every action in this repo is pinned to a commit SHA, not a tag:
       # githubactions:S7637 flags movable refs, since a tag can be repointed at
       # new code. Dependabot still updates them by reading the version comment.
       - name: SonarCloud Scan
-        if: ${{ always() && github.event.pull_request.user.login != 'dependabot[bot]' }}
+        if: ${{ always() && github.event.pull_request.user.login != 'dependabot[bot]' && env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarqube-scan-action@59db25f34e16620e48ab4bb9e4a5dce155cb5432 # v8.0.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Upload test artifacts
         if: ${{ always() }}
