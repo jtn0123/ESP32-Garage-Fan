@@ -38,7 +38,10 @@ Feather ESP32-S2 → BSS138 level shifter → USB-A screw-terminal breakout →
 fan cable. GPIO 18 (A0) carries the PWM through the shifter (the signal is
 ~4.3–5 V — not 3.3 V-safe); the fan's 5 V feeds the shifter's HV reference.
 Power the Feather from LiPo or USB wall power — the fan's 5 V export can't
-carry it. Full wiring and bring-up history in `docs/fan_protocol/`.
+carry it alone — a battery buffers it (and charges from it).
+**Complete wiring guide, pin map, diagrams, and rebuild checklist:**
+[docs/HARDWARE.md](docs/HARDWARE.md); protocol internals and captures in
+`docs/fan_protocol/`.
 
 ## Build
 
