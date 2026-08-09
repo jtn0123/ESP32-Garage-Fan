@@ -8,22 +8,18 @@
 // Accessors hand out the raw arrays on purpose: the JSON writers iterate
 // hundreds of rows and a per-element function call buys nothing but stack
 // churn on a 240 MHz core serving HTTP in the loop thread.
+//
+// The ring itself (append/evict/stats) lives in ring_logic.h so the
+// native_storage_ring env can test it on the host; this module owns the one
+// device-sized instance and the SNTP end-timestamp.
 
 #include <stdint.h>
 
 #include <ctime>
 
-namespace history {
+#include "storage/ring_logic.h"
 
-struct Sample {
-  float t;       // corrected garage temperature, C
-  float h;       // %RH
-  float p;       // hPa
-  float out_f;   // yard, F (NAN = no fresh feed at sample time)
-  float batt_v;  // NAN = no fuel gauge
-  int8_t speed;  // fan speed 0..12 at sample time
-  int8_t chg;    // 1 charging, 0 not, -1 no battery
-};
+namespace history {
 
 /** Append a row, evicting the oldest once full. `stamped` = clock is synced. */
 void append(const Sample& s, bool stamped);
