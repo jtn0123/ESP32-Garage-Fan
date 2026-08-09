@@ -309,6 +309,11 @@ def main():
         # with no .env, and the device persists a runtime override in NVS, but
         # a provisioned build should never ship the public default.
         ota_token = str(os.getenv("FAN_OTA_TOKEN") or "")
+        if ota_token == "pick_a_long_random_token":
+            # The historical .env.example placeholder: as public as the
+            # committed default, so baking it in would only feign security.
+            print("WARNING: FAN_OTA_TOKEN is the example placeholder; ignoring it")
+            ota_token = ""
         if ota_token:
             f.write(f"#define FAN_OTA_TOKEN {c_string(ota_token)}\n")
         f.write(f"#define MQTT_HOST {c_string(mqtt_host)}\n")

@@ -80,9 +80,12 @@ void maybe_render() {
   else
     g_epd->printf("OUT %.1fF", oc * 9 / 5 + 32);
   g_epd->setCursor(158, 66);
-  if (!isnan(battery::volts()))
-    g_epd->printf("BAT %.2fV %.0f%%", battery::volts(),
-                  isnan(battery::percent()) ? 0 : battery::percent());
+  if (!isnan(battery::volts())) {
+    if (isnan(battery::percent()))
+      g_epd->printf("BAT %.2fV --%%", battery::volts());
+    else
+      g_epd->printf("BAT %.2fV %.0f%%", battery::volts(), battery::percent());
+  }
   g_epd->setCursor(6, 76);
   g_epd->printf("run today %luh%02lum  total %luh", (unsigned long)(odometer::run_today_s() / 3600),
                 (unsigned long)(odometer::run_today_s() % 3600 / 60),

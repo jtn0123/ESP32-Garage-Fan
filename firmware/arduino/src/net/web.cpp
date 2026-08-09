@@ -59,6 +59,13 @@ Preferences* g_prefs = nullptr;
 char g_token[40];
 bool g_ota_authorized = false;
 
+// An empty configured token must never authorize anything: with g_token ""
+// and no ?token= argument, arg() returns "" and a bare equality check would
+// wave the request through. Unreachable with today's defaults, but this is
+// the line every privileged route stands behind, so it does not get to rely
+// on the defaults staying friendly.
+bool token_ok(const String& presented) { return g_token[0] != '\0' && presented == g_token; }
+
 }  // namespace
 
 void state_json(char* out, size_t cap) {
@@ -196,7 +203,7 @@ static void handle_device() {
 // Token-guarded reboot behind the console's maintenance row. Shares the OTA
 // token so reaching the page is not by itself enough to bounce the fan.
 static void handle_restart() {
-  if (g_http.arg("token") != g_token) {
+  if (!token_ok(g_http.arg("token"))) {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
@@ -239,7 +246,7 @@ static void handle_config() {
       fan::set_release_f(v);
   }
   fan::enforce_hysteresis_gap();
-  if (g_http.hasArg("newtoken") && g_http.arg("auth") == g_token) {
+  if (g_http.hasArg("newtoken") && token_ok(g_http.arg("auth"))) {
     const String nt = g_http.arg("newtoken");
     if (nt.length() >= 6 && nt.length() < 39) {
       snprintf(g_token, sizeof(g_token), "%s", nt.c_str());
@@ -343,7 +350,7 @@ static void handle_history() {
 // loop for the duration (can be minutes on big cards); the RMT peripheral
 // keeps the fan running throughout.
 static void handle_sd_format() {
-  if (g_http.arg("token") != g_token) {
+  if (!token_ok(g_http.arg("token"))) {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
@@ -389,7 +396,7 @@ static void handle_set() {
 static void handle_update_upload() {
   HTTPUpload& up = g_http.upload();
   if (up.status == UPLOAD_FILE_START) {
-    g_ota_authorized = g_http.arg("token") == g_token;
+    g_ota_authorized = token_ok(g_http.arg("token"));
     if (!g_ota_authorized) {
       Serial.println("[OTA] rejected: bad token");
       return;

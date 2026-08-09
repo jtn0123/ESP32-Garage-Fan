@@ -27,6 +27,12 @@ float g_off_idle = -1.0f;
 float g_outside_c = NAN;
 uint32_t g_outside_ms = 0;
 time_t g_outdoor_epoch = 0;  // bridge's own timestamp topic, if any
+uint32_t g_epoch_rx_ms = 0;  // when that /ts arrived, for pairing
+
+// How close together a /ts and its temperature must land to count as one
+// sample. Broker delivery of a pair is millisecond-scale; ten seconds is
+// generous without letting an epoch outlive its own sample cycle.
+constexpr uint32_t kEpochPairMs = 10000;
 
 bool begin_if_needed() {
   if (g_ok)
@@ -96,16 +102,21 @@ void set_offset_idle(float c) {
 void set_outside_f(float f) {
   g_outside_c = (f - 32.0f) * 5.0f / 9.0f;
   g_outside_ms = millis();
-  // Each temperature clears the bridge timestamp; a feed that publishes /ts
-  // re-sends it alongside every sample, so epoch mode re-arms immediately.
-  // A bridge that STOPS publishing /ts (config change) falls back to
-  // receipt-time freshness instead of gating on a fossil epoch forever, and
-  // retained replay still reads stale: the redelivered old /ts re-arms epoch
-  // mode with its old value.
-  g_outdoor_epoch = 0;
+  // Pair the bridge timestamp with its sample: keep an epoch that arrived
+  // just before this temperature (broker delivers the retained or live pair
+  // within milliseconds, in either order), discard one that is older than a
+  // pairing window. So: retained replay keeps its stale epoch and reads
+  // stale; a live feed keeps its fresh epoch; and a bridge that STOPS
+  // publishing /ts falls back to receipt-time freshness within one sample
+  // instead of gating on a fossil epoch forever.
+  if (millis() - g_epoch_rx_ms > kEpochPairMs)
+    g_outdoor_epoch = 0;
 }
 
-void set_outdoor_epoch(long epoch) { g_outdoor_epoch = epoch; }
+void set_outdoor_epoch(long epoch) {
+  g_outdoor_epoch = epoch;
+  g_epoch_rx_ms = millis();
+}
 
 float outside_c_fresh() {
   // A bridge that publishes its own epoch timestamp gives real freshness --

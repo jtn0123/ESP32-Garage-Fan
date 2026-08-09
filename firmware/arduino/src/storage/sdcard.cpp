@@ -80,8 +80,10 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed) {
     CRUMB_CLEAR();
     return;
   }
-  f.write((const uint8_t*)line, n);
+  const size_t written = f.write((const uint8_t*)line, n);
   f.close();
+  if (written != static_cast<size_t>(n))
+    g_ok = false;  // card is failing writes; re-mount rather than lose rows silently
   CRUMB_CLEAR();
 }
 
