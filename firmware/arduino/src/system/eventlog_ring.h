@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#include <cstring>
+#include <cstdio>
 
 namespace eventlog {
 
@@ -28,8 +28,7 @@ struct LineRing {
       flushed++;
       lost++;
     }
-    strncpy(buf[head], line, kLineLen - 1);
-    buf[head][kLineLen - 1] = '\0';
+    snprintf(buf[head], kLineLen, "%s", line);  // truncates and NUL-terminates
     head = static_cast<uint16_t>((head + 1) % kMaxLines);
     if (n < kMaxLines)
       n++;
