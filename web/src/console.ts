@@ -154,7 +154,13 @@ export function paintHero(): void {
   const stamp = $('stamp');
   if (scrubbing) {
     const t = series.ts(i);
-    const minutes = ((series.n - 1 - i) * (view.history?.interval_s ?? 300)) / 60;
+    const tNow = series.ts(series.n - 1);
+    // Real timestamp difference, not index * interval: a cache-merged series
+    // has holes, and across one the index arithmetic understates the age.
+    const minutes =
+      t !== null && tNow !== null
+        ? (tNow - t) / 60
+        : ((series.n - 1 - i) * (view.history?.interval_s ?? 300)) / 60;
     stamp.textContent = `${t === null ? '–' : clock(t)} · ${ago(minutes)}`;
     stamp.className = 'scrub';
   } else {

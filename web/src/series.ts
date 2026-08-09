@@ -10,6 +10,18 @@ export interface Series {
   n: number;
   /** Epoch seconds for sample i, or null before SNTP has synced. */
   ts: (i: number) => number | null;
+  /**
+   * Horizontal position of sample i as a 0..1 fraction, proportional to TIME:
+   * an outage occupies its true width on the axis instead of being squeezed
+   * to one sample step. Index-proportional before SNTP has synced.
+   */
+  frac: number[];
+  /**
+   * True where the step from sample i-1 to i spans more than ~1.5 intervals --
+   * the device was dark. Chart lines break here rather than fabricating a
+   * bridge across the hole.
+   */
+  gap: boolean[];
   night: boolean[];
   tf: (number | null)[]; // garage, Fahrenheit
   of: (number | null)[]; // outside, Fahrenheit
@@ -27,10 +39,29 @@ export interface Series {
  */
 const OUTDOOR_ABSENT_MAX = -100;
 
-export function build(h: History): Series {
+export function build(h: History, explicitTs?: readonly number[]): Series {
   const n = h.temp_c?.length ?? 0;
-  const ts = (i: number): number | null =>
-    h.end_ts ? h.end_ts - (n - 1 - i) * h.interval_s : null;
+  // The device response is uniformly spaced by construction; a cache-merged
+  // response is not (reboots leave holes), so the merge hands its real key
+  // list in as explicitTs and index arithmetic stops being the truth.
+  const ts = (i: number): number | null => {
+    if (explicitTs && explicitTs.length === n) return explicitTs[i] ?? null;
+    return h.end_ts ? h.end_ts - (n - 1 - i) * h.interval_s : null;
+  };
+
+  const t0 = ts(0);
+  const tn = ts(n - 1);
+  const span = t0 !== null && tn !== null ? tn - t0 : 0;
+  const frac: number[] = [];
+  const gap: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = ts(i);
+    frac.push(
+      span > 0 && t0 !== null && t !== null ? (t - t0) / span : n > 1 ? i / (n - 1) : 0,
+    );
+    const prev = i > 0 ? ts(i - 1) : null;
+    gap.push(prev !== null && t !== null && t - prev > h.interval_s * 1.5);
+  }
 
   const night: boolean[] = [];
   for (let i = 0; i < n; i++) {
@@ -48,6 +79,8 @@ export function build(h: History): Series {
   return {
     n,
     ts,
+    frac,
+    gap,
     night,
     tf: (h.temp_c ?? []).map((v) => (v === null ? null : v * 9 / 5 + 32)),
     of: (h.out_f ?? []).map((v) => (v === null || v <= OUTDOOR_ABSENT_MAX ? null : v)),
@@ -77,6 +110,17 @@ interface CachedSample {
 const CACHE_KEY = 'gf24';
 const DAY_SECONDS = 86_400;
 
+export interface Merged {
+  h: History;
+  /**
+   * The real epoch of every row in `h`, oldest first -- the union's keys, so
+   * holes from reboots and outages are visible in it. Null on pass-through
+   * (no storage, no timestamp): the rows are then uniformly spaced and index
+   * arithmetic remains the truth.
+   */
+  ts: number[] | null;
+}
+
 /**
  * Union the freshly fetched 24 h window with the browser's own record of it.
  *
@@ -88,8 +132,8 @@ const DAY_SECONDS = 86_400;
  * localStorage, and so a browser with storage disabled degrades to
  * pass-through rather than throwing on every poll.
  */
-export function mergeCache(h: History, store: Storage | null = safeStorage()): History {
-  if (!h.end_ts || !store) return h;
+export function mergeCache(h: History, store: Storage | null = safeStorage()): Merged {
+  if (!h.end_ts || !store) return { h, ts: null };
 
   let cache: Record<string, CachedSample> = {};
   try {
@@ -117,7 +161,7 @@ export function mergeCache(h: History, store: Storage | null = safeStorage()): H
     .map(Number)
     .filter((t) => Number.isFinite(t) && t >= cutoff)
     .sort((a, b) => a - b);
-  if (!keys.length) return h;
+  if (!keys.length) return { h, ts: null };
 
   const out: History = {
     interval_s: h.interval_s,
@@ -149,7 +193,7 @@ export function mergeCache(h: History, store: Storage | null = safeStorage()): H
     // Quota exceeded or storage disabled: the merge still stands for this
     // render, we just will not remember it next time.
   }
-  return out;
+  return { h: out, ts: keys };
 }
 
 function safeStorage(): Storage | null {
