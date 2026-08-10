@@ -263,14 +263,22 @@ static void handle_config() {
 }
 
 static void handle_sensors() {
-  if (!climate::ok() || history::count() == 0) {
+  // A LIVE read, not the newest ring entry. History is stored
+  // already-corrected -- deliberately, so changing an offset never rewrites
+  // what was already logged -- and it is only appended every 5 minutes, so
+  // serving it here made a freshly changed offset appear to do nothing at
+  // all. Calibrating against a display that will not move is precisely how
+  // this board ended up reading ~10 F low: the offset was pushed further and
+  // further to chase a number that could not respond until the next sample
+  // (2026-08-09). The console polls this once a minute and calls the result
+  // `live`; it should be live. Costs one forced BME280 conversion.
+  float t, h, p;
+  if (!climate::sample(&t, &h, &p)) {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
   char buf[128];
-  const uint16_t i = history::count() - 1;
-  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}",
-           history::temp()[i], history::rh()[i], history::hpa()[i]);
+  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
   g_http.send(200, "application/json", buf);
 }
 
