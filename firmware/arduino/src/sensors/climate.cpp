@@ -55,13 +55,26 @@ void restore(Preferences* prefs) {
 
 float corrected(float raw_c) { return raw_c + offset_active(); }
 
+// NaN is not the only way a BME280 read fails, and assuming it was let bad
+// data all the way through. When the I2C transaction is refused -- this rig
+// logs ESP_ERR_INVALID_STATE regularly -- the driver still runs the
+// compensation maths, on garbage, and returns a perfectly finite number.
+// 167.25 C, 100 %RH and -162.9 hPa reached the RAM ring, the SD CSV, the
+// broker and the auto thermostat on 2026-08-09, and /api/sensors reported
+// them as a measurement. Outside the datasheet's operating range it is a
+// failed read, not weather.
+static bool plausible(float t_c, float rh, float hpa) {
+  return !isnan(t_c) && !isnan(rh) && !isnan(hpa) && t_c > -40.0f && t_c < 85.0f && rh >= 0.0f &&
+         rh <= 100.0f && hpa > 300.0f && hpa < 1100.0f;
+}
+
 bool sample(float* t, float* h, float* p) {
   if (!begin_if_needed())
     return false;
   const float t_raw = g_bme.readTemperature();
   const float hv = g_bme.readHumidity();
   const float pv = g_bme.readPressure() / 100.0f;
-  if (isnan(t_raw) || isnan(hv) || isnan(pv)) {
+  if (!plausible(t_raw, hv, pv)) {
     g_ok = false;  // sensor wedged or unplugged; re-probe next sample
     return false;
   }
@@ -76,7 +89,10 @@ void refresh_inside() {
   if (!g_ok)
     return;
   const float t = g_bme.readTemperature();
-  if (!isnan(t))
+  // Same guard as sample(): this value feeds the auto thermostat every 30 s,
+  // so a garbage read here would drive the fan directly. Holding the last
+  // good reading is what auto_logic already expects of missing data.
+  if (t > -40.0f && t < 85.0f && !isnan(t))
     g_inside_c = corrected(t);
 }
 

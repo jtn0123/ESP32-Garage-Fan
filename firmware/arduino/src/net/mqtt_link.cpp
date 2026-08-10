@@ -25,6 +25,7 @@ PubSubClient g_mqtt(g_net);
 uint32_t g_last_reconnect_ms = 0;
 uint32_t g_up_ms = 0;
 uint32_t g_last_seen_up_ms = 0;  // last tick that observed a live session
+int g_echoed_speed = -1;         // our own echo, awaiting its round trip
 bool g_ever = false;
 
 void on_message(char* topic, uint8_t* payload, unsigned int len) {
@@ -53,10 +54,14 @@ void on_message(char* topic, uint8_t* payload, unsigned int len) {
   long v = strtol(buf, &end, 10);
   if (end == buf || *end != '\0')
     return;
-  // Manual only when it arrives OUTSIDE the retained-replay grace window:
-  // a retained command replayed at connect is the broker remembering, not
-  // the human acting.
-  fan::apply(static_cast<int>(v), "mqtt", millis() - g_up_ms > kMqttGraceMs);
+  // Manual only when it arrives OUTSIDE the retained-replay grace window (a
+  // retained command replayed at connect is the broker remembering, not the
+  // human acting) AND when it is not the echo of our own last publish coming
+  // back around. apply() drops auto for a manual command even when the speed
+  // is unchanged -- correct for a human, fatal for a feedback loop.
+  const bool ours = (static_cast<int>(v) == g_echoed_speed);
+  g_echoed_speed = -1;
+  fan::apply(static_cast<int>(v), "mqtt", !ours && millis() - g_up_ms > kMqttGraceMs);
   publish_state(fan::speed());
 }
 
@@ -73,6 +78,14 @@ void publish_state(int speed) {
 void echo_set(int speed) {
   if (!g_mqtt.connected())
     return;
+  // Remember what we are about to say so the round trip can be recognised.
+  // We publish this retained so the broker's remembered command matches
+  // reality -- but we also SUBSCRIBE to it, so the broker hands it straight
+  // back, and on_message used to read our own echo as a human grabbing the
+  // wheel and switch auto off. Auto could therefore make exactly one step
+  // before disabling itself, forever; invisible until an outdoor reading
+  // finally arrived and it tried to act (2026-08-09).
+  g_echoed_speed = speed;
   char buf[4];
   snprintf(buf, sizeof(buf), "%d", speed);
   g_mqtt.publish(kTopicSet, buf, true);
