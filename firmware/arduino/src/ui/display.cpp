@@ -14,6 +14,7 @@
 #include "sensors/climate.h"
 #include "storage/history.h"
 #include "system/crashlog.h"
+#include "system/eventlog.h"
 #include "system/odometer.h"
 
 namespace display {
@@ -46,6 +47,13 @@ void maybe_render() {
                    (fan::speed() != g_speed_shown && millis() - g_last_ms >= 60000);
   if (!due)
     return;
+  // Stamp the cadence BEFORE the refresh, not after it. Stamping at the end
+  // made the real period "every kSampleMs PLUS however long the panel took",
+  // which is exactly why this device dropped its MQTT session every 317 s and
+  // never on a round number: 300 s of waiting + ~17 s of blocking refresh
+  // (2026-08-09).
+  g_last_ms = millis();
+  const uint32_t t_render = millis();
   CRUMB("epd");
   g_epd->clearBuffer();
   g_epd->fillScreen(EPD_WHITE);
@@ -94,8 +102,16 @@ void maybe_render() {
   g_epd->printf("%s  fw %s", WiFi.localIP().toString().c_str(), kFwVersion);
   g_epd->display();
   CRUMB_CLEAR();
-  g_last_ms = millis();
   g_speed_shown = fan::speed();
+  // Adafruit_EPD::display() is synchronous: it parks the entire loop while the
+  // panel clocks its waveform out. Long enough that PubSubClient cannot send a
+  // keepalive, which is what the broker was recording as "Client
+  // garage-fan-03f784 disconnected: exceeded timeout" on a 317 s beat. Never
+  // let that cost be invisible again -- the sample and the SD flush were both
+  // instrumented and exonerated before anyone thought to time the screen.
+  const uint32_t dt = millis() - t_render;
+  if (dt > 2000)
+    eventlog::log("slow", "epd refresh %lums", (unsigned long)dt);
 }
 
 }  // namespace display

@@ -151,6 +151,13 @@ void note_link_state() {
 void init() {
   g_mqtt.setServer(MQTT_HOST, MQTT_PORT);
   g_mqtt.setCallback(on_message);
+  // 60 s, not PubSubClient's 15 s default. The e-ink refresh blocks the loop
+  // for ~17 s every 5 minutes, and no keepalive can be sent while it runs; the
+  // broker (which allows 1.5x keepalive = 22.5 s) was dropping this client on
+  // every single refresh and firing its will, so anything watching the fan saw
+  // it flap all day. 60 s absorbs the refresh with room to spare and still
+  // notices a genuinely dead link within 90 s.
+  g_mqtt.setKeepAlive(60);
 }
 
 void tick() {
