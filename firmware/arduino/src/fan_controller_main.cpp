@@ -56,23 +56,42 @@ static void sample_climate() {
   // Battery first and unconditionally: the charging verdict feeds the climate
   // correction (climate.h documents the dependency), so a wedged BME280 must
   // not freeze the hysteresis, the voltage slope or the runtime estimate.
+  const uint32_t t0 = millis();
   battery::sample();
+  const uint32_t t_batt = millis();
   float t, h, p;
-  if (!climate::sample(&t, &h, &p))
-    return;
-  const float oc = climate::outside_c_fresh();
-  history::Sample row;
-  row.t = t;
-  row.h = h;
-  row.p = p;
-  row.out_f = isnan(oc) ? NAN : oc * 9 / 5 + 32;
-  row.speed = (int8_t)(fan::speed() < 0 ? 0 : fan::speed());
-  row.batt_v = battery::kind() ? battery::volts() : NAN;
-  row.chg = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
-  history::append(row, time_synced());
-  if (time_synced())
-    sdcard::log_sample(time(nullptr), t, h, p, row.out_f, fan::speed());
-  mqtt_link::publish_climate(t, h, p);
+  const bool have = climate::sample(&t, &h, &p);
+  const uint32_t t_bme = millis();
+  uint32_t t_sd = t_bme;
+  if (have) {
+    const float oc = climate::outside_c_fresh();
+    history::Sample row;
+    row.t = t;
+    row.h = h;
+    row.p = p;
+    row.out_f = isnan(oc) ? NAN : oc * 9 / 5 + 32;
+    row.speed = (int8_t)(fan::speed() < 0 ? 0 : fan::speed());
+    row.batt_v = battery::kind() ? battery::volts() : NAN;
+    row.chg = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
+    history::append(row, time_synced());
+    if (time_synced())
+      sdcard::log_sample(time(nullptr), t, h, p, row.out_f, fan::speed());
+    t_sd = millis();
+    mqtt_link::publish_climate(t, h, p);
+  }
+  // Anything in here that blocks past the 15 s MQTT keepalive silently kills
+  // the broker session. Deployed 1.14.8 stalled the whole loop ~16 s at every
+  // sample: the broker fired the fan's will ("availability: offline") and the
+  // reconnect looked like a random dropout to every subscriber, while
+  // publish_climate -- reached after the stall, with the session already gone
+  // -- dropped its reading on the floor. Logged on EVERY exit path, phase by
+  // phase, so the tape names the slow step instead of implicating the loop
+  // (2026-08-09).
+  const uint32_t total = millis() - t0;
+  if (total > 2000)
+    eventlog::log("slow", "sample %lums batt=%lu bme=%lu sd=%lu", (unsigned long)total,
+                  (unsigned long)(t_batt - t0), (unsigned long)(t_bme - t_batt),
+                  (unsigned long)(t_sd - t_bme));
 }
 
 void setup() {

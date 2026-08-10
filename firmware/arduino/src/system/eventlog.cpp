@@ -47,6 +47,13 @@ void log(const char* tag, const char* fmt, ...) {
 void flush_tick() {
   if (!sdcard::ok())
     return;
+  // Timed because this is the loop's other blocking SD path and it was NOT
+  // instrumented when sample_climate was: most ticks flush nothing and cost
+  // nothing, so a stall here hides between samples and looks like a random
+  // MQTT dropout. A block past the 15 s keepalive kills the broker session
+  // (2026-08-09).
+  const uint32_t t0 = millis();
+  int wrote = 0;
   // A small batch per tick: the ledger keeps the place, and the cap keeps an
   // event burst from turning one tick into a run of SD writes.
   for (int i = 0; i < 8; i++) {
@@ -62,9 +69,10 @@ void flush_tick() {
     }
     portEXIT_CRITICAL(&g_mux);
     if (!pending)
-      return;
+      break;
     if (!sdcard::append_event_line(line))
-      return;  // write failed and dropped the mount; retry after the remount
+      break;  // write failed and dropped the mount; retry after the remount
+    wrote++;
     portENTER_CRITICAL(&g_mux);
     // Acknowledge only if the ledger still points at the line just written.
     // An event burst during the SD write can wrap the ring past it (append's
@@ -74,6 +82,11 @@ void flush_tick() {
       g_ring.mark_flushed(1);
     portEXIT_CRITICAL(&g_mux);
   }
+  // Safe to log here: the flush loop is finished, so this line simply lands in
+  // the ring and rides out on the next tick rather than re-entering the batch.
+  const uint32_t dt = millis() - t0;
+  if (dt > 2000)
+    log("slow", "sdflush %lums lines=%d", (unsigned long)dt, wrote);
 }
 
 uint16_t count() {
