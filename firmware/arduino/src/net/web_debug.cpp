@@ -27,9 +27,25 @@ bool authorized() {
   return false;
 }
 
-// Raw SD probe: bit-level CMD0/CMD8 handshake at 400 kHz, reporting each
-// step, so "card not seated", "card dead", and "card incompatible" stop
-// looking identical. Read-only; safe on any card.
+// One raw SPI-mode command; returns R1 (0xFF = no answer within 16 clocks).
+uint8_t sd_cmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
+  SPI.transfer(0x40 | cmd);
+  SPI.transfer((arg >> 24) & 0xFF);
+  SPI.transfer((arg >> 16) & 0xFF);
+  SPI.transfer((arg >> 8) & 0xFF);
+  SPI.transfer(arg & 0xFF);
+  SPI.transfer(crc);
+  uint8_t r1 = 0xFF;
+  for (int i = 0; i < 16 && (r1 & 0x80); i++) r1 = SPI.transfer(0xFF);
+  return r1;
+}
+
+// Raw SD probe: the FULL SPI-mode init conversation at 400 kHz -- CMD0/CMD8
+// handshake, the ACMD41 wake-up loop, OCR, CSD, and an actual read of block 0
+// -- reporting each stage, so "card not seated", "card dead", "init stalls"
+// and "reads corrupt" stop looking identical. Read-only; safe on any card.
+// Exists because a healthy Mac-verified FAT32 card handshakes here but
+// SD.begin() fails at every bus speed (2026-08-09) and nothing said why.
 void handle_sd_test() {
   if (!authorized())
     return;
@@ -46,32 +62,95 @@ void handle_sd_test() {
   SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
   for (int i = 0; i < 10; i++) SPI.transfer(0xFF);  // 80 warm-up clocks
   digitalWrite(SD_CS_PIN, LOW);
-  static const uint8_t kCmd0[] = {0x40, 0, 0, 0, 0, 0x95};
-  for (uint8_t b : kCmd0) SPI.transfer(b);
-  uint8_t r1 = 0xFF;
-  for (int i = 0; i < 16 && (r1 & 0x80); i++) r1 = SPI.transfer(0xFF);
+
+  const uint8_t r1_cmd0 = sd_cmd(0, 0, 0x95);
   uint8_t r7[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-  uint8_t r1b = 0xFF;
-  if (r1 == 0x01) {  // idle: try CMD8 (SDv2 voltage check, echoes 0x1AA)
-    static const uint8_t kCmd8[] = {0x48, 0, 0, 0x01, 0xAA, 0x87};
-    for (uint8_t b : kCmd8) SPI.transfer(b);
-    for (int i = 0; i < 16 && (r1b & 0x80); i++) r1b = SPI.transfer(0xFF);
-    if (r1b == 0x01) {
+  uint8_t r1_cmd8 = 0xFF;
+  if (r1_cmd0 == 0x01) {  // idle: CMD8 (SDv2 voltage check, echoes 0x1AA)
+    r1_cmd8 = sd_cmd(8, 0x000001AA, 0x87);
+    if (r1_cmd8 == 0x01) {
       for (int i = 0; i < 4; i++) r7[i] = SPI.transfer(0xFF);
+    }
+  }
+
+  // ACMD41 wake-up loop with HCS: this is where marginal power dies -- the
+  // card draws its init current here and never leaves idle.
+  uint8_t r1_acmd41 = 0xFF;
+  int iters = 0;
+  const uint32_t t0 = millis();
+  if (r1_cmd8 == 0x01) {
+    while (millis() - t0 < 1000) {
+      sd_cmd(55, 0, 0xFF);
+      r1_acmd41 = sd_cmd(41, 0x40000000, 0xFF);
+      iters++;
+      if (r1_acmd41 == 0x00)
+        break;
+      delay(10);
+    }
+  }
+  const uint32_t acmd_ms = millis() - t0;
+
+  uint8_t ocr[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+  uint8_t r1_cmd58 = 0xFF;
+  if (r1_acmd41 == 0x00) {
+    r1_cmd58 = sd_cmd(58, 0, 0xFF);
+    if (r1_cmd58 <= 0x01) {
+      for (int i = 0; i < 4; i++) ocr[i] = SPI.transfer(0xFF);
+    }
+  }
+
+  // Block 0 read: the decisive stage. If this returns the MBR signature the
+  // bus, power and card are all fine and the failure is software-side.
+  uint8_t r1_cmd17 = 0xFF, token = 0xFF;
+  uint8_t first8[8] = {0};
+  bool mbr_sig = false;
+  if (r1_cmd58 <= 0x01) {
+    r1_cmd17 = sd_cmd(17, 0, 0xFF);
+    if (r1_cmd17 == 0x00) {
+      for (int i = 0; i < 2000 && token == 0xFF; i++) token = SPI.transfer(0xFF);
+      if (token == 0xFE) {
+        uint8_t sig0 = 0, sig1 = 0;
+        for (int i = 0; i < 512; i++) {
+          const uint8_t b = SPI.transfer(0xFF);
+          if (i < 8)
+            first8[i] = b;
+          if (i == 510)
+            sig0 = b;
+          if (i == 511)
+            sig1 = b;
+        }
+        SPI.transfer(0xFF);  // discard the 2 CRC bytes
+        SPI.transfer(0xFF);
+        mbr_sig = (sig0 == 0x55 && sig1 == 0xAA);
+      }
     }
   }
   digitalWrite(SD_CS_PIN, HIGH);
   SPI.transfer(0xFF);
   SPI.endTransaction();
-  char buf[160];
+
+  const char* verdict = r1_cmd0 == 0xFF   ? "no response - card absent, unseated, or bad contact"
+                        : r1_cmd0 != 0x01 ? "CMD0 abnormal - card answered but not idle"
+                        : r1_cmd8 != 0x01 ? "CMD8 rejected - SDv1 or protocol trouble"
+                        : r1_acmd41 != 0x00
+                            ? "init stalls at ACMD41 - power sag or card incompatibility"
+                        : r1_cmd58 > 0x01 ? "OCR read failed after init - bus integrity"
+                        : token != 0xFE   ? "block read token missing - bus or card data path"
+                        : mbr_sig ? "FULL INIT + BLOCK READ OK - failure is in the SD library layer"
+                                  : "block read corrupt - MISO integrity";
+
+  char buf[512];
   snprintf(buf, sizeof(buf),
-           "{\"cmd0_r1\":\"0x%02X\",\"cmd8_r1\":\"0x%02X\","
-           "\"cmd8_echo\":\"%02X%02X%02X%02X\",\"verdict\":\"%s\"}",
-           r1, r1b, r7[0], r7[1], r7[2], r7[3],
-           r1 == 0xFF   ? "no response - card absent, unseated, or bad contact"
-           : r1 == 0x01 ? (r7[2] == 0x01 && r7[3] == 0xAA ? "card alive, SDv2, handshake ok"
-                                                          : "card alive but CMD8 odd")
-                        : "card answered abnormally");
+           "{\"cmd0\":\"0x%02X\",\"cmd8\":\"0x%02X\",\"echo\":\"%02X%02X%02X%02X\","
+           "\"acmd41\":{\"r1\":\"0x%02X\",\"iters\":%d,\"ms\":%lu},"
+           "\"ocr\":\"%02X%02X%02X%02X\",\"ccs\":%s,"
+           "\"read0\":{\"r1\":\"0x%02X\",\"token\":\"0x%02X\",\"mbr_sig\":%s,"
+           "\"first8\":\"%02X%02X%02X%02X%02X%02X%02X%02X\"},"
+           "\"verdict\":\"%s\"}",
+           r1_cmd0, r1_cmd8, r7[0], r7[1], r7[2], r7[3], r1_acmd41, iters, (unsigned long)acmd_ms,
+           ocr[0], ocr[1], ocr[2], ocr[3], (ocr[0] & 0x40) ? "true" : "false", r1_cmd17, token,
+           mbr_sig ? "true" : "false", first8[0], first8[1], first8[2], first8[3], first8[4],
+           first8[5], first8[6], first8[7], verdict);
   Serial.printf("[SD] probe: %s\n", buf);
   // The probe tore down the SD/SPI buses; tell the owning module and remount
   // so the next 5-minute sample does not silently drop its CSV row.

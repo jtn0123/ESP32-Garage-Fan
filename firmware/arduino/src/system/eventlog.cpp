@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <ctime>
 
+#include "esp_log.h"
 #include "storage/sdcard.h"
 #include "system/eventlog_ring.h"
 #include "system/timeutil.h"
@@ -16,10 +17,14 @@
 namespace eventlog {
 namespace {
 
-// 48 lines x 104 bytes = ~5 KB of RAM. WiFi events append from the network
-// event task while loop() reads and flushes, hence the spinlock around every
-// ring touch (the sections are short memcpys, never I/O).
-LineRing<48, 104> g_ring;
+// 24 lines x 104 bytes = ~2.5 KB of RAM -- an hour-plus of normal chatter,
+// and the SD file carries the long history. Halved from 48 on 2026-08-09:
+// this board's heap is tight enough that esp_vfs_fat_register was failing
+// with NO_MEM, and the ring was one of the few honest places to give back.
+// WiFi events append from the network event task while loop() reads and
+// flushes, hence the spinlock around every ring touch (the sections are
+// short memcpys, never I/O).
+LineRing<24, 104> g_ring;
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 
 }  // namespace
@@ -42,6 +47,13 @@ void log(const char* tag, const char* fmt, ...) {
 void flush_tick() {
   if (!sdcard::ok())
     return;
+  // Timed because this is the loop's other blocking SD path and it was NOT
+  // instrumented when sample_climate was: most ticks flush nothing and cost
+  // nothing, so a stall here hides between samples and looks like a random
+  // MQTT dropout. A block past the 15 s keepalive kills the broker session
+  // (2026-08-09).
+  const uint32_t t0 = millis();
+  int wrote = 0;
   // A small batch per tick: the ledger keeps the place, and the cap keeps an
   // event burst from turning one tick into a run of SD writes.
   for (int i = 0; i < 8; i++) {
@@ -57,9 +69,10 @@ void flush_tick() {
     }
     portEXIT_CRITICAL(&g_mux);
     if (!pending)
-      return;
+      break;
     if (!sdcard::append_event_line(line))
-      return;  // write failed and dropped the mount; retry after the remount
+      break;  // write failed and dropped the mount; retry after the remount
+    wrote++;
     portENTER_CRITICAL(&g_mux);
     // Acknowledge only if the ledger still points at the line just written.
     // An event burst during the SD write can wrap the ring past it (append's
@@ -69,6 +82,11 @@ void flush_tick() {
       g_ring.mark_flushed(1);
     portEXIT_CRITICAL(&g_mux);
   }
+  // Safe to log here: the flush loop is finished, so this line simply lands in
+  // the ring and rides out on the next tick rather than re-entering the batch.
+  const uint32_t dt = millis() - t0;
+  if (dt > 2000)
+    log("slow", "sdflush %lums lines=%d", (unsigned long)dt, wrote);
 }
 
 uint16_t count() {
@@ -89,6 +107,37 @@ uint32_t lost() {
   const uint32_t l = g_ring.lost;
   portEXIT_CRITICAL(&g_mux);
   return l;
+}
+
+namespace {
+
+// esp_log vprintf hook: framework warnings become tape lines. 20 lines per
+// 10 s window, then dropped -- the SD driver's dying words fit easily; a
+// boot-time log storm must not evict the events that matter.
+int esp_vlog_to_ring(const char* fmt, va_list ap) {
+  static uint32_t win_start_ms = 0;
+  static uint8_t in_window = 0;
+  char buf[160];
+  const int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+  for (int i = 0; buf[i]; i++)
+    if (buf[i] == '\n' || buf[i] == '\r')
+      buf[i] = ' ';
+  if (millis() - win_start_ms > 10000) {
+    win_start_ms = millis();
+    in_window = 0;
+  }
+  if (in_window < 20) {
+    in_window++;
+    log("esp", "%s", buf);
+  }
+  return n;
+}
+
+}  // namespace
+
+void capture_esp_logs() {
+  esp_log_level_set("*", ESP_LOG_WARN);
+  esp_log_set_vprintf(&esp_vlog_to_ring);
 }
 
 }  // namespace eventlog

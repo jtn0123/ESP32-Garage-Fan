@@ -94,6 +94,27 @@ while [ $SECONDS -lt $deadline ]; do
     confirmed=$(echo "$state" | sed -n 's/.*"confirmed":\(true\|false\).*/\1/p')
     if [ "$fw" = "$EXPECTED_FW" ] && [ "$confirmed" = "true" ]; then
       echo "VERIFIED: $HOST online, running $fw, image confirmed ($((SECONDS - started))s)"
+      # --- post-deploy smoke ---------------------------------------------------
+      # The version match proves the bytes arrived; these prove the boot is
+      # healthy. Added 2026-08-09 after an OTA upload starved the task watchdog
+      # and panicked the board -- the old verify would still have said VERIFIED
+      # on the next boot without mentioning the corpse.
+      # NOSONAR on the $state consumers: S5332 traces these to the plain-HTTP
+      # curl above. The target is a LAN-only ESP32 with no TLS stack; HTTP is
+      # the device's only protocol, not an oversight.
+      cause=$(echo "$state" | sed -n 's/.*"last_reset":"\([^"]*\)".*/\1/p')    # NOSONAR
+      sd_mb=$(echo "$state" | sed -n 's/.*"sd_total_mb":\([0-9]*\).*/\1/p')   # NOSONAR
+      drops=$(echo "$state" | sed -n 's/.*"drops":\([0-9]*\).*/\1/p')         # NOSONAR
+      echo "  smoke: boot_cause=$cause sd_total_mb=${sd_mb:-?} wifi_drops=${drops:-?}"  # NOSONAR
+      if [ "$cause" = "panic" ]; then
+        echo "SMOKE FAIL: this boot follows a PANIC - the new image crashed once"
+        echo "already. Read $HOST/api/events before trusting it."
+        exit 1
+      fi
+      if [ "${sd_mb:-0}" -eq 0 ]; then
+        echo "SMOKE WARN: SD card not mounted - the flight recorder has no"
+        echo "persistence; check $HOST/api/events for the mount failure line."
+      fi
       exit 0
     elif [ "$fw" = "$EXPECTED_FW" ]; then
       echo "  running $fw but not yet confirmed (needs the broker), waiting..."

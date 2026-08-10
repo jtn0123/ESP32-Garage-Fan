@@ -13,6 +13,7 @@
 #include "config.h"
 #include "esp_task_wdt.h"
 #include "system/crashlog.h"
+#include "system/eventlog.h"
 
 namespace sdcard {
 namespace {
@@ -20,6 +21,7 @@ namespace {
 bool g_ok = false;
 uint8_t g_fails = 0;  // give up retrying after 10; format resets
 bool g_quarantined = false;
+bool g_net_up = false;  // pulls the first mount attempt forward; see retry_tick
 
 constexpr const char* kEventsPath = "/events.log";
 constexpr const char* kEventsOldPath = "/events.old";
@@ -47,21 +49,47 @@ static bool begin_attempt(uint32_t freq, bool format_if_failed) {
   digitalWrite(SRAM_CS_PIN, HIGH);
   pinMode(EPD_CS_PIN, OUTPUT);
   digitalWrite(EPD_CS_PIN, HIGH);
-  return format_if_failed ? SD.begin(SD_CS_PIN, SPI, freq, "/sd", 5, true)
-                          : SD.begin(SD_CS_PIN, SPI, freq);
+  // max_files=2, not the default 5: with per-file cache enabled each slot
+  // embeds a 4 KB sector buffer, and esp_vfs_fat_register allocates all of
+  // them plus the FATFS core in ONE contiguous block (~26 KB at 5 slots).
+  // After WiFi is up this board's largest free block is ~17 KB, so the
+  // default could never mount (NO_MEM, 2026-08-09). We open one file at a
+  // time (event log, CSV, tail); 2 slots (~13 KB) is one of margin.
+  return format_if_failed ? SD.begin(SD_CS_PIN, SPI, freq, "/sd", 2, true)
+                          : SD.begin(SD_CS_PIN, SPI, freq, "/sd", 2);
 }
+
+// Reachability outranks persistence. The first time the card ever mounted
+// (1.14.6), its ~13 KB filesystem context left the largest free block at
+// 1.5 KB -- no socket could allocate, and the board vanished from the network
+// while "working". If a mount leaves less than this contiguous, undo it.
+constexpr uint32_t kMinLargestAfterMount = 10 * 1024;
 
 static void mount() {
   for (size_t i = 0; i < kFreqCount; i++) {
     if (i > 0)
       bus_restart();
     if (begin_attempt(kFreqs[i], false)) {
+      const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      if (largest < kMinLargestAfterMount) {
+        SD.end();
+        eventlog::log("sd", "mount undone: leaves largest=%lu (<%lu); network first",
+                      (unsigned long)largest, (unsigned long)kMinLargestAfterMount);
+        return;
+      }
       g_ok = true;
-      Serial.printf("sd mounted at %lu Hz: %.1f/%.1f MB used\n", (unsigned long)kFreqs[i],
-                    SD.usedBytes() / 1048576.0, SD.totalBytes() / 1048576.0);
+      eventlog::log("sd", "mounted at %lu Hz: %lu MB (largest=%lu)", (unsigned long)kFreqs[i],
+                    (unsigned long)(SD.totalBytes() / 1048576), (unsigned long)largest);
       return;
     }
   }
+  // On the flight-recorder tape, not just Serial: silent mount failures made
+  // "why is the card not logging" undiagnosable from the network. Heap
+  // numbers included because the 2026-08-09 failure was esp_vfs_fat_register
+  // returning NO_MEM -- the card was never the problem, the allocator was.
+  eventlog::log("sd", "mount failed at all %u freqs (heap=%lu largest=%lu)", (unsigned)kFreqCount,
+                (unsigned long)ESP.getFreeHeap(),
+                (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 }  // namespace
@@ -271,19 +299,31 @@ uint32_t total_mb() { return g_ok ? static_cast<uint32_t>(SD.totalBytes() / 1048
 uint32_t used_mb() { return g_ok ? static_cast<uint32_t>(SD.usedBytes() / 1048576) : 0; }
 
 void retry_tick() {
-  // First mount attempt ~60 s after boot, then every 10th call (~5 min at the
-  // auto-tick cadence), 10-fail cap, never while quarantined.
+  // First mount attempt the moment WiFi associates, then every 10th call
+  // (~5 min at the auto-tick cadence), 10-fail cap, never while quarantined.
+  // Timing is the whole game: esp_vfs_fat_register needs ONE contiguous
+  // ~13 KB block, and every second of web/MQTT traffic fragments the heap
+  // (largest free block measured at 76 s after boot: 17 KB on a quiet boot,
+  // 7.7 KB on a busy one -- both boots had 20+ KB "free"). Right after the
+  // radio settles is the freshest heap this board ever has. The 60 s clause
+  // is the WiFi-never-came fallback; before-WiFi mounting is off the table
+  // (1.14.3: the radio failed to come up at all).
   static bool tried = false;
   static uint8_t backoff = 0;
   if (g_ok || g_quarantined || g_fails >= 10)
     return;
-  const bool due = tried ? (++backoff >= 10) : (millis() > 60000);
+  const bool due = tried ? (++backoff >= 10) : (g_net_up || millis() > 60000);
   if (!due)
     return;
   tried = true;
   backoff = 0;
   mount_guarded();
   g_fails = g_ok ? 0 : g_fails + 1;
+}
+
+void on_network_up() {
+  g_net_up = true;
+  retry_tick();
 }
 
 }  // namespace sdcard
