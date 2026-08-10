@@ -13,6 +13,7 @@
 #include "config.h"
 #include "esp_task_wdt.h"
 #include "system/crashlog.h"
+#include "storage/line_reader.h"
 #include "system/eventlog.h"
 
 namespace sdcard {
@@ -159,23 +160,15 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
       File f = SD.open(paths[i], FILE_READ);
       if (!f)
         continue;
-      // Line-buffered scan; lines are short and epoch-prefixed.
+      // Block-buffered scan; lines are short and epoch-prefixed.
+      storage::LineReader<File> rd(f);
       char line[96];
-      size_t ll = 0;
       uint32_t fed = 0;
-      while (f.available()) {
-        // Two passes over up to two month files is normally ~3 s, but a
-        // corrupt oversized file must not ride into the 60 s task watchdog.
-        if ((++fed & 0x3FF) == 0)
+      while (rd.next(line, sizeof(line))) {
+        // Two passes over up to two month files, but a corrupt oversized file
+        // must not ride into the 60 s task watchdog.
+        if ((++fed & 0x3F) == 0)
           esp_task_wdt_reset();
-        const char c = static_cast<char>(f.read());
-        if (c != '\n') {
-          if (ll < sizeof(line) - 1)
-            line[ll++] = c;
-          continue;
-        }
-        line[ll] = '\0';
-        ll = 0;
         const long epoch = strtol(line, nullptr, 10);
         if (epoch < cutoff)
           continue;
