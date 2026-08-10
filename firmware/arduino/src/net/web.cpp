@@ -357,13 +357,26 @@ static void handle_sd_format() {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
-  const bool ok = sdcard::format();
-  eventlog::log("sd", "format %s (%lu MB)", ok ? "ok" : "FAILED",
-                (unsigned long)sdcard::total_mb());
-  char buf[80];
-  snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}", ok ? "true" : "false",
-           (unsigned long)sdcard::total_mb());
-  g_http.send(ok ? 200 : 500, "application/json", buf);
+  // "ok" used to mean only "the card mounted afterwards", so this endpoint
+  // claimed success for work it had not done. SD.begin's format_if_empty
+  // formats an UNMOUNTABLE card only; on a card that already carries a
+  // filesystem it is a remount that erases nothing. A 99%-full 28 GB card
+  // answered {"ok":true} in 166 ms with every byte still on it (2026-08-09).
+  // Report what actually happened, and let the caller see the numbers.
+  const uint32_t used_before = sdcard::used_mb();
+  const bool mounted = sdcard::format();
+  const uint32_t used_after = sdcard::used_mb();
+  const bool erased = mounted && used_after < used_before;
+  eventlog::log("sd", "format: mounted=%d erased=%d used %lu->%lu MB", mounted ? 1 : 0,
+                erased ? 1 : 0, (unsigned long)used_before, (unsigned long)used_after);
+  char buf[288];
+  snprintf(buf, sizeof(buf),
+           "{\"ok\":%s,\"erased\":%s,\"total_mb\":%lu,\"used_before_mb\":%lu,\"used_mb\":%lu,"
+           "\"note\":\"%s\"}",
+           mounted ? "true" : "false", erased ? "true" : "false", (unsigned long)sdcard::total_mb(),
+           (unsigned long)used_before, (unsigned long)used_after,
+           erased ? "erased" : "nothing erased: the card already held a mountable filesystem");
+  g_http.send(mounted ? 200 : 500, "application/json", buf);
 }
 
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.

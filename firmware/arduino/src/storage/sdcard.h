@@ -70,9 +70,17 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
 
 /**
  * Token-verified caller only: full teardown, then mount with
- * format-on-failure (fresh exFAT card becomes FAT32 in place). Blocks for
- * minutes on big cards; the RMT peripheral keeps the fan running throughout.
- * Clears the quarantine and the failure count. True if the card mounted.
+ * format-on-failure (a fresh or exFAT card becomes FAT32 in place). Clears
+ * the quarantine and the failure count. True if the card MOUNTED -- which is
+ * not the same as "was erased", and the difference matters:
+ *
+ *   This CANNOT wipe a card that already carries a mountable filesystem.
+ *   SD.begin's flag is format_if_EMPTY, so a card with a valid FAT returns
+ *   in milliseconds with all its data intact. To actually erase a working
+ *   card, pull it and format it on a computer.
+ *
+ * The endpoint reports used_before/used_mb so a no-op cannot masquerade as a
+ * wipe (it did exactly that on a 99%-full 28 GB card, 2026-08-09).
  */
 bool format();
 
