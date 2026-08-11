@@ -217,9 +217,12 @@ function bitValues(): { value: string; colour: string }[] {
   // A card with no room left stops being a flight recorder, so it reads as a
   // warning rather than as ordinary status text.
   const cardTense = s.sd_total_mb > 0 && cardTight(s.sd_used_mb, s.sd_total_mb);
+  let cardColour = OUT;
+  if (!s.sd_total_mb) cardColour = DIM;
+  else if (cardTense) cardColour = OR;
   return [
     { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
-    { value: card, colour: !s.sd_total_mb ? DIM : cardTense ? OR : OUT },
+    { value: card, colour: cardColour },
     { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },

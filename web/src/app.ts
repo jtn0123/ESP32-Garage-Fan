@@ -135,6 +135,52 @@ async function maintenance(kind: keyof typeof MAINTENANCE): Promise<void> {
   }
 }
 
+/**
+ * Hash the picked image and, when a published sum exists, compare against it.
+ *
+ * There is no secure boot and /update accepts whatever bytes it is handed, so
+ * the release's `.sha256` sidecar is the only thing standing between GitHub
+ * and the flash -- and nothing consulted it until now. Two rules:
+ *
+ *  - Fail closed. "We could not hash it" is not a reason to write it anyway.
+ *  - Say whether anything was actually COMPARED. Printing a digest on its own
+ *    reads like a passed check, and in the common cases (a locally built
+ *    image, or a check that came back ahead/no-binary/up-to-date) there is no
+ *    published sum and nothing was verified at all.
+ */
+async function verifyImage(file: File): Promise<{ ok: boolean; note: string }> {
+  let digest: string;
+  try {
+    digest = await sha256Hex(file);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return { ok: false, note: `ABORTED: could not hash the image (${why}).` };
+  }
+  const short = `${digest.slice(0, 16)}…`;
+  const upd = view.update;
+  if (upd?.kind !== 'available') {
+    return { ok: true, note: `NOT VERIFIED — no published checksum to compare; sha256 ${short}` };
+  }
+  const { asset, latest } = upd;
+  const expected = await fetch(`${asset.browser_download_url}.sha256`)
+    .then((r) => (r.ok ? r.text() : null))
+    .then((t) => (t ? parseChecksum(t) : null))
+    .catch(() => null);
+  if (!expected) {
+    return {
+      ok: true,
+      note: `NOT VERIFIED — could not fetch ${latest}'s published sum; sha256 ${short}`,
+    };
+  }
+  if (expected !== digest) {
+    return {
+      ok: false,
+      note: `ABORTED: this file's SHA-256 does not match ${latest}. Do not flash it.`,
+    };
+  }
+  return { ok: true, note: `verified against ${latest} (sha256 ${short})` };
+}
+
 async function uploadFirmware(): Promise<void> {
   const file = (document.getElementById('ota_f') as HTMLInputElement | null)?.files?.[0];
   const token = (document.getElementById('ota_t') as HTMLInputElement | null)?.value ?? '';
@@ -144,51 +190,14 @@ async function uploadFirmware(): Promise<void> {
     msg.textContent = 'pick firmware.bin first';
     return;
   }
-  // Integrity check before anything is written to flash.
-  //
-  // There is no secure boot and /update accepts whatever bytes it is handed,
-  // so the release's .sha256 sidecar is the only thing standing between
-  // GitHub and the flash -- and until now nothing consulted it. If the running
-  // update check found an installable asset we fetch its sidecar and refuse a
-  // mismatch outright. When the sidecar cannot be fetched (GitHub's asset host
-  // may not allow the cross-origin read) we still show the computed digest so
-  // it can be compared by eye rather than silently skipping the check.
   msg.textContent = 'checking image…';
-  let digest: string | null = null;
-  try {
-    digest = await sha256Hex(file);
-  } catch (err) {
-    // Fail closed. Hashing is the only integrity check between GitHub and the
-    // flash, and "we could not hash it" is not a reason to write it anyway.
-    msg.textContent = `ABORTED: could not hash the image (${err instanceof Error ? err.message : String(err)}).`;
-    return;
-  }
-  const upd = view.update;
-  const asset = upd?.kind === 'available' ? upd.asset : null;
-  const latest = upd && 'latest' in upd ? upd.latest : 'the release';
-  const short = `${digest.slice(0, 16)}…`;
-  // Say plainly whether anything was COMPARED. Printing a digest on its own
-  // reads like a passed check, and in the common cases -- a locally built
-  // image, or a check that came back ahead/no-binary/up-to-date -- there is no
-  // published sum to compare it against and nothing was verified at all.
-  if (asset) {
-    const expected = await fetch(`${asset.browser_download_url}.sha256`)
-      .then((r) => (r.ok ? r.text() : null))
-      .then((t) => (t ? parseChecksum(t) : null))
-      .catch(() => null);
-    if (expected && expected !== digest) {
-      msg.textContent = `ABORTED: this file's SHA-256 does not match ${latest}. Do not flash it.`;
-      return;
-    }
-    msg.textContent = expected
-      ? `verified against ${latest} (sha256 ${short})`
-      : `NOT VERIFIED — could not fetch ${latest}'s published sum; sha256 ${short}`;
-  } else {
-    msg.textContent = `NOT VERIFIED — no published checksum to compare; sha256 ${short}`;
-  }
+  const check = await verifyImage(file);
+  msg.textContent = check.note;
+  if (!check.ok) return;
 
   const size = `${(file.size / 1024).toFixed(0)} KB`;
-  msg.textContent = `${msg.textContent ? `${msg.textContent} — ` : ''}uploading ${size}…`;
+  const prefix = msg.textContent ? `${msg.textContent} — ` : '';
+  msg.textContent = `${prefix}uploading ${size}…`;
   try {
     const body = await api.uploadFirmware(file, token);
     // The endpoint answers JSON for both outcomes; surface the failure as one.

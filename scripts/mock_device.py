@@ -105,7 +105,38 @@ SCEN = {
 }
 
 
-def history(days: int):
+# Type and bounds for every scenario knob. /_scen coerces through this rather
+# than storing whatever arrived: the response echoes SCEN back, so without a
+# strict whitelist the endpoint reflects caller-controlled data (Sonar
+# pythonsecurity:S5131, and correct in principle even though this binds to
+# loopback and answers application/json).
+SCEN_SPEC = {
+    "card": bool,
+    "synced": bool,
+    "rows": (int, 0, 8640),
+    "gap_at": (int, 0, 8640),  # or None
+    "corrupt": bool,
+    "flat_rh": bool,
+    "down": bool,
+}
+
+
+def coerce_scen(key: str, raw: str):
+    """Whitelisted parse of one knob. Raises ValueError on anything else."""
+    spec = SCEN_SPEC[key]
+    if spec is bool:
+        if raw not in ("true", "false"):
+            raise ValueError(f"{key} takes true|false")
+        return raw == "true"
+    _, lo, hi = spec
+    if raw == "none":
+        return None
+    if not raw.isdigit() or not (lo <= int(raw) <= hi):
+        raise ValueError(f"{key} takes {lo}..{hi} or none")
+    return int(raw)
+
+
+def history():
     n = SCEN["rows"]
     end = int(time.time())
     ts, temp, rh, hpa, out, batt, spd, chg = [], [], [], [], [], [], [], []
@@ -177,102 +208,142 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route()
 
-    def route(self):
-        u = urlparse(self.path)
-        p, q = u.path, parse_qs(u.query)
-        STATE["uptime_s"] = int(time.time() - BOOT) + 1837
+    # --- routing ----------------------------------------------------------
+    # Split into small handlers rather than one long if-chain: the chain grew
+    # to a cognitive complexity of 67, which is exactly the shape that hides a
+    # missing guard.
 
-        if p == "/_scen":  # harness only
-            for k, v in q.items():
-                if k in SCEN:
-                    SCEN[k] = (
-                        None
-                        if v[0] == "none"
-                        else True if v[0] == "true" else False if v[0] == "false" else int(v[0])
-                    )
-            return self._json(200, SCEN)
-        if p == "/_die":  # simulate the device going away
+    def route(self):
+        STATE["uptime_s"] = int(time.time() - BOOT) + 1837
+        u = urlparse(self.path)
+        path, query = u.path, parse_qs(u.query)
+
+        if path.startswith("/_"):
+            return self._harness(path, query)
+        if SCEN["down"] and path.startswith("/api"):
+            self.close_connection = True  # the controller has gone away
+            return
+        handler = self.READS.get(path) or self.WRITES.get(path)
+        if handler is None:
+            return self._json(404, {"error": "404"})
+        if path in self.WRITES and self._write_guard():
+            return
+        return handler(self, query)
+
+    # --- harness ----------------------------------------------------------
+    def _harness(self, path, query):
+        if path == "/_die":
             SCEN["down"] = True
             return self._json(200, {"ok": True})
-        if SCEN.get("down") and p.startswith("/api"):
-            self.close_connection = True
-            return
+        if path != "/_scen":
+            return self._json(404, {"error": "404"})
+        # Strictly whitelisted: only known keys, only known value shapes. The
+        # response echoes SCEN, so storing raw input here would reflect
+        # caller-controlled data straight back out.
+        for key, values in query.items():
+            if key not in SCEN_SPEC:
+                return self._json(400, {"error": "unknown knob"})
+            try:
+                SCEN[key] = coerce_scen(key, values[0])
+            except ValueError as exc:
+                return self._json(400, {"error": str(exc)})
+        return self._json(200, dict(SCEN))
 
-        if p in ("/", "/index.html"):
-            return self._send(200, CONSOLE.read_bytes(), "text/html")
-        if p == "/api/state":
-            return self._json(200, STATE)
-        if p == "/api/device":
-            return self._json(200, DEVICE)
-        if p == "/api/stats":
-            return self._json(200, STATS)
-        if p == "/api/sensors":
-            return self._json(200, {"ok": True, "temp_c": 23.86, "rh": 38.9, "hpa": 999.9})
-        if p == "/api/events":
-            return self._send(
-                200,
-                "\n".join(
-                    f"{int(time.time())-i*30} {1000-i*30} health rssi=-63 heap=46724 drops=0"
-                    for i in range(30)
-                ),
-                "text/plain",
-            )
+    # --- reads ------------------------------------------------------------
+    def _page(self, _query):
+        return self._send(200, CONSOLE.read_bytes(), "text/html")
 
-        if p == "/api/history":
-            d = q.get("days", [None])[0]
-            if d not in ("1", "7", "30"):
-                return self._json(400, {"error": "days must be 1, 7 or 30"})
-            if not (SCEN["card"] and SCEN["synced"]) and d != "1":
-                return self._json(503, {"error": "sd card not mounted"})
-            return self._json(200, history(int(d)))
+    def _state(self, _query):
+        return self._json(200, STATE)
 
-        if p == "/download.csv":
-            if "days" in q:
-                raw = q["days"][0]
-                if not raw.isdigit() or not (1 <= int(raw) <= 30):
-                    return self._json(400, {"error": "days must be 1-30"})
-            return self._send(
-                200,
-                "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n"
-                "1786425931,24.00,40.0,999.9,73.2,9,4.20,1\n",
-                "text/csv",
-            )
+    def _device(self, _query):
+        return self._json(200, DEVICE)
 
-        # ---- writes ------------------------------------------------------
-        if p == "/api/set":
-            if self._write_guard():
-                return
-            s = q.get("speed", [None])[0]
-            if s is None or not s.lstrip("-").isdigit() or not (0 <= int(s) <= 12):
-                return self._json(400, {"error": "0-12 only"})
-            STATE["speed"] = int(s)
-            STATE["uptime_s"] += 1  # so ordering guards see progress
-            return self._json(200, STATE)
-        if p == "/api/config":
-            if self._write_guard():
-                return
-            for k, key, cast in (
-                ("auto", "auto", lambda v: v != "0"),
-                ("max", "auto_max", int),
-                ("min", "auto_min", int),
-                ("offc", "offc", float),
-                ("offi", "offi", float),
-            ):
-                if k in q:
-                    try:
-                        STATE[key] = cast(q[k][0])
-                    except ValueError:
-                        pass
-            STATE["uptime_s"] += 1
-            return self._json(200, STATE)
-        if p in ("/api/raw", "/api/restart", "/api/sdformat", "/api/sdpurge", "/update"):
-            if self._write_guard():
-                return
-            if p == "/api/sdpurge":
-                return self._json(403, {"error": "bad token"})
-            return self._json(403, {"error": "bad token"})
+    def _stats(self, _query):
+        return self._json(200, STATS)
 
-        return self._json(404, {"error": "404"})
+    def _sensors(self, _query):
+        return self._json(200, {"ok": True, "temp_c": 23.86, "rh": 38.9, "hpa": 999.9})
+
+    def _events(self, _query):
+        now = int(time.time())
+        body = "\n".join(
+            f"{now - i * 30} {1000 - i * 30} health rssi=-63 heap=46724 drops=0" for i in range(30)
+        )
+        return self._send(200, body, "text/plain")
+
+    def _history(self, query):
+        days = query.get("days", [None])[0]
+        if days not in ("1", "7", "30"):
+            return self._json(400, {"error": "days must be 1, 7 or 30"})
+        if days != "1" and not (SCEN["card"] and SCEN["synced"]):
+            return self._json(503, {"error": "sd card not mounted"})
+        return self._json(200, history())
+
+    def _csv(self, query):
+        if "days" in query:
+            raw = query["days"][0]
+            if not raw.isdigit() or not (1 <= int(raw) <= 30):
+                return self._json(400, {"error": "days must be 1-30"})
+        body = (
+            "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n"
+            "1786425931,24.00,40.0,999.9,73.2,9,4.20,1\n"
+        )
+        return self._send(200, body, "text/csv")
+
+    # --- writes -----------------------------------------------------------
+    def _set(self, query):
+        raw = query.get("speed", [None])[0]
+        if raw is None or not raw.isdigit() or not (0 <= int(raw) <= 12):
+            return self._json(400, {"error": "0-12 only"})
+        STATE["speed"] = int(raw)
+        STATE["uptime_s"] += 1  # so the console's ordering guard sees progress
+        return self._json(200, STATE)
+
+    CONFIG_KEYS = {
+        "auto": ("auto", lambda v: v != "0"),
+        "max": ("auto_max", int),
+        "min": ("auto_min", int),
+        "offc": ("offc", float),
+        "offi": ("offi", float),
+    }
+
+    def _config(self, query):
+        for arg, (key, cast) in self.CONFIG_KEYS.items():
+            if arg not in query:
+                continue
+            try:
+                STATE[key] = cast(query[arg][0])
+            except ValueError:
+                return self._json(400, {"error": f"bad {arg}"})
+        STATE["uptime_s"] += 1
+        return self._json(200, STATE)
+
+    def _needs_token(self, _query):
+        # Token-guarded on the real device; the mock always refuses, which is
+        # what the console's error path should be exercised against.
+        return self._json(403, {"error": "bad token"})
+
+    READS = {
+        "/": _page,
+        "/index.html": _page,
+        "/api/state": _state,
+        "/api/device": _device,
+        "/api/stats": _stats,
+        "/api/sensors": _sensors,
+        "/api/events": _events,
+        "/api/history": _history,
+        "/download.csv": _csv,
+    }
+    WRITES = {
+        "/api/set": _set,
+        "/api/config": _config,
+        "/api/raw": _needs_token,
+        "/api/restart": _needs_token,
+        "/api/sdformat": _needs_token,
+        "/api/sdpurge": _needs_token,
+        "/update": _needs_token,
+    }
 
 
 if __name__ == "__main__":

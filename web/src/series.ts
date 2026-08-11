@@ -68,10 +68,8 @@ export function build(h: History): Series {
   // Real per-row epochs from the device. A 0 means SNTP had not synced when
   // that row was taken, which is "unknown", not 1970.
   const stamps = pad<number>(h.ts, n, 0);
-  const ts = (i: number): number | null => {
-    const v = stamps[i];
-    return v ? v : null;
-  };
+  // A 0 means SNTP had not synced when that row was taken -- unknown, not 1970.
+  const ts = (i: number): number | null => stamps[i] || null;
 
   const t0 = ts(0);
   const tn = ts(n - 1);
