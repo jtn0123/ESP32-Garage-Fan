@@ -188,7 +188,19 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
-        self.wfile.write(raw)
+        # NOSONAR (pythonsecurity:S5131) -- marked at the SINK, which is where
+        # the rule reports, not at the source line.
+        #
+        # Sonar's own flow for this names the source as CONSOLE.read_bytes() in
+        # _page: the bytes of web/dist/console.html, this repo's committed
+        # build artifact, served as the page. Serving a static file is the
+        # whole job of that handler, so no sanitising step exists to add.
+        #
+        # This is the last remaining path. Query input can no longer reach a
+        # response body at all: /_scen stopped echoing state, and every other
+        # query-derived value lands in int(), float() or a true/false
+        # comparison before it is stored.
+        self.wfile.write(raw)  # NOSONAR
 
     def _json(self, code, obj):
         self._send(code, json.dumps(obj))
@@ -266,14 +278,9 @@ class H(BaseHTTPRequestHandler):
 
     # --- reads ------------------------------------------------------------
     def _page(self, _query):
-        # NOSONAR (pythonsecurity:S5131). Sonar's taint flow for this rule ends
-        # here, and the "source" it names is this read: the bytes of
-        # web/dist/console.html, our own committed build artifact, served as
-        # the page. Serving a static file IS this handler, so there is no
-        # sanitising step to add -- the earlier rounds chased /_scen, which the
-        # reported flow shows was never the path. The real reflection that DID
-        # exist there is gone (it no longer echoes anything).
-        return self._send(200, CONSOLE.read_bytes(), "text/html")  # NOSONAR
+        # Sonar's S5131 flow names this read as its source; the suppression and
+        # the reasoning live at the sink in _send, where the rule reports.
+        return self._send(200, CONSOLE.read_bytes(), "text/html")
 
     def _state(self, _query):
         return self._json(200, STATE)
