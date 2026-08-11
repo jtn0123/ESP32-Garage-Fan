@@ -75,8 +75,21 @@ describe('evaluate', () => {
     expect(evaluate('1.13.0', [release('v1.13.0')]).kind).toBe('up-to-date');
   });
 
-  it('reports up to date when the device is ahead', () => {
-    expect(evaluate('1.14.0', [release('v1.13.0')]).kind).toBe('up-to-date');
+  it('reports "ahead" -- not "up to date" -- when the device leads the feed', () => {
+    // These mean opposite things about the release channel. The deployed fan
+    // ran 1.14.22 against a newest tag of v1.14.0 and the console showed a
+    // green all-clear for a channel that had been dead for 22 versions.
+    const got = evaluate('1.14.0', [release('v1.13.0')]);
+    expect(got.kind).toBe('ahead');
+    if (got.kind === 'ahead') {
+      expect(got.running).toBe('1.14.0');
+      expect(got.latest).toBe('v1.13.0');
+    }
+  });
+
+  it('never offers a downgrade', () => {
+    const got = evaluate('1.14.0', [release('v1.13.0')]);
+    expect(got.kind).not.toBe('available');
   });
 
   it('skips drafts and pre-releases', () => {
@@ -112,12 +125,13 @@ describe('evaluate', () => {
     expect(got.kind).toBe('unknown');
   });
 
-  it('still reports available when the release has no attached binary', () => {
-    // The banner should link to the release page even if CI has not finished
-    // attaching the image -- silence would look like "no update exists".
+  it('separates a release with no binary from an installable one', () => {
+    // Still surfaced -- silence would look like "no update exists" -- but as
+    // its own kind, because "available" drives an install affordance the
+    // operator cannot actually use when CI has attached no image.
     const got = evaluate('1.13.0', [release('v1.14.0', { assets: [] })]);
-    expect(got.kind).toBe('available');
-    if (got.kind === 'available') expect(got.asset).toBeNull();
+    expect(got.kind).toBe('no-binary');
+    if (got.kind === 'no-binary') expect(got.release.html_url).toContain('v1.14.0');
   });
 });
 

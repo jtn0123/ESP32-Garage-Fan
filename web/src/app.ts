@@ -26,7 +26,7 @@ import { buildGroups, render as renderSettings } from './settings.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
 import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 import type { DeviceState } from './types.js';
-import { checkForUpdate } from './update.js';
+import { checkForUpdate, parseChecksum, sha256Hex } from './update.js';
 
 
 
@@ -36,6 +36,22 @@ function paintSettings(): void {
     clear($('groups'));
     return;
   }
+  // Never rebuild the settings DOM out from under someone who is using it.
+  //
+  // renderSettings() calls host.replaceChildren(), and paint() runs on every
+  // SSE frame and every 15 s poll. That destroyed and recreated the update
+  // token field mid-typing (upload then POSTed token="" and 403'd), stole
+  // focus from the +/- steppers so keyboard repeat died after one press, and
+  // detached the OTA progress node so a ~1 MB upload -- which always outlives
+  // 15 s -- reported neither success nor failure and looked hung forever.
+  //
+  // The OTA row is additionally kept as a stable node (see otaControl), so an
+  // upload in flight survives even a rebuild triggered by leaving and
+  // returning to the screen.
+  const host = $('groups');
+  const active = document.activeElement;
+  if (active && active !== document.body && host.contains(active)) return;
+
   renderSettings(
     $('groups'),
     buildGroups({
@@ -102,9 +118,40 @@ async function uploadFirmware(): Promise<void> {
     msg.textContent = 'pick firmware.bin first';
     return;
   }
-  msg.textContent = `uploading ${(file.size / 1024).toFixed(0)} KB…`;
+  // Integrity check before anything is written to flash.
+  //
+  // There is no secure boot and /update accepts whatever bytes it is handed,
+  // so the release's .sha256 sidecar is the only thing standing between
+  // GitHub and the flash -- and until now nothing consulted it. If the running
+  // update check found an installable asset we fetch its sidecar and refuse a
+  // mismatch outright. When the sidecar cannot be fetched (GitHub's asset host
+  // may not allow the cross-origin read) we still show the computed digest so
+  // it can be compared by eye rather than silently skipping the check.
+  msg.textContent = 'checking image…';
+  const digest = await sha256Hex(file).catch(() => null);
+  const upd = view.update;
+  const asset = upd?.kind === 'available' ? upd.asset : null;
+  const latest = upd && 'latest' in upd ? upd.latest : 'the release';
+  if (digest && asset) {
+    const expected = await fetch(`${asset.browser_download_url}.sha256`)
+      .then((r) => (r.ok ? r.text() : null))
+      .then((t) => (t ? parseChecksum(t) : null))
+      .catch(() => null);
+    if (expected && expected !== digest) {
+      msg.textContent = `ABORTED: this file's SHA-256 does not match ${latest}. Do not flash it.`;
+      return;
+    }
+    if (!expected) msg.textContent = `sha256 ${digest.slice(0, 16)}… (could not fetch published sum)`;
+  } else if (digest) {
+    msg.textContent = `sha256 ${digest.slice(0, 16)}…`;
+  }
+
+  const size = `${(file.size / 1024).toFixed(0)} KB`;
+  msg.textContent = `${msg.textContent ? `${msg.textContent} — ` : ''}uploading ${size}…`;
   try {
-    msg.textContent = await api.uploadFirmware(file, token);
+    const body = await api.uploadFirmware(file, token);
+    // The endpoint answers JSON for both outcomes; surface the failure as one.
+    msg.textContent = /"error"/.test(body) ? `upload failed: ${body}` : body;
   } catch (err) {
     msg.textContent = `upload failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -298,11 +345,52 @@ async function refreshClimate(): Promise<void> {
   paintHero();
 }
 
+// Three missed polls. Long enough that one dropped request or a brief WiFi
+// flap does not cry wolf, short enough that a page left open on a dead
+// controller stops presenting its last readings as current.
+const OFFLINE_AFTER_MS = 45_000;
+
 async function poll(): Promise<void> {
   try {
     paint(await api.getState());
   } catch {
-    /* SSE or the next poll will catch up */
+    // The catch used to be entirely empty, which is how a dead device kept
+    // rendering as a live one. Failing is information; record it.
+    if (view.lastOk && Date.now() - view.lastOk > OFFLINE_AFTER_MS && !view.offline) {
+      view.offline = true;
+      paint();
+    }
+  }
+}
+
+/**
+ * Fetch the immutable device facts, retrying until they arrive.
+ *
+ * This used to be a single attempt at boot whose failure was swallowed with a
+ * comment claiming "the duty table falls back to its defaults". There is no
+ * such fallback: console.ts reads `view.info?.high_us[speed] ?? 0`, so one
+ * timed-out request (10 s abort, reachable on a weak link) left the PWM DUTY
+ * tile reading 0.0%, the scope badge showing IDLE and the capture grid empty
+ * while the gate pin was actually transmitting -- permanently, because nothing
+ * ever asked again. It also stranded the update check, which returns early
+ * without `info.repo`, leaving the UPDATE row on "checking…" with a "Check
+ * again" button that could not do anything.
+ */
+async function loadDevice(attempt = 0): Promise<void> {
+  try {
+    view.info = await api.getDevice();
+    buildCaptureTable();
+    paintPwm();
+    // The update check needs info.repo and returns early without it, so a
+    // late-arriving device fetch has to nudge it. Guarded internally against
+    // running twice.
+    void runUpdateCheck();
+    if (view.screen === 'settings') paintSettings();
+  } catch {
+    // Back off to a minute and keep trying; these facts never change, so a
+    // late answer is still the right answer.
+    const delay = Math.min(60_000, 2_000 * 2 ** attempt);
+    window.setTimeout(() => void loadDevice(attempt + 1), delay);
   }
 }
 
@@ -345,12 +433,7 @@ export async function boot(): Promise<void> {
     if (view.scopeOpen) drawScope($<HTMLCanvasElement>('cv_pw'), waveform(), view.phase, performance.now());
   });
 
-  try {
-    view.info = await api.getDevice();
-    buildCaptureTable();
-  } catch {
-    /* the duty table falls back to its defaults; the rest of the page works */
-  }
+  await loadDevice();
 
   await poll();
   await refreshClimate();

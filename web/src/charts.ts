@@ -40,7 +40,20 @@ interface Scale {
   ticks: number[];
 }
 
-function limits(values: readonly (number | null)[]): Scale | null {
+/**
+ * Smallest y-range a chart may auto-scale to.
+ *
+ * Without a floor, a calm night reading 40.1-40.5 %RH filled the full chart
+ * height with dramatic-looking oscillation while all three gridline labels
+ * rendered as "40" -- the axis said the swing was nothing and the line said it
+ * was everything, and the line is what gets read. The floor is set just above
+ * the tick formatters' resolution (0-dp for temperature and humidity) so a
+ * range that cannot be distinguished in the labels cannot be exaggerated in
+ * the plot either.
+ */
+const MIN_SPAN = 2;
+
+function limits(values: readonly (number | null)[], minSpan = MIN_SPAN): Scale | null {
   let mn = Infinity;
   let mx = -Infinity;
   for (const v of values) {
@@ -49,9 +62,12 @@ function limits(values: readonly (number | null)[]): Scale | null {
     if (v > mx) mx = v;
   }
   if (mn > mx) return null;
-  if (mn === mx) {
-    mn -= 1;
-    mx += 1;
+  if (mx - mn < minSpan) {
+    // Grow symmetrically about the data so a flat series sits centred rather
+    // than pinned to an edge.
+    const mid = (mn + mx) / 2;
+    mn = mid - minSpan / 2;
+    mx = mid + minSpan / 2;
   }
   const pad = (mx - mn) * 0.12;
   return scale(mn - pad, mx + pad);
@@ -270,6 +286,8 @@ export function drawSimple(
   fmt: (v: number) => string,
   emptyMessage: string,
   index: number,
+  /** Smallest range to auto-scale to, in this series' own units. */
+  minSpan = MIN_SPAN,
 ): void {
   const surf = surface(canvas);
   if (!surf) return;
@@ -277,7 +295,7 @@ export function drawSimple(
     placeholder(surf, emptyMessage);
     return;
   }
-  const sc = limits(values);
+  const sc = limits(values, minSpan);
   if (!sc) {
     placeholder(surf, emptyMessage);
     return;
@@ -295,7 +313,10 @@ export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number)
     placeholder(surf, 'battery history is only kept for the last 24 hours');
     return;
   }
-  const sc = limits(s.bv);
+  // 0.1 V, not the 2-unit default: a LiPo's ENTIRE working range is about
+  // 0.7 V, so the temperature/humidity floor would flatten every real
+  // discharge curve into a straight line.
+  const sc = limits(s.bv, 0.1);
   if (!sc) {
     placeholder(surf, 'no battery data');
     return;

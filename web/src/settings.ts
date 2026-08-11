@@ -316,28 +316,43 @@ function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLEl
   const box = el('div', { className: 'upd' });
   const line = el('div', { className: 'updline' });
 
+  const notes = (release: { html_url: string }) =>
+    el('a', {
+      className: 'updlink',
+      textContent: 'release notes',
+      href: release.html_url,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    });
+
   if (status === null) {
     line.append(el('span', { className: 'updmuted', textContent: 'checking…' }));
   } else if (status.kind === 'available') {
     line.append(el('span', { className: 'updnew', textContent: `${status.latest} available` }));
+    line.append(notes(status.release));
+    // Downloads the image to the machine running the browser; installing it
+    // is still the deliberate OTA upload below.
     line.append(el('a', {
       className: 'updlink',
-      textContent: 'release notes',
-      href: status.release.html_url,
-      target: '_blank',
-      rel: 'noopener noreferrer',
+      textContent: 'download .bin',
+      href: status.asset.browser_download_url,
     }));
-    if (status.asset) {
-      // Downloads the image to the machine running the browser; installing it
-      // is still the deliberate OTA upload below.
-      line.append(el('a', {
-        className: 'updlink',
-        textContent: 'download .bin',
-        href: status.asset.browser_download_url,
-      }));
-    } else {
-      line.append(el('span', { className: 'updmuted', textContent: 'no binary attached yet' }));
-    }
+  } else if (status.kind === 'no-binary') {
+    // Not shown as "available": there is nothing the operator can install.
+    line.append(el('span', {
+      className: 'updmuted',
+      textContent: `${status.latest} tagged, but it published no .bin`,
+    }));
+    line.append(notes(status.release));
+  } else if (status.kind === 'ahead') {
+    // Deliberately NOT the green "up to date". The device being ahead of the
+    // newest published release means the release channel is stale, which is
+    // the opposite of an all-clear -- the deployed fan sat 22 versions ahead
+    // of v1.14.0 while this row rendered a reassuring green tick.
+    line.append(el('span', {
+      className: 'updmuted',
+      textContent: `running ${status.running}, newer than the latest release (${status.latest}) — unreleased build`,
+    }));
   } else if (status.kind === 'up-to-date') {
     line.append(el('span', { className: 'updok', textContent: `up to date (${status.latest})` }));
   } else {
@@ -349,7 +364,20 @@ function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLEl
   return box;
 }
 
+/**
+ * The OTA row, built once and reused.
+ *
+ * Every other control is cheap to recreate; this one holds state the operator
+ * typed (the token), a picked File, and the progress line for an upload that
+ * is still running. Rebuilding it discarded all three -- the upload handler
+ * captured #otamsg before awaiting and then wrote to a node that had since
+ * been replaced, so a ~1 MB upload showed "uploading…" and then nothing,
+ * forever, whichever way it ended.
+ */
+let otaRow: HTMLElement | null = null;
+
 function otaControl(): HTMLElement {
+  if (otaRow) return otaRow;
   const box = el('div');
   const row = el('div', { id: 'otarow' });
   const file = el('input', { className: 'fld', id: 'ota_f', type: 'file', accept: '.bin' });
@@ -366,5 +394,6 @@ function otaControl(): HTMLElement {
   const msg = el('div', { id: 'otamsg' });
   box.append(row, msg);
   show(msg, true);
+  otaRow = box;
   return box;
 }

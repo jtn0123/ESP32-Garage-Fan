@@ -31,7 +31,19 @@ export interface Release {
 
 export type UpdateStatus =
   | { kind: 'up-to-date'; latest: string }
-  | { kind: 'available'; latest: string; release: Release; asset: ReleaseAsset | null }
+  | { kind: 'available'; latest: string; release: Release; asset: ReleaseAsset }
+  /**
+   * The device is running something NEWER than anything published.
+   *
+   * Distinguished from 'up-to-date' because it means the opposite thing about
+   * the release channel. The deployed fan ran 1.14.22 while the newest tag was
+   * v1.14.0 -- 22 versions of stability work that existed only on main -- and
+   * the console rendered a green "up to date (v1.14.0)", which reads as an
+   * all-clear. A device ahead of the feed is an unreleased-work signal.
+   */
+  | { kind: 'ahead'; latest: string; running: string }
+  /** A newer tag exists but published no OTA image, so it cannot be installed. */
+  | { kind: 'no-binary'; latest: string; release: Release }
   | { kind: 'unknown'; reason: string };
 
 /**
@@ -91,14 +103,39 @@ export function evaluate(runningVersion: string, releases: readonly Release[]): 
     };
   }
   if (verdict === 'newer') {
-    return {
-      kind: 'available',
-      latest: latest.tag_name,
-      release: latest,
-      asset: pickFirmwareAsset(latest.assets),
-    };
+    const asset = pickFirmwareAsset(latest.assets);
+    // A release with no OTA image is not something the operator can act on.
+    // It used to be shown as a green "available" badge with a muted "no binary
+    // attached yet" beside it -- the same prominence as an installable one.
+    if (!asset) return { kind: 'no-binary', latest: latest.tag_name, release: latest };
+    return { kind: 'available', latest: latest.tag_name, release: latest, asset };
+  }
+  if (verdict === 'older') {
+    return { kind: 'ahead', latest: latest.tag_name, running: runningVersion };
   }
   return { kind: 'up-to-date', latest: latest.tag_name };
+}
+
+/**
+ * SHA-256 of a picked file, lowercase hex.
+ *
+ * The release workflow publishes a `.sha256` beside every image and calls it
+ * "the only integrity check between GitHub and the flash" -- there is no
+ * secure boot and /update accepts whatever bytes it is handed. That sidecar
+ * was published, unit-tested, and then never actually consulted by anything.
+ * This is the missing half.
+ */
+export async function sha256Hex(file: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** Pull the expected digest out of a `sha256sum` sidecar ("<hex>  <name>"). */
+export function parseChecksum(body: string): string | null {
+  const m = /^([0-9a-f]{64})\b/i.exec(body.trim());
+  return m ? m[1]!.toLowerCase() : null;
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;

@@ -111,13 +111,12 @@ describe('update check against the live release feed', () => {
     size: 1_100_000,
   });
 
-  it('FAILS-TODAY: does not claim "up to date" when the device is AHEAD of the feed', () => {
-    // The device runs 1.14.22; the newest published release is v1.14.0. The
-    // console renders a green "up to date (v1.14.0)", which reads as "the
-    // release channel is healthy" when it has in fact been dead for 22
-    // versions. A device ahead of the feed is an unreleased-work signal.
+  it('does not claim "up to date" when the device is AHEAD of the feed', () => {
+    // The device ran 1.14.22 against a newest published release of v1.14.0.
+    // The console rendered a green "up to date (v1.14.0)", which reads as
+    // "the release channel is healthy" when it had been dead for 22 versions.
     const s = evaluate('1.14.22', [rel('v1.14.0', [bin('v1.14.0')]), rel('v1.13.0')]);
-    expect(s.kind).not.toBe('up-to-date');
+    expect(s.kind).toBe('ahead');
   });
 
   it('offers the newest stable release even when tagged out of order', () => {
@@ -126,12 +125,12 @@ describe('update check against the live release feed', () => {
     if (s.kind === 'available') expect(s.latest).toBe('v1.14.0');
   });
 
-  it('FAILS-TODAY: a release with no attached binary is not offered as installable', () => {
-    // pickFirmwareAsset returns null and the UI prints "no binary attached
-    // yet" beside a green "available" badge -- an update the user cannot act
-    // on, shown with the same prominence as one they can.
+  it('does not offer a release with no attached binary as installable', () => {
+    // This used to render a green "available" badge with a muted "no binary
+    // attached yet" beside it -- an update the operator cannot act on, shown
+    // with the same prominence as one they can. `available` now guarantees a
+    // non-null asset by construction.
     const s = evaluate('1.13.0', [rel('v1.14.0')]);
-    if (s.kind !== 'available') throw new Error('expected available');
-    expect(s.asset).not.toBeNull();
+    expect(s.kind).toBe('no-binary');
   });
 });

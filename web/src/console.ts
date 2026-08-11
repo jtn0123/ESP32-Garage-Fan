@@ -296,8 +296,10 @@ export function drawAll(): void {
       (v) => v.toFixed(0), 'no humidity data', view.scrub);
   }
   if (view.rows.pressure) {
+    // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
+    // legible in the labels and does not need flattening.
     drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      (v) => v.toFixed(1), 'no pressure data', view.scrub);
+      (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
   drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
@@ -341,14 +343,40 @@ export function paintChips(): void {
   });
 }
 
+/**
+ * Is `next` actually newer than what we are already showing?
+ *
+ * Three sources write state -- the 15 s poll, the SSE stream, and every
+ * command's own response -- and none of them was ordered against the others.
+ * A poll issued before a speed change could land after it and repaint the rail
+ * back to the old speed for a full cycle. uptime_s is monotonic within a boot
+ * and `boots` increments across one, so the pair orders every frame without a
+ * wire change.
+ */
+function isNewer(next: DeviceState, cur: DeviceState | null): boolean {
+  if (!cur) return true;
+  if (next.boots !== cur.boots) return next.boots > cur.boots;
+  return next.uptime_s >= cur.uptime_s;
+}
+
 export function paint(next?: DeviceState): void {
-  if (next) view.state = next;
+  if (next) {
+    view.lastOk = Date.now();
+    view.offline = false;
+    if (!isNewer(next, view.state)) return; // a straggler; do not un-paint
+    view.state = next;
+  }
   const s = view.state;
   if (!s) return;
 
+  const stale = view.offline;
   const mqtt = $('hmq');
-  mqtt.textContent = s.mqtt ? '● BROKER UP' : '● BROKER DOWN';
-  mqtt.className = s.mqtt ? 'up' : '';
+  // Offline outranks every field in here: they are all last-known values, and
+  // the broker flag in particular would otherwise keep asserting "UP" about a
+  // device we have not heard from in minutes.
+  mqtt.textContent = stale ? '● NO CONTACT' : s.mqtt ? '● BROKER UP' : '● BROKER DOWN';
+  mqtt.className = stale ? 'stale' : s.mqtt ? 'up' : '';
+  document.body.classList.toggle('offline', stale);
   const batt = $('hbat');
   if (s.batt) {
     show(batt, true);
