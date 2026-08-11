@@ -340,6 +340,12 @@ def main():
             ota_token = ""
         if ota_token:
             f.write(f"#define FAN_OTA_TOKEN {c_string(ota_token)}\n")
+        # Site timezone as a POSIX TZ string, e.g. "PST8PDT,M3.2.0,M11.1.0".
+        # Only the daily-runtime rollover uses it; the clock stays UTC. Absent
+        # from .env means config.h's default applies.
+        fan_tz = str(os.getenv("FAN_TZ") or "").strip()
+        if fan_tz:
+            f.write(f"#define FAN_TZ {c_string(fan_tz)}\n")
         f.write(f"#define MQTT_HOST {c_string(mqtt_host)}\n")
         f.write(f"#define MQTT_PORT {mqtt_port}\n")
         f.write(f"#define MQTT_PUB_BASE {c_string(mqtt_pub)}\n")

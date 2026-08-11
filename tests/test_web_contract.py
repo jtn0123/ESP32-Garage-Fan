@@ -21,8 +21,15 @@ TYPES = ROOT / "web" / "src" / "types.ts"
 
 # JSON keys as they appear inside C++ string literals: \"key\":
 CPP_KEY = re.compile(r'\\"([A-Za-z_]\w*)\\":')
-# Series appended via the helper: append_series(out, "name", ...)
-CPP_SERIES = re.compile(r'append_series\(\s*\w+,\s*"(\w+)"')
+# Series emitted via a helper that takes the JSON key as its own argument:
+#   write_series(tx, "name", ...)   write_ints(tx, "name", ...)
+# The key never appears as a \"name\": literal in the calling function, so
+# CPP_KEY alone cannot see it. (append_series is the pre-1.14.23 spelling; it
+# is kept here so the pattern still matches if a writer is reverted.)
+CPP_SERIES = re.compile(r'(?:append_series|write_series|write_ints)\(\s*\w+,\s*"(\w+)"')
+# Fixed-name writers, where the key is baked into the helper rather than
+# passed: write_ts() always emits exactly "ts".
+CPP_FIXED = {"write_ts": "ts", "write_ts_derived": "ts"}
 # TS interface fields:   name: T;   name?: T;   'quoted' names are not used.
 TS_FIELD = re.compile(r"^\s*(\w+)\??:", re.MULTILINE)
 
@@ -53,7 +60,11 @@ def find_function(name: str) -> str:
 
 def cpp_keys(function: str) -> set[str]:
     body = find_function(function)
-    return set(CPP_KEY.findall(body)) | set(CPP_SERIES.findall(body))
+    keys = set(CPP_KEY.findall(body)) | set(CPP_SERIES.findall(body))
+    for helper, key in CPP_FIXED.items():
+        if re.search(rf"\b{helper}\s*\(", body):
+            keys.add(key)
+    return keys
 
 
 def ts_block(name: str) -> str:

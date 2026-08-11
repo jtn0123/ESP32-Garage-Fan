@@ -25,7 +25,13 @@ bool sample(float* t, float* h, float* p);
 /** Cheap temperature-only refresh for the 30 s auto tick. */
 void refresh_inside();
 
-/** Last corrected garage temperature, °C. NAN before the first good read. */
+/**
+ * Last corrected garage temperature, °C.
+ *
+ * NAN before the first good read AND once that read goes stale (10 min, two
+ * missed sample cycles) -- a wedged or unplugged BME280 must not keep handing
+ * the thermostat a confident number it will act on all night.
+ */
 float inside_c();
 
 /** Did the BME280 answer its last transaction? */

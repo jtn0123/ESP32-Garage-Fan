@@ -138,7 +138,7 @@ through this rig, **the fan follows the HIGH fraction**: our first deploy
 used the controller's polarity verbatim and "off" ran the fan at full blast.
 The firmware's `kHighUs[13]` table is therefore the **mirror** of the
 captured table, and **off = solid LOW**. Verified across all 13 settings on
-the live fan. If a future rig behaves differently, `GET /api/raw?us=N`
+the live fan. If a future rig behaves differently, `POST /api/raw?high_pct=N`
 transmits an arbitrary HIGH-width for empirical recalibration without
 reflashing.
 

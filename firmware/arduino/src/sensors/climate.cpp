@@ -19,6 +19,24 @@ Adafruit_BME280 g_bme;
 Preferences* g_prefs = nullptr;
 bool g_ok = false;
 float g_inside_c = NAN;
+// When g_inside_c was last actually measured. 0 = never.
+//
+// Without this the garage reading had no expiry at all, while the yard reading
+// had two (outside_c_fresh). So a BME280 that wedged or came unplugged froze
+// g_inside_c at its last value FOREVER, and fan_auto_decide -- which is
+// written to hold speed and latch on NaN precisely so it never guesses -- kept
+// being handed a confident number. Sensor drops out at 4 PM with the garage at
+// 32 C, the yard cools to 15 C overnight, and the delta stays above the engage
+// threshold every 30 s tick: the fan runs at auto_max all night on a reading
+// hours old. /api/state said "sensor":false the whole time; nothing in the
+// control path read it.
+uint32_t g_inside_ms = 0;
+
+// Two missed 5-minute samples. Long enough that the transient I2C
+// ESP_ERR_INVALID_STATE pairs this board logs every ~30 s cannot trip it (a
+// failed read leaves g_ok false and the next sample() re-probes), short enough
+// that a genuinely dead sensor stops driving the fan within minutes.
+constexpr uint32_t kInsideStaleMs = 10 * 60 * 1000;
 // Board self-heating correction: charging current warms the board-mounted
 // BME280 far more than idle operation does. User-tunable via
 // /api/config?offc=&offi= (Celsius, added to the raw reading).
@@ -82,6 +100,7 @@ bool sample(float* t, float* h, float* p) {
   *h = hv;
   *p = pv;
   g_inside_c = *t;
+  g_inside_ms = millis();
   return true;
 }
 
@@ -92,11 +111,20 @@ void refresh_inside() {
   // Same guard as sample(): this value feeds the auto thermostat every 30 s,
   // so a garbage read here would drive the fan directly. Holding the last
   // good reading is what auto_logic already expects of missing data.
-  if (t > -40.0f && t < 85.0f && !isnan(t))
+  if (t > -40.0f && t < 85.0f && !isnan(t)) {
     g_inside_c = corrected(t);
+    g_inside_ms = millis();
+  }
 }
 
-float inside_c() { return g_inside_c; }
+float inside_c() {
+  // Symmetric with outside_c_fresh(): a reading nobody has been able to
+  // refresh is not a reading. NaN is the contract fan_auto_decide already
+  // handles ("hold speed AND latch: never guess").
+  if (g_inside_ms == 0 || millis() - g_inside_ms > kInsideStaleMs)
+    return NAN;
+  return g_inside_c;
+}
 bool ok() { return g_ok; }
 
 float offset_charging() { return g_off_chg; }

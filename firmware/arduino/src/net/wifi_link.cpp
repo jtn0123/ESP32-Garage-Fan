@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include <cstdlib>
+#include <ctime>
+
 #include "config.h"
 #include "system/eventlog.h"
 
@@ -79,7 +82,13 @@ void begin() {
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(FAN_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  // Clock stays UTC: every epoch this firmware logs, publishes or compares is
+  // UTC and must remain so. TZ is set alongside it purely so localtime_r() is
+  // available to the one caller that needs the operator's calendar day --
+  // odometer's "fan today" reset. Setting TZ does not move the clock.
   configTime(0, 0, "pool.ntp.org");
+  setenv("TZ", FAN_TZ, 1);
+  tzset();
   g_down_since_ms = now_nonzero();
 }
 

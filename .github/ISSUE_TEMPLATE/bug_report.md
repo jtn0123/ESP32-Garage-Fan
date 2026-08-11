@@ -20,7 +20,7 @@ assignees: ''
 
 - Firmware version (from `/api/state` or the web UI):
 - Commanded speed (0–12):
-- Control path used: web UI / `GET /api/set` / MQTT `garage/fan/set`
+- Control path used: web UI / `POST /api/set` / MQTT `garage/fan/set`
 - Board power source: LiPo / USB wall / other
 
 ## Evidence

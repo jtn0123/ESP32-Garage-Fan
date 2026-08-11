@@ -6,10 +6,10 @@
 
 import type { DeviceInfo, DeviceState, History, Sensors, Stats } from './types.js';
 
-async function json<T>(url: string): Promise<T> {
+async function json<T>(url: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
   // Timeout so a device that drops off the network mid-request fails the
   // call (and the poll retries) instead of holding a pending fetch forever.
-  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  const res = await fetch(url, { method, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return (await res.json()) as T;
 }
@@ -21,12 +21,19 @@ export const getSensors = (): Promise<Sensors> => json<Sensors>('/api/sensors');
 export const getHistory = (days: number): Promise<History> =>
   json<History>(`/api/history?days=${days}`);
 
-/** Every command endpoint answers with the new state, so the UI never guesses. */
+/**
+ * Every command endpoint answers with the new state, so the UI never guesses.
+ *
+ * POST, not GET: these change the device, and the firmware now registers them
+ * POST-only. As GETs they fired from any `<img src>` on any page the operator
+ * had open, and from link prefetchers -- the same reasoning that already made
+ * /api/restart and /api/sdformat POST-only.
+ */
 export const setSpeed = (speed: number): Promise<DeviceState> =>
-  json<DeviceState>(`/api/set?speed=${speed}`);
+  json<DeviceState>(`/api/set?speed=${speed}`, 'POST');
 
 export const setConfig = (query: string): Promise<DeviceState> =>
-  json<DeviceState>(`/api/config?${query}`);
+  json<DeviceState>(`/api/config?${query}`, 'POST');
 
 /** Token-guarded maintenance. Returns the raw body so the caller can show it. */
 async function guarded(path: string, token: string): Promise<string> {

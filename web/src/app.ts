@@ -21,7 +21,7 @@ import {
 } from './console.js';
 import { $, clear, el, show } from './dom.js';
 import { drawPreview, drawScope } from './pwm.js';
-import { build, mergeCache } from './series.js';
+import { build } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
 import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
@@ -261,18 +261,20 @@ function buildCaptureTable(): void {
   );
 }
 
+// Monotonic request id. Range switching used to have no sequencing at all:
+// the handler read view.days again AFTER the await, so clicking 24H then 7D
+// quickly could let the 24 h response land last and be drawn under the 7-day
+// title, with the axis formatted for a week. A late response for a range the
+// user has already left is now discarded rather than rendered.
+let historySeq = 0;
+
 async function loadHistory(): Promise<void> {
+  const seq = ++historySeq;
   try {
     const raw = await api.getHistory(view.days);
-    let hist = raw;
-    let stamps: number[] | null = null;
-    if (view.days === 1) {
-      const merged = mergeCache(raw);
-      hist = merged.h;
-      stamps = merged.ts; // the union's real epochs -- holes and all
-    }
-    view.history = hist;
-    view.series = build(hist, stamps ?? undefined);
+    if (seq !== historySeq) return; // superseded by a newer range request
+    view.history = raw;
+    view.series = build(raw);
     drawAll();
     paintHero();
   } catch {

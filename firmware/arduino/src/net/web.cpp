@@ -152,21 +152,51 @@ static void handle_stats() {
   g_http.send(200, "application/json", buf);
 }
 
+// The whole stored record, streamed off the card.
+//
+// This used to serialise the RAM ring, so it handed back only the samples
+// since the last reboot -- 308 bytes on the live device -- while the month
+// files it was named after sat unreachable on the card. `?days=` selects the
+// window; the default of 30 is the full retention the two-month path window
+// can address. Falls back to the ring only when there is no card, and says so
+// in the filename so the two are never confused.
 static void handle_csv() {
-  const uint16_t n = history::count();
-  String out;
-  out.reserve(n * 44 + 64);
-  out += "epoch,temp_c,rh,hpa,outside_f,speed\n";
-  for (uint16_t i = 0; i < n; i++) {
-    char l[80];
-    const long ts = history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * 300 : 0;
-    snprintf(l, sizeof(l), "%ld,%.2f,%.0f,%.1f,%.1f,%d\n", ts, history::temp()[i], history::rh()[i],
-             history::hpa()[i], isnan(history::out_f()[i]) ? -999 : history::out_f()[i],
-             static_cast<int>(history::speed()[i]));
-    out += l;
+  const int days_arg = g_http.hasArg("days") ? g_http.arg("days").toInt() : 30;
+  const int days = (days_arg >= 1 && days_arg <= 30) ? days_arg : 30;
+
+  if (sdcard::ok() && time_synced()) {
+    char disp[96];
+    snprintf(disp, sizeof(disp),
+             "Content-Disposition: attachment; filename=garage-fan-%dd.csv\r\n", days);
+    http_tx::Chunked tx(g_http.client(), "text/csv", disp);
+    // Header names the 1.14.23 column set; older rows in the same file carry
+    // six fields and are streamed exactly as stored rather than back-filled.
+    tx.print("epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n");
+    sdcard::stream_range(
+        time(nullptr) - (time_t)days * 86400,
+        [](const char* line, void* ctx) {
+          auto* t = static_cast<http_tx::Chunked*>(ctx);
+          return t->print(line) && t->print("\n");
+        },
+        &tx);
+    tx.end();
+    return;
   }
-  http_tx::send_big(g_http.client(), "text/csv", out.c_str(), out.length(),
-                    "Content-Disposition: attachment; filename=garage-fan-24h.csv\r\n");
+
+  const uint16_t n = history::count();
+  http_tx::Chunked tx(g_http.client(), "text/csv",
+                      "Content-Disposition: attachment; filename=garage-fan-ring.csv\r\n");
+  tx.print("epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n");
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
+    const long ts =
+        history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * (kSampleMs / 1000) : 0;
+    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d\n", ts, history::temp()[i], history::rh()[i],
+              history::hpa()[i], isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
+              static_cast<int>(history::speed()[i]),
+              isnan(history::batt_v()[i]) ? -999.0f : history::batt_v()[i],
+              static_cast<int>(history::chg()[i]));
+  }
+  tx.end();
 }
 
 static void handle_state() {
@@ -284,26 +314,107 @@ static void handle_sensors() {
   g_http.send(200, "application/json", buf);
 }
 
-static void append_series(String& out, const char* name, const float* v, uint16_t n,
-                          uint8_t decimals) {
-  out += '"';
-  out += name;
-  out += "\":[";
+// Series writers stream straight to the socket. They used to append to an
+// Arduino String whose reserve()/concat() failures nothing checked; with
+// per-row timestamps and all seven series the full 288-row body runs past
+// 11 KB, and this board's largest contiguous free block has measured 7.7 KB.
+// See http_tx::Chunked.
+static void write_series(http_tx::Chunked& tx, const char* name, const float* v, uint16_t n,
+                         uint8_t decimals) {
+  tx.printf("\"%s\":[", name);
   char num[16];
-  for (uint16_t i = 0; i < n; i++) {
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
     if (isnan(v[i])) {
       // A literal "nan" is not JSON -- one bad sample would make the
       // browser's parser reject the entire history payload (blank graph).
-      out += "null";
+      tx.print("null");
     } else {
       dtostrf(v[i], 0, decimals, num);
-      out += num;
+      tx.print(num);
     }
     if (i + 1 < n)
-      out += ',';
+      tx.print(",");
   }
-  out += ']';
+  tx.print("]");
 }
+
+static void write_ints(http_tx::Chunked& tx, const char* name, const int8_t* v, uint16_t n) {
+  tx.printf("\"%s\":[", name);
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
+    tx.printf(i + 1 < n ? "%d," : "%d", static_cast<int>(v[i]));
+  }
+  tx.print("]");
+}
+
+// Per-row epochs. This is the field whose absence made the long ranges lie:
+// with no timestamps the console spaced rows evenly across the requested
+// window regardless of when they were actually taken, and could not detect
+// an outage because every step measured exactly one nominal interval.
+static void write_ts(http_tx::Chunked& tx, const time_t* v, uint16_t n) {
+  tx.print("\"ts\":[");
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
+    tx.printf(i + 1 < n ? "%ld," : "%ld", static_cast<long>(v[i]));
+  }
+  tx.print("]");
+}
+
+// The ring's rows are uniformly spaced by construction, so its timestamps are
+// derived rather than stored -- no scratch array for them.
+static void write_ts_derived(http_tx::Chunked& tx, time_t end, uint16_t n, long step) {
+  tx.print("\"ts\":[");
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
+    const long ts = end ? static_cast<long>(end) - (long)(n - 1 - i) * step : 0;
+    tx.printf(i + 1 < n ? "%ld," : "%ld", ts);
+  }
+  tx.print("]");
+}
+
+// Chart scratch for the SD path: 288 rows x 8 columns is ~7.5 KB, which does
+// not fit in this build's remaining DRAM (the link failed by 2 KB when it was
+// plain BSS). It lives in the 2 MB of PSRAM the board already enables instead
+// -- the access penalty is irrelevant for a once-per-range-change request, and
+// keeping it out of internal RAM leaves the contiguous block that the SD mount
+// and the sockets compete for untouched. Allocated once, on first use.
+namespace {
+struct GraphScratch {
+  time_t* ts = nullptr;
+  float* t = nullptr;
+  float* h = nullptr;
+  float* p = nullptr;
+  float* o = nullptr;
+  float* b = nullptr;
+  int8_t* sp = nullptr;
+  int8_t* cg = nullptr;
+  bool ready = false;
+};
+GraphScratch g_scratch;
+
+template <class T>
+T* psram_array(uint16_t n) {
+  void* m = heap_caps_calloc(n, sizeof(T), MALLOC_CAP_SPIRAM);
+  if (!m)  // no PSRAM on this board variant: internal heap is the fallback
+    m = heap_caps_calloc(n, sizeof(T), MALLOC_CAP_8BIT);
+  return static_cast<T*>(m);
+}
+
+bool scratch_ready() {
+  if (g_scratch.ready)
+    return true;
+  g_scratch.ts = psram_array<time_t>(kGraphMaxPts);
+  g_scratch.t = psram_array<float>(kGraphMaxPts);
+  g_scratch.h = psram_array<float>(kGraphMaxPts);
+  g_scratch.p = psram_array<float>(kGraphMaxPts);
+  g_scratch.o = psram_array<float>(kGraphMaxPts);
+  g_scratch.b = psram_array<float>(kGraphMaxPts);
+  g_scratch.sp = psram_array<int8_t>(kGraphMaxPts);
+  g_scratch.cg = psram_array<int8_t>(kGraphMaxPts);
+  g_scratch.ready = g_scratch.ts && g_scratch.t && g_scratch.h && g_scratch.p && g_scratch.o &&
+                    g_scratch.b && g_scratch.sp && g_scratch.cg;
+  if (!g_scratch.ready)
+    eventlog::log("web", "graph scratch alloc failed");
+  return g_scratch.ready;
+}
+}  // namespace
 
 static void handle_history() {
   // Reject anything but the documented ?days=1|7|30 instead of quietly
@@ -323,54 +434,81 @@ static void handle_history() {
     g_http.send(400, "application/json", "{\"error\":\"days must be 1, 7 or 30\"}");
     return;
   }
-  String out;
-  out.reserve(13000);
-  if (days <= 1 || !sdcard::ok() || !time_synced()) {
-    const uint16_t rows = history::count();
-    char hd[64];
-    snprintf(hd, sizeof(hd), "{\"interval_s\":300,\"end_ts\":%ld,", (long)history::end_ts());
-    out += hd;
-    append_series(out, "temp_c", history::temp(), rows, 1);
-    out += ',';
-    append_series(out, "rh", history::rh(), rows, 0);
-    out += ',';
-    append_series(out, "hpa", history::hpa(), rows, 1);
-    out += ',';
-    append_series(out, "out_f", history::out_f(), rows, 1);
-    out += ',';
-    append_series(out, "batt_v", history::batt_v(), rows, 2);
-    out += ",\"spd\":[";
-    for (uint16_t i = 0; i < rows; i++) {
-      char n[6];
-      snprintf(n, sizeof(n), "%d", static_cast<int>(history::speed()[i]));
-      out += n;
-      if (i + 1 < rows)
-        out += ',';
-    }
-    out += "],\"chg\":[";
-    for (uint16_t i = 0; i < rows; i++) {
-      char n[6];
-      snprintf(n, sizeof(n), "%d", static_cast<int>(history::chg()[i]));
-      out += n;
-      if (i + 1 < rows)
-        out += ',';
-    }
-    out += "]}";
-  } else {
-    static float t[kGraphMaxPts], h[kGraphMaxPts], p[kGraphMaxPts];
-    const time_t cutoff = time(nullptr) - (time_t)days * 86400;
-    const uint16_t n = sdcard::read_range(cutoff, t, h, p, kGraphMaxPts);
-    char head[48];
-    snprintf(head, sizeof(head), "{\"interval_s\":%ld,", n > 1 ? (long)(days * 86400L / n) : 300L);
-    out += head;
-    append_series(out, "temp_c", t, n, 1);
-    out += ',';
-    append_series(out, "rh", h, n, 0);
-    out += ',';
-    append_series(out, "hpa", p, n, 1);
-    out += '}';
+  // The card is the record for EVERY range, not just 7 and 30.
+  //
+  // days=1 used to be hardcoded to the RAM ring, so the 24-hour chart restarted
+  // from a single point after each of this device's 40 reboots even though the
+  // card held a month of samples. The browser's localStorage merge hid it in
+  // one browser and nowhere else; that cache is gone now, and this is why it
+  // could go.
+  //
+  // A range the card cannot answer is an ERROR, not the ring wearing the
+  // range's label. Serving 24 h of RAM under a "30 days" request is the same
+  // class of confident falsehood as the ?range=7d typo above -- and it was
+  // reachable any time the card was unmounted or the clock unsynced.
+  const bool have_card = sdcard::ok() && time_synced();
+  if (!have_card && days > 1) {
+    g_http.send(503, "application/json",
+                sdcard::ok() ? "{\"error\":\"clock not synced yet\"}"
+                             : "{\"error\":\"sd card not mounted\"}");
+    return;
   }
-  http_tx::send_big(g_http.client(), "application/json", out.c_str(), out.length());
+
+  if (have_card && !scratch_ready()) {
+    g_http.send(503, "application/json", "{\"error\":\"out of memory for chart data\"}");
+    return;
+  }
+
+  const long step = (long)(kSampleMs / 1000);
+  http_tx::Chunked tx(g_http.client(), "application/json");
+  if (have_card) {
+    const GraphScratch& s = g_scratch;
+    const sdcard::Samples dst{s.ts, s.t, s.h, s.p, s.o, s.b, s.sp, s.cg};
+    const time_t cutoff = time(nullptr) - (time_t)days * 86400;
+    const uint16_t n = sdcard::read_range(cutoff, dst, kGraphMaxPts);
+    // interval_s is now only a nominal hint for gap detection; ts[] carries
+    // the truth. It used to be days*86400/n, which inflated by exactly
+    // requested_span/actual_span whenever the card held less than the window.
+    tx.printf("{\"source\":\"sd\",\"interval_s\":%ld,", step);
+    write_ts(tx, s.ts, n);
+    tx.print(",");
+    write_series(tx, "temp_c", s.t, n, 1);
+    tx.print(",");
+    write_series(tx, "rh", s.h, n, 0);
+    tx.print(",");
+    write_series(tx, "hpa", s.p, n, 1);
+    tx.print(",");
+    write_series(tx, "out_f", s.o, n, 1);
+    tx.print(",");
+    write_series(tx, "batt_v", s.b, n, 2);
+    tx.print(",");
+    write_ints(tx, "spd", s.sp, n);
+    tx.print(",");
+    write_ints(tx, "chg", s.cg, n);
+    tx.print("}");
+  } else {
+    // No card and days=1: the ring is all there is, and the response says so
+    // rather than letting the caller assume persistence it does not have.
+    const uint16_t rows = history::count();
+    tx.printf("{\"source\":\"ring\",\"interval_s\":%ld,", step);
+    write_ts_derived(tx, history::end_ts(), rows, step);
+    tx.print(",");
+    write_series(tx, "temp_c", history::temp(), rows, 1);
+    tx.print(",");
+    write_series(tx, "rh", history::rh(), rows, 0);
+    tx.print(",");
+    write_series(tx, "hpa", history::hpa(), rows, 1);
+    tx.print(",");
+    write_series(tx, "out_f", history::out_f(), rows, 1);
+    tx.print(",");
+    write_series(tx, "batt_v", history::batt_v(), rows, 2);
+    tx.print(",");
+    write_ints(tx, "spd", history::speed(), rows);
+    tx.print(",");
+    write_ints(tx, "chg", history::chg(), rows);
+    tx.print("}");
+  }
+  tx.end();
 }
 
 // Token-guarded one-shot: mount with format-on-failure, turning a fresh
@@ -496,9 +634,17 @@ void begin(Preferences* prefs) {
   // POST-only: token-guarded AND destructive; a GET must never reboot the
   // board (link prefetchers and crawlers issue GETs).
   g_http.on("/api/restart", HTTP_POST, handle_restart);
-  g_http.on("/api/set", handle_set);
-  g_http.on("/api/raw", handle_raw);
-  g_http.on("/api/config", handle_config);
+  // POST-only, for the same reason /api/restart and /api/sdformat are: these
+  // three CHANGE the device, and a route registered without a method answers
+  // GET too. That made every one of them reachable from any web page the
+  // operator happened to have open -- `<img src="http://garage-fan.local/
+  // api/set?speed=0">` stops the fan, with no auth on the LAN by design -- and
+  // reachable by link prefetchers and history-restoring browsers besides. The
+  // response is not readable cross-origin (no CORS header here), but the write
+  // lands, which is the whole attack.
+  g_http.on("/api/set", HTTP_POST, handle_set);
+  g_http.on("/api/raw", HTTP_POST, handle_raw);
+  g_http.on("/api/config", HTTP_POST, handle_config);
   g_http.on("/api/sensors", handle_sensors);
   g_http.on("/api/history", handle_history);
   g_http.on("/api/stats", handle_stats);

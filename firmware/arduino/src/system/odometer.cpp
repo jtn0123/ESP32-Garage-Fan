@@ -44,7 +44,12 @@ void tick(int speed, float watts) {
     if (time_synced()) {
       struct tm lt;
       time_t now = time(nullptr);
-      gmtime_r(&now, &lt);
+      // localtime_r, not gmtime_r: this is the OPERATOR's day, not UTC's.
+      // With gmtime_r the counter labelled "FAN TODAY" in the console reset at
+      // 17:00 local, so an evening glance showed only the hours since 5 PM --
+      // during exactly the afternoon stretch the fan runs hardest. TZ is set
+      // in wifi_link::begin(); the stored clock is still UTC.
+      localtime_r(&now, &lt);
       const uint32_t ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
       if (g_today_ymd != 0 && ymd != g_today_ymd)
         g_run_today_s = 0;

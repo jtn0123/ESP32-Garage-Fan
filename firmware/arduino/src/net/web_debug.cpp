@@ -169,8 +169,13 @@ void register_routes(WebServer& http, const char* token) {
     if (!authorized())
       return;
     char out[512];
-    const bool w15 = battery::write_reg(0x15, 0x0001);
-    const bool w0b = battery::write_reg(0x0B, 0x0056);
+    // Read-only on purpose. This used to write APA register 0x0B = 0x0056
+    // before probing -- a DIFFERENT pack profile than the 0x0055 (2x3200 =
+    // 6400 mAh) that battery::begin() selects. Opening this endpoint once
+    // therefore re-calibrated the gauge's RSOC until the next reboot, so every
+    // percentage, the drain slope, the sticky charging verdict and the
+    // BME280 self-heating offset that depends on it all ran off a profile the
+    // firmware never chose. A probe must not perturb the state it reports.
     String r;
     for (int variant = 0; variant < 2; variant++) {
       for (uint8_t reg : {(uint8_t)0x09, (uint8_t)0x0D, (uint8_t)0x11}) {
@@ -194,8 +199,7 @@ void register_routes(WebServer& http, const char* token) {
         r += e;
       }
     }
-    snprintf(out, sizeof(out), "{\"w15\":%s,\"w0b\":%s,\"reads\":[", w15 ? "true" : "false",
-             w0b ? "true" : "false");
+    snprintf(out, sizeof(out), "{\"read_only\":true,\"reads\":[");
     String full = String(out) + r.substring(0, r.length() - 1) + "]}";
     g_http->send(200, "application/json", full);
   });

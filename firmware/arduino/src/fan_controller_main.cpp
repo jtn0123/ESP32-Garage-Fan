@@ -76,7 +76,10 @@ static void sample_climate() {
     row.chg = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
     history::append(row, time_synced());
     if (time_synced())
-      sdcard::log_sample(time(nullptr), t, h, p, row.out_f, fan::speed());
+      // row.speed, not fan::speed(): the ring stores the clamped value and the
+      // CSV used to store the raw one, so a sample taken during an /api/raw
+      // sweep left the two records of the same instant disagreeing (0 vs -1).
+      sdcard::log_sample(time(nullptr), t, h, p, row.out_f, row.speed, row.batt_v, row.chg);
     t_sd = millis();
     mqtt_link::publish_climate(t, h, p);
   }

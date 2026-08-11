@@ -48,6 +48,19 @@
 #define FAN_GITHUB_REPO "jtn0123/ESP32-Garage-Fan"
 #endif
 
+// POSIX TZ string for the site. SNTP is configured with configTime(0, 0, ...),
+// i.e. the system clock is UTC -- correct, and what every logged epoch should
+// stay in. This is only for the places that must reason about the OPERATOR's
+// day.
+//
+// It exists because odometer's "fan today" counter derived its day key with
+// gmtime_r, so run_today_s reset at UTC midnight: 17:00 PDT, in the middle of
+// the hottest hours the fan actually runs. Override FAN_TZ in .env for a site
+// in another zone; the default matches the deployed unit.
+#ifndef FAN_TZ
+#define FAN_TZ "PST8PDT,M3.2.0,M11.1.0"
+#endif
+
 // One source of truth: repo-root VERSION -> gen_device_header.py -> FW_VERSION
 // -> here -> /api/state -> the console header and deploy.sh's post-flash
 // verify. Never hardcode a version string: a tagged release would then ship a

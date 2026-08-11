@@ -21,9 +21,11 @@ cable into a computer: the fan drives 5 V out on VBUS.
 - **Update check** — the console asks GitHub Releases whether a newer tag
   exists and links the `.bin`; the controller itself never talks to the
   internet, so there is no TLS stack on the device
-- **HTTP API** — `GET /api/state`, `GET /api/set?speed=0..12`,
-  `GET /api/device` (duty table, identity, broker), `GET /api/history?days=`,
-  `GET /api/stats`
+- **HTTP API** — reads are `GET`: `/api/state`, `/api/device` (duty table,
+  identity, broker), `/api/history?days=1|7|30`, `/api/stats`. Writes are
+  **`POST` only** — `/api/set?speed=0..12`, `/api/config`, `/api/raw`,
+  `/api/restart`, `/api/sdformat` — so a page in another tab cannot change
+  the fan with an `<img src>`. Add `-X POST` when curling those
 - **MQTT** — `garage/fan/set` / `garage/fan/state` / `garage/fan/availability`,
   retained commands resume after power loss
 - **OTA updates** — `POST /update?token=...`, written to the inactive A/B
