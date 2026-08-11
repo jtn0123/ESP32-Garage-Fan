@@ -61,6 +61,13 @@ void reset_stream(const char* reason) {
 
 void handle_upload() {
   HTTPUpload& up = g_http->upload();
+  // Unconditionally, before any branch. handleClient() consumes the entire
+  // multipart body in ONE call, and it keeps draining the remaining megabytes
+  // even after we have rejected the token or failed the flash -- so the paths
+  // that stop doing work are exactly the paths that still need the watchdog
+  // fed. Gating this on `g_authorized && !g_failed` reintroduced the >60 s
+  // panic that the 2026-08-09 fix was written for, just via the failure route.
+  esp_task_wdt_reset();
   if (up.status == UPLOAD_FILE_START) {
     g_failed = false;
     g_fail_reason = nullptr;
@@ -81,11 +88,6 @@ void handle_upload() {
       g_fail_reason = "flash begin failed";
     }
   } else if (up.status == UPLOAD_FILE_WRITE && g_authorized && !g_failed) {
-    // handleClient() consumes the whole upload in one call, so loop() cannot
-    // feed the task watchdog until the flash finishes. A slow WiFi upload
-    // (>60 s) then panics the board mid-OTA (seen 2026-08-09). Chunks still
-    // arriving means progress, so feed it here.
-    esp_task_wdt_reset();
     if (Update.write(up.buf, up.currentSize) != up.currentSize) {
       Update.printError(Serial);
       eventlog::log("ota", "write failed: %s", Update.errorString());

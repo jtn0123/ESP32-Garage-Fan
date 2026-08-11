@@ -41,6 +41,13 @@ class Chunked {
   Chunked(WiFiClient c, const char* mime, const char* extra_hdr = "");
   Chunked(const Chunked&) = delete;
   Chunked& operator=(const Chunked&) = delete;
+  /**
+   * Terminates the body if the caller has not. end() is idempotent, so this
+   * costs nothing on the normal path and makes "the chunked stream is always
+   * closed" a property of the type rather than of every early return in every
+   * handler that will ever use it.
+   */
+  ~Chunked() { end(); }
 
   /** Append to the body. False once the peer has gone; further calls no-op. */
   bool write(const char* p, size_t n);

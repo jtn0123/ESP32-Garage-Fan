@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "esp_task_wdt.h"
 #include "lwip/sockets.h"
 
 namespace sse {
@@ -55,12 +56,19 @@ void sse_send(WiFiClient& c, const char* buf, int n) {
 // Bounded hard, because this runs inside loop().
 bool read_request(WiFiClient& c, char* out, size_t cap) {
   size_t n = 0;
-  const uint32_t deadline = millis() + 50;
+  // 300 ms, not 50: accept() runs the instant the TCP handshake completes, so
+  // on a lossy link the request bytes may not have arrived yet. Giving up too
+  // early meant `allow` stayed empty, the browser refused the EventSource, and
+  // the console fell back to 15 s polling -- the exact outcome reading the
+  // request was supposed to prevent. Still bounded, because this runs in
+  // loop(), and the watchdog is fed while waiting.
+  const uint32_t deadline = millis() + 300;
   while (millis() < deadline && n + 1 < cap) {
     const int avail = c.available();
     if (avail <= 0) {
       if (!c.connected())
         break;
+      esp_task_wdt_reset();
       delay(1);
       continue;
     }
@@ -141,17 +149,23 @@ void accept() {
   // occupies one of the four.
   char req[512];
   char allow[96] = {0};
-  if (read_request(nc, req, sizeof(req))) {
-    size_t olen = 0;
-    const char* origin = header_value(req, "Origin:", &olen);
-    if (origin) {
-      if (!origin_is_self(origin, olen)) {
-        nc.stop();  // a page that is not our console; do not stream to it
-        return;
-      }
-      snprintf(allow, sizeof(allow), "Access-Control-Allow-Origin: %.*s\r\n",
-               static_cast<int>(olen), origin);
+  if (!read_request(nc, req, sizeof(req))) {
+    // No request at all within the bound. Serving this peer would either leak
+    // the stream to an unknown origin or hand the console a header-less
+    // response it cannot use; either way there is nothing to be gained by
+    // holding one of the four slots for it. EventSource reconnects.
+    nc.stop();
+    return;
+  }
+  size_t olen = 0;
+  const char* origin = header_value(req, "Origin:", &olen);
+  if (origin) {
+    if (!origin_is_self(origin, olen)) {
+      nc.stop();  // a page that is not our console; do not stream to it
+      return;
     }
+    snprintf(allow, sizeof(allow), "Access-Control-Allow-Origin: %.*s\r\n", static_cast<int>(olen),
+             origin);
   }
 
   for (auto& c : g_peers) {

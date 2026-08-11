@@ -36,14 +36,16 @@ void tick(int speed, float watts) {
   const uint32_t elapsed_s = (millis() - g_last_count_ms) / 1000;
   if (elapsed_s >= 1) {
     g_last_count_ms += elapsed_s * 1000;
-    if (speed > 0) {
-      g_run_total_s += elapsed_s;
-      g_run_today_s += elapsed_s;
-      g_energy_wh += watts * elapsed_s / 3600.0f;
-    }
+
+    // Roll the day BEFORE crediting, and split the elapsed span at the
+    // boundary. This function deliberately credits whole accumulated seconds,
+    // so one tick can cover minutes; crediting first and resetting afterwards
+    // discarded the post-midnight portion along with the pre-midnight one, and
+    // the new day silently started short.
+    uint32_t today_s = elapsed_s;
     if (time_synced()) {
       struct tm lt;
-      time_t now = time(nullptr);
+      const time_t now = time(nullptr);
       // localtime_r, not gmtime_r: this is the OPERATOR's day, not UTC's.
       // With gmtime_r the counter labelled "FAN TODAY" in the console reset at
       // 17:00 local, so an evening glance showed only the hours since 5 PM --
@@ -51,9 +53,22 @@ void tick(int speed, float watts) {
       // in wifi_link::begin(); the stored clock is still UTC.
       localtime_r(&now, &lt);
       const uint32_t ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
-      if (g_today_ymd != 0 && ymd != g_today_ymd)
+      if (g_today_ymd != 0 && ymd != g_today_ymd) {
         g_run_today_s = 0;
+        // Seconds of this span that fall on the new day: everything since
+        // local midnight, capped at the span itself.
+        const uint32_t since_midnight = static_cast<uint32_t>(lt.tm_hour) * 3600U +
+                                        static_cast<uint32_t>(lt.tm_min) * 60U +
+                                        static_cast<uint32_t>(lt.tm_sec);
+        today_s = since_midnight < elapsed_s ? since_midnight : elapsed_s;
+      }
       g_today_ymd = ymd;
+    }
+
+    if (speed > 0) {
+      g_run_total_s += elapsed_s;
+      g_run_today_s += today_s;
+      g_energy_wh += watts * elapsed_s / 3600.0f;
     }
   }
   if (g_prefs && millis() - g_last_nvs_ms >= 15 * 60 * 1000) {

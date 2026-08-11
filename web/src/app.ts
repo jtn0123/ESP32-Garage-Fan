@@ -48,9 +48,21 @@ function paintSettings(): void {
   // The OTA row is additionally kept as a stable node (see otaControl), so an
   // upload in flight survives even a rebuild triggered by leaving and
   // returning to the screen.
+  // Only an element whose CONTENT is being edited blocks the repaint. Keying
+  // on "focus is anywhere inside #groups" was too broad: a stepper button or a
+  // toggle pill keeps focus after a click, which would freeze every later
+  // repaint and leave the whole screen showing stale values until focus moved
+  // out of the host.
   const host = $('groups');
-  const active = document.activeElement;
-  if (active && active !== document.body && host.contains(active)) return;
+  const active = document.activeElement as HTMLElement | null;
+  const editing =
+    !!active &&
+    host.contains(active) &&
+    (active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLSelectElement ||
+      active.isContentEditable);
+  if (editing) return;
 
   renderSettings(
     $('groups'),

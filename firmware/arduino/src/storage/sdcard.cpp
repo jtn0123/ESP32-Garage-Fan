@@ -287,35 +287,62 @@ void purge_dir(const char* path, PurgeResult& r, uint32_t& budget, int depth) {
   constexpr int kMaxDepth = 8;
   if (depth > kMaxDepth || budget == 0)
     return;
-  File dir = SD.open(path);
-  if (!dir || !dir.isDirectory()) {
-    if (dir)
-      dir.close();
-    return;
-  }
-  // Collect-then-delete: removing entries while iterating the same handle is
-  // not something FATFS promises to keep consistent.
+  // Collect a batch, CLOSE the directory, then delete -- genuinely, not just
+  // in the comment. Deleting through an open handle while calling
+  // openNextFile() on it is not something FATFS promises to keep consistent,
+  // and the failure is silent in the worst way: entries get skipped, the walk
+  // returns with the card still populated, budget is untouched, and purge()
+  // therefore reports complete=true and the endpoint tells the operator the
+  // card was emptied. Re-opening per batch costs a directory rewind and buys
+  // a result that can be trusted.
+  constexpr size_t kBatch = 24;
   for (;;) {
-    File e = dir.openNextFile();
-    if (!e)
-      break;
-    char child[128];
-    snprintf(child, sizeof(child), "%s", e.path());
-    const bool is_dir = e.isDirectory();
-    e.close();
-    if (budget == 0)
-      break;
-    budget--;
-    esp_task_wdt_reset();
-    if (is_dir) {
-      purge_dir(child, r, budget, depth + 1);
-      if (SD.rmdir(child))
-        r.dirs++;
-    } else if (SD.remove(child)) {
-      r.files++;
+    char names[kBatch][128];
+    bool is_dir[kBatch];
+    size_t n = 0;
+
+    File dir = SD.open(path);
+    if (!dir || !dir.isDirectory()) {
+      if (dir)
+        dir.close();
+      return;
     }
+    while (n < kBatch) {
+      File e = dir.openNextFile();
+      if (!e)
+        break;
+      snprintf(names[n], sizeof(names[n]), "%s", e.path());
+      is_dir[n] = e.isDirectory();
+      e.close();
+      n++;
+    }
+    dir.close();
+    if (n == 0)
+      return;  // directory is empty
+
+    size_t removed = 0;
+    for (size_t i = 0; i < n; i++) {
+      if (budget == 0)
+        return;
+      budget--;
+      esp_task_wdt_reset();
+      if (is_dir[i]) {
+        purge_dir(names[i], r, budget, depth + 1);
+        if (SD.rmdir(names[i])) {
+          r.dirs++;
+          removed++;
+        }
+      } else if (SD.remove(names[i])) {
+        r.files++;
+        removed++;
+      }
+    }
+    // Nothing in a full batch could be deleted: retrying would spin on the
+    // same entries forever. Leave the budget alone and let the caller see an
+    // incomplete result rather than looping.
+    if (removed == 0)
+      return;
   }
-  dir.close();
 }
 }  // namespace
 
@@ -330,7 +357,21 @@ PurgeResult purge() {
   const uint32_t before = free_mb();
   uint32_t budget = kPurgeMaxEntries;
   purge_dir("/", r, budget, 0);
-  r.complete = budget > 0;
+  // Verify by looking, not by inferring from the budget. "We did not run out
+  // of allowance" is not the same claim as "the card is empty" -- a directory
+  // that refused every delete also leaves budget to spare, and the endpoint
+  // would have told the operator their card was cleared.
+  {
+    File root = SD.open("/");
+    if (root && root.isDirectory()) {
+      File first = root.openNextFile();
+      r.complete = !first;
+      if (first)
+        first.close();
+    }
+    if (root)
+      root.close();
+  }
   const uint32_t after = free_mb();
   r.freed_mb = after > before ? after - before : 0;
   crashlog::rtc_sd_sentinel = 0;

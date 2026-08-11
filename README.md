@@ -24,8 +24,10 @@ cable into a computer: the fan drives 5 V out on VBUS.
 - **HTTP API** — reads are `GET`: `/api/state`, `/api/device` (duty table,
   identity, broker), `/api/history?days=1|7|30`, `/api/stats`. Writes are
   **`POST` only** — `/api/set?speed=0..12`, `/api/config`, `/api/raw`,
-  `/api/restart`, `/api/sdformat` — so a page in another tab cannot change
-  the fan with an `<img src>`. Add `-X POST` when curling those
+  `/api/restart`, `/api/sdformat`, `/api/sdpurge` — and they additionally
+  refuse a request carrying a foreign `Origin`, since a cross-origin HTML form
+  can `POST` without a preflight. Requests with no `Origin` at all (curl, the
+  deploy script) are allowed, so add `-X POST` and nothing else
 - **MQTT** — `garage/fan/set` / `garage/fan/state` / `garage/fan/availability`,
   retained commands resume after power loss
 - **OTA updates** — `POST /update?token=...`, written to the inactive A/B

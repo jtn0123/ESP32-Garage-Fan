@@ -67,6 +67,48 @@ char g_token[40];
 // on the defaults staying friendly.
 bool token_ok(const String& presented) { return g_token[0] != '\0' && presented == g_token; }
 
+/**
+ * Reject a state-changing request that a foreign page told the browser to make.
+ *
+ * POST-only is NOT sufficient on its own, which is the correction that produced
+ * this function: an HTML form can be submitted cross-origin with method=POST
+ * and no preflight, so `<form action="http://garage-fan.local/api/set?speed=0">`
+ * with a scripted submit() reaches the handler exactly as a GET `<img src>`
+ * used to. The response stays unreadable cross-origin, but the write lands, and
+ * the write is the whole attack.
+ *
+ * A request with NO Origin header is allowed: that is curl, the deploy script,
+ * and every other non-browser client. Browsers always attach Origin to a
+ * cross-origin POST, so this closes the browser-driven path without breaking
+ * the bench tooling. These endpoints remain unauthenticated on the LAN by
+ * deliberate choice; this is about who gets to speak for the operator.
+ */
+bool origin_ok() {
+  if (!g_http.hasHeader("Origin"))
+    return true;  // non-browser caller
+  const String origin = g_http.header("Origin");
+  if (origin.length() == 0 || origin == "null")
+    return false;
+  char self[64];
+  snprintf(self, sizeof(self), "http://%s", WiFi.localIP().toString().c_str());
+  if (origin.equalsIgnoreCase(self))
+    return true;
+  snprintf(self, sizeof(self), "http://%s", FAN_HOSTNAME);
+  if (origin.equalsIgnoreCase(self))
+    return true;
+  snprintf(self, sizeof(self), "http://%s.local", FAN_HOSTNAME);
+  return origin.equalsIgnoreCase(self);
+}
+
+/** origin_ok() with the 403 already sent. True means "keep going". */
+bool guard_origin() {
+  if (origin_ok())
+    return true;
+  eventlog::log("web", "rejected cross-origin write from %s", g_http.header("Origin").c_str());
+  g_http.send(403, "application/json", "{\"error\":\"cross-origin request refused\"}");
+  return false;
+}
+
 }  // namespace
 
 void state_json(char* out, size_t cap) {
@@ -162,8 +204,18 @@ static void handle_stats() {
 // can address. Falls back to the ring only when there is no card, and says so
 // in the filename so the two are never confused.
 static void handle_csv() {
-  const int days_arg = g_http.hasArg("days") ? g_http.arg("days").toInt() : 30;
-  const int days = (days_arg >= 1 && days_arg <= 30) ? days_arg : 30;
+  // Same rule as handle_history: a malformed question gets an error, not a
+  // plausible answer. This used to clamp silently, so ?days=90 and ?days=abc
+  // both returned a 30-day export under a 200 with a filename claiming 30 days.
+  int days = 30;
+  if (g_http.hasArg("days")) {
+    const String raw = g_http.arg("days");
+    days = raw.toInt();
+    if (days < 1 || days > 30 || String(days) != raw) {
+      g_http.send(400, "application/json", "{\"error\":\"days must be 1-30\"}");
+      return;
+    }
+  }
 
   if (sdcard::ok() && time_synced()) {
     char disp[96];
@@ -235,6 +287,9 @@ static void handle_device() {
 // Token-guarded reboot behind the console's maintenance row. Shares the OTA
 // token so reaching the page is not by itself enough to bounce the fan.
 static void handle_restart() {
+  if (!guard_origin())
+    return;
+
   if (!token_ok(g_http.arg("token"))) {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
@@ -247,6 +302,9 @@ static void handle_restart() {
 }
 
 static void handle_config() {
+  if (!guard_origin())
+    return;
+
   if (g_http.hasArg("auto"))
     fan::set_auto(g_http.arg("auto").toInt() != 0);
   if (g_http.hasArg("max")) {
@@ -323,15 +381,21 @@ static void handle_sensors() {
 static void write_series(http_tx::Chunked& tx, const char* name, const float* v, uint16_t n,
                          uint8_t decimals) {
   tx.printf("\"%s\":[", name);
-  char num[16];
+  char num[32];
   for (uint16_t i = 0; i < n && tx.ok(); i++) {
-    if (isnan(v[i])) {
-      // A literal "nan" is not JSON -- one bad sample would make the
-      // browser's parser reject the entire history payload (blank graph).
+    // isfinite, not !isnan: infinity is not valid JSON either, and these
+    // values come off the SD card via sscanf with no range check, so a single
+    // corrupt row must not tear the whole payload.
+    //
+    // snprintf, not dtostrf: dtostrf's width argument is a MINIMUM, not a cap,
+    // and it always writes the full number. A corrupt row holding 1e38 renders
+    // 39 digits plus decimals -- straight past the old 16-byte buffer and into
+    // the loop thread's stack.
+    if (!isfinite(v[i])) {
       tx.print("null");
     } else {
-      dtostrf(v[i], 0, decimals, num);
-      tx.print(num);
+      const int w = snprintf(num, sizeof(num), "%.*f", static_cast<int>(decimals), v[i]);
+      tx.print(w > 0 && w < static_cast<int>(sizeof(num)) ? num : "null");
     }
     if (i + 1 < n)
       tx.print(",");
@@ -411,8 +475,22 @@ bool scratch_ready() {
   g_scratch.cg = psram_array<int8_t>(kGraphMaxPts);
   g_scratch.ready = g_scratch.ts && g_scratch.t && g_scratch.h && g_scratch.p && g_scratch.o &&
                     g_scratch.b && g_scratch.sp && g_scratch.cg;
-  if (!g_scratch.ready)
+  if (!g_scratch.ready) {
+    // Release the blocks that DID succeed. Without this a partial failure
+    // leaked them and the next chart request allocated a fresh partial set --
+    // under exactly the memory pressure that caused the failure, and
+    // scratch_ready() runs on every card-backed request.
+    free(g_scratch.ts);
+    free(g_scratch.t);
+    free(g_scratch.h);
+    free(g_scratch.p);
+    free(g_scratch.o);
+    free(g_scratch.b);
+    free(g_scratch.sp);
+    free(g_scratch.cg);
+    g_scratch = GraphScratch{};
     eventlog::log("web", "graph scratch alloc failed");
+  }
   return g_scratch.ready;
 }
 }  // namespace
@@ -518,6 +596,9 @@ static void handle_history() {
 // loop for the duration (can be minutes on big cards); the RMT peripheral
 // keeps the fan running throughout.
 static void handle_sd_format() {
+  if (!guard_origin())
+    return;
+
   if (!token_ok(g_http.arg("token"))) {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
@@ -571,6 +652,9 @@ static void handle_sd_format() {
 //
 // Destructive and irreversible; the console confirms before calling.
 static void handle_sd_purge() {
+  if (!guard_origin())
+    return;
+
   if (!token_ok(g_http.arg("token"))) {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
@@ -594,6 +678,9 @@ static void handle_sd_purge() {
 
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.
 static void handle_raw() {
+  if (!guard_origin())
+    return;
+
   if (!g_http.hasArg("high_pct")) {
     g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
     return;
@@ -610,6 +697,9 @@ static void handle_raw() {
 }
 
 static void handle_set() {
+  if (!guard_origin())
+    return;
+
   if (!g_http.hasArg("speed")) {
     g_http.send(400, "application/json", "{\"error\":\"speed required\"}");
     return;
@@ -653,6 +743,14 @@ void begin(Preferences* prefs) {
   g_prefs = prefs;
   String tk = prefs ? prefs->getString("token", FAN_OTA_TOKEN) : String(FAN_OTA_TOKEN);
   snprintf(g_token, sizeof(g_token), "%s", tk.c_str());
+  // WebServer discards every header it was not told to keep, so guard_origin()
+  // would see nothing -- and, since "no Origin" means "non-browser caller",
+  // would wave every cross-origin write straight through. This one line is
+  // what makes the CSRF guard real rather than decorative.
+  {
+    const char* kWanted[] = {"Origin"};
+    g_http.collectHeaders(kWanted, 1);
+  }
   sse::set_state_source(state_json);
   g_http.on("/", []() {
     // Unconditionally gzipped: the page is only ever stored compressed, and
