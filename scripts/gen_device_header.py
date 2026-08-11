@@ -191,6 +191,24 @@ def main():
     mqtt_pass = str(os.getenv("MQTT_PASSWORD") or mqtt.get("password", "") or "")
     mqtt_pub = base_topics.get("publish", "sensors/" + room_name.lower())
     mqtt_sub = base_topics.get("subscribe", "home/outdoor")
+    # Where this device lives, for the firmware's direct weather poll. From the
+    # gitignored .env only (coordinates are private, like credentials): a clone
+    # without them builds with the poller disabled and the fan falls back to
+    # the MQTT outdoor feed alone. Rounded to 2 decimals (~1.1 km) because the
+    # request travels plain HTTP -- the ESP32-S2 cannot afford TLS's ~34 KB of
+    # contiguous internal RAM (measured: "SSL - Memory allocation failed"),
+    # and neighborhood-level is all a weather forecast needs anyway.
+    def _coord(name: str) -> str:
+        v = str(os.getenv(name) or "").strip()
+        if not v:
+            return ""
+        try:
+            return f"{float(v):.2f}"
+        except ValueError:
+            return ""
+
+    weather_lat = _coord("WEATHER_LAT")
+    weather_lon = _coord("WEATHER_LON")
     # battery
     battery = data.get("battery", {})
     capacity_mAh = int(battery.get("capacity_mAh", 3500) or 3500)
@@ -322,6 +340,8 @@ def main():
         f.write(f"#define MQTT_SUB_BASE {c_string(mqtt_sub)}\n")
         f.write(f"#define MQTT_USER {c_string(mqtt_user)}\n")
         f.write(f"#define MQTT_PASS {c_string(mqtt_pass)}\n")
+        f.write(f"#define WEATHER_LAT {c_string(weather_lat)}\n")
+        f.write(f"#define WEATHER_LON {c_string(weather_lon)}\n")
         f.write(f"#define BATTERY_CAPACITY_MAH {capacity_mAh}\n")
         f.write(f"#define SLEEP_CURRENT_MA {sleep_current_mA}\n")
         f.write(f"#define ACTIVE_CURRENT_MA {active_current_mA}\n")

@@ -31,6 +31,7 @@
 #include "esp_task_wdt.h"
 #include "fan/control.h"
 #include "net/mqtt_link.h"
+#include "net/weather.h"
 #include "net/web.h"
 #include "net/wifi_link.h"
 #include "sensors/battery.h"
@@ -193,6 +194,7 @@ void loop() {
     battery::read();
     sdcard::retry_tick();
     eventlog::flush_tick();
+    weather::tick();  // internally rate-limited to one fetch per 10 min
   }
   if (!mqtt_link::ever_connected() && !ota_rollback_image_confirmed() &&
       millis() > kUnconfirmedDeadlineMs) {
