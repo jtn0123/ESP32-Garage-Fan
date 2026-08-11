@@ -27,12 +27,10 @@ class StringSource {
     pos_ += n;
     return static_cast<int>(n);
   }
-  int reads() const { return reads_; }
 
  private:
   std::string s_;
   size_t pos_ = 0;
-  int reads_ = 0;
 };
 
 }  // namespace

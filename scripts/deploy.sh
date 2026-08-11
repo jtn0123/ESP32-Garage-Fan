@@ -93,7 +93,6 @@ while [ $SECONDS -lt $deadline ]; do
     fw=$(echo "$state" | sed -n 's/.*"fw":"\([^"]*\)".*/\1/p')
     confirmed=$(echo "$state" | sed -n 's/.*"confirmed":\(true\|false\).*/\1/p')
     if [ "$fw" = "$EXPECTED_FW" ] && [ "$confirmed" = "true" ]; then
-      echo "VERIFIED: $HOST online, running $fw, image confirmed ($((SECONDS - started))s)"
       # --- post-deploy smoke ---------------------------------------------------
       # The version match proves the bytes arrived; these prove the boot is
       # healthy. Added 2026-08-09 after an OTA upload starved the task watchdog
@@ -106,15 +105,29 @@ while [ $SECONDS -lt $deadline ]; do
       sd_mb=$(echo "$state" | sed -n 's/.*"sd_total_mb":\([0-9]*\).*/\1/p')   # NOSONAR
       drops=$(echo "$state" | sed -n 's/.*"drops":\([0-9]*\).*/\1/p')         # NOSONAR
       echo "  smoke: boot_cause=$cause sd_total_mb=${sd_mb:-?} wifi_drops=${drops:-?}"  # NOSONAR
-      if [ "$cause" = "panic" ]; then
-        echo "SMOKE FAIL: this boot follows a PANIC - the new image crashed once"
-        echo "already. Read $HOST/api/events before trusting it."
+      # Fail closed: fw/confirmed arrive EARLY in the JSON, so a truncated
+      # response can pass the version gate with the health fields missing --
+      # and an empty $cause would then sail past the panic check while
+      # ${sd_mb:-0} invented a false "card not mounted". Missing evidence is
+      # a failed check, not a passed one.
+      if [ -z "$cause" ] || [ -z "$sd_mb" ] || [ -z "$drops" ]; then
+        echo "SMOKE FAIL: /api/state response is missing health fields (truncated?)"
         exit 1
       fi
-      if [ "${sd_mb:-0}" -eq 0 ]; then
+      # Prefix match: crashlog appends the dying breadcrumb, so the cause
+      # reads "panic during sd_mount", not a bare "panic".
+      case "$cause" in
+        panic*)
+          echo "SMOKE FAIL: this boot follows a PANIC - the new image crashed once"
+          echo "already. Read $HOST/api/events before trusting it."
+          exit 1
+          ;;
+      esac
+      if [ "$sd_mb" -eq 0 ]; then
         echo "SMOKE WARN: SD card not mounted - the flight recorder has no"
         echo "persistence; check $HOST/api/events for the mount failure line."
       fi
+      echo "VERIFIED: $HOST online, running $fw, image confirmed, smoke passed ($((SECONDS - started))s)"
       exit 0
     elif [ "$fw" = "$EXPECTED_FW" ]; then
       echo "  running $fw but not yet confirmed (needs the broker), waiting..."

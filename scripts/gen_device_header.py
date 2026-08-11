@@ -198,17 +198,22 @@ def main():
     # request travels plain HTTP -- the ESP32-S2 cannot afford TLS's ~34 KB of
     # contiguous internal RAM (measured: "SSL - Memory allocation failed"),
     # and neighborhood-level is all a weather forecast needs anyway.
-    def _coord(name: str) -> str:
+    def _coord(name: str, minimum: float, maximum: float) -> str:
         v = str(os.getenv(name) or "").strip()
         if not v:
             return ""
         try:
-            return f"{float(v):.2f}"
+            value = float(v)
         except ValueError:
             return ""
+        # nan fails the chained comparison too, so "nan"/"inf" disable the
+        # poller instead of pasting a non-geographic token into the URL.
+        if not minimum <= value <= maximum:
+            return ""
+        return f"{value:.2f}"
 
-    weather_lat = _coord("WEATHER_LAT")
-    weather_lon = _coord("WEATHER_LON")
+    weather_lat = _coord("WEATHER_LAT", -90.0, 90.0)
+    weather_lon = _coord("WEATHER_LON", -180.0, 180.0)
     # battery
     battery = data.get("battery", {})
     capacity_mAh = int(battery.get("capacity_mAh", 3500) or 3500)

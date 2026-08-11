@@ -387,19 +387,31 @@ static void handle_sd_format() {
   // filesystem it is a remount that erases nothing. A 99%-full 28 GB card
   // answered {"ok":true} in 166 ms with every byte still on it (2026-08-09).
   // Report what actually happened, and let the caller see the numbers.
+  // used_mb() reads 0 while unmounted -- and an unmountable card is the
+  // NORMAL reason to call this endpoint. Without a measurable baseline the
+  // erased verdict would be a guess in the dangerous direction ("nothing
+  // erased" right after format_if_empty legitimately wrote a fresh FAT32
+  // over the card), so the baseline-less case says unknown instead.
+  const bool baseline_known = sdcard::ok();
   const uint32_t used_before = sdcard::used_mb();
   const bool mounted = sdcard::format();
   const uint32_t used_after = sdcard::used_mb();
-  const bool erased = mounted && used_after < used_before;
-  eventlog::log("sd", "format: mounted=%d erased=%d used %lu->%lu MB", mounted ? 1 : 0,
-                erased ? 1 : 0, (unsigned long)used_before, (unsigned long)used_after);
-  char buf[288];
+  const bool erased = baseline_known && mounted && used_after < used_before;
+  eventlog::log("sd", "format: mounted=%d baseline=%d erased=%d used %lu->%lu MB", mounted ? 1 : 0,
+                baseline_known ? 1 : 0, erased ? 1 : 0, (unsigned long)used_before,
+                (unsigned long)used_after);
+  const char* note = !baseline_known
+                         ? "card was not mounted before the call; whether the filesystem was "
+                           "rewritten cannot be measured from here"
+                     : erased ? "erased"
+                              : "nothing erased: the card already held a mountable filesystem";
+  char buf[352];
   snprintf(buf, sizeof(buf),
            "{\"ok\":%s,\"erased\":%s,\"total_mb\":%lu,\"used_before_mb\":%lu,\"used_mb\":%lu,"
            "\"note\":\"%s\"}",
-           mounted ? "true" : "false", erased ? "true" : "false", (unsigned long)sdcard::total_mb(),
-           (unsigned long)used_before, (unsigned long)used_after,
-           erased ? "erased" : "nothing erased: the card already held a mountable filesystem");
+           mounted ? "true" : "false", !baseline_known ? "null" : (erased ? "true" : "false"),
+           (unsigned long)sdcard::total_mb(), (unsigned long)used_before, (unsigned long)used_after,
+           note);
   g_http.send(mounted ? 200 : 500, "application/json", buf);
 }
 
