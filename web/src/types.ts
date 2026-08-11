@@ -85,7 +85,21 @@ export interface Stats {
 export type Sensors = { ok: false } | { ok: true; temp_c: number; rh: number; hpa: number };
 
 /**
+ * The 4xx body every endpoint sends for a malformed request. api.ts throws
+ * on non-2xx before parsing, so the console never sees this shape -- it is
+ * declared for the wire contract (the firmware emits it) and for anyone
+ * driving the API by hand.
+ */
+export interface ApiError {
+  error: string;
+}
+
+/**
  * GET /api/history?days=1|7|30
+ *
+ * `days` is REQUIRED and must be exactly 1, 7 or 30; anything else is a 400
+ * ApiError. (It used to default to 1, which served RAM-ring data to typo'd
+ * queries as if it were the card's -- 2026-08-10.)
  *
  * The optional series are present only for days=1, which is served from the
  * in-RAM ring. Longer ranges are decimated out of the monthly CSVs on the SD
