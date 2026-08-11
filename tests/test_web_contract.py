@@ -142,3 +142,33 @@ def test_duty_table_matches_protocol():
         assert m, f"kHighUs not found in {path}"
         values = [int(v) for v in re.findall(r"\d+", m.group(1))]
         assert values == expected, "the measured duty table changed -- PROTOCOL.md is ground truth"
+
+
+def test_history_branches_agree():
+    """Both /api/history branches must emit the SAME series.
+
+    The 7/30-day path used to run through a different writer that emitted only
+    temp_c/rh/hpa -- no timestamps and none of the other four series -- so
+    changing the range silently dropped four of the seven lines and left the
+    chart with no real time axis. types.ts cannot catch that on its own: it
+    describes one shape, and check() above passes as long as SOME branch emits
+    each field. This pins that every series is written on BOTH sides.
+    """
+    body = find_function("handle_history")
+    # Everything the History interface declares as a data series.
+    series = ["temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg"]
+    for name in series:
+        n = len(re.findall(rf'"{name}"', body))
+        assert n == 2, (
+            f"handle_history writes '{name}' {n} time(s); expected exactly 2 "
+            f"(the SD branch and the ring branch). A series emitted on only one "
+            f"side is the 7/30-day regression: the chart loses that line for "
+            f"whichever range takes the other path."
+        )
+    # And both branches must anchor their rows in real time.
+    assert re.search(r"\bwrite_ts\s*\(", body), "SD branch must emit per-row ts[]"
+    assert re.search(r"\bwrite_ts_derived\s*\(", body), "ring branch must emit ts[]"
+    # source tells the caller which store answered; both branches set it.
+    assert (
+        len(re.findall(r'\\"source\\":', body)) == 2
+    ), "both branches must report which store answered"

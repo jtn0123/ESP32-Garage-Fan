@@ -16,6 +16,8 @@ export interface View {
   live: Sensors | null;
   series: Series | null;
   history: History | null;
+  /** Why the last history fetch failed, or null. Shown in place of the chart. */
+  historyError: string | null;
   update: UpdateStatus | null;
   days: number;
   scrub: number;
@@ -46,6 +48,7 @@ export const view: View = {
   live: null,
   series: null,
   history: null,
+  historyError: null,
   update: null,
   days: 1,
   scrub: -1,

@@ -53,7 +53,7 @@ interface Scale {
  */
 const MIN_SPAN = 2;
 
-function limits(values: readonly (number | null)[], minSpan = MIN_SPAN): Scale | null {
+export function limits(values: readonly (number | null)[], minSpan = MIN_SPAN): Scale | null {
   let mn = Infinity;
   let mx = -Infinity;
   for (const v of values) {

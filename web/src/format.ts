@@ -35,7 +35,24 @@ export function airflow(speed: number): string {
   return 'Full tilt';
 }
 
-/** Megabytes -> "1.42 / 29.7 GB", matching the status bar and settings row. */
-export function storage(usedMb: number, totalMb: number): string {
-  return `${(usedMb / 1024).toFixed(2)} / ${(totalMb / 1024).toFixed(1)} GB`;
+/**
+ * Megabytes -> "1.42 / 29.7 GB", with the free space named once it gets tight.
+ *
+ * "28.00 / 28.2 GB" is technically the same information and conveys nothing:
+ * the deployed card sat at 210 MB free and read as unremarkable. The whole
+ * reason sd_free_mb was added to the wire is that a nearly-full card was
+ * invisible, so the formatter has to actually say it.
+ */
+export function storage(usedMb: number, totalMb: number, freeMb?: number): string {
+  const base = `${(usedMb / 1024).toFixed(2)} / ${(totalMb / 1024).toFixed(1)} GB`;
+  if (freeMb === undefined || totalMb <= 0) return base;
+  const pctFull = (100 * usedMb) / totalMb;
+  if (pctFull < 90) return base;
+  const free = freeMb >= 1024 ? `${(freeMb / 1024).toFixed(1)} GB` : `${freeMb} MB`;
+  return `${base} · ${free} free (${pctFull.toFixed(0)}% full)`;
+}
+
+/** True once the card is full enough that logging is at risk. */
+export function cardTight(usedMb: number, totalMb: number): boolean {
+  return totalMb > 0 && (100 * usedMb) / totalMb >= 90;
 }

@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "storage/sdcard.h"
 #include "system/eventlog_ring.h"
+#include "system/log_filter.h"
 #include "system/timeutil.h"
 
 namespace eventlog {
@@ -115,49 +116,26 @@ namespace {
 // esp_log vprintf hook: framework warnings become tape lines. 20 lines per
 // 10 s window, then dropped -- the SD driver's dying words fit easily; a
 // boot-time log storm must not evict the events that matter.
-// Chatter that repeats forever, carries no new information, and would
-// otherwise crowd the tape.
-//
-// The deployed board emits four of these every ~30 s from the fuel gauge
-// probe -- i2c_master_transmit_receive failing with ESP_ERR_INVALID_STATE and
-// its i2cWriteReadNonStop partner. Benign (battery::read has its own retry and
-// the readings are fine), but at that rate they are the majority of every
-// /api/events tail, so the flight recorder built to explain a fault was mostly
-// full of one that does not matter. Suppressed after the first few, then
-// summarised periodically so the condition is still visible without drowning
-// the record.
-bool is_i2c_noise(const char* s) {
-  return strstr(s, "i2c_master_transmit_receive failed") ||
-         strstr(s, "i2cWriteReadNonStop returned Error");
-}
-
+// The noise decision itself lives in log_filter.h so the host can test it --
+// a mis-tuned filter is otherwise only discovered when a real fault turns out
+// to be missing from the tape.
 int esp_vlog_to_ring(const char* fmt, va_list ap) {
   static uint32_t win_start_ms = 0;
   static uint8_t in_window = 0;
-  static uint32_t i2c_suppressed = 0;
-  static uint8_t i2c_shown = 0;
-  static uint32_t i2c_report_ms = 0;
+  static log_filter::NoiseGate gate;
   char buf[160];
   const int n = vsnprintf(buf, sizeof(buf), fmt, ap);
   for (int i = 0; buf[i]; i++)
     if (buf[i] == '\n' || buf[i] == '\r')
       buf[i] = ' ';
 
-  if (is_i2c_noise(buf)) {
-    // Keep the first few of a boot: the first occurrence is genuinely worth
-    // knowing, a permanent stream of them is not.
-    if (i2c_shown < 4) {
-      i2c_shown++;
+  const bool noisy = log_filter::is_i2c_noise(buf);
+  const auto v = gate.feed(noisy, millis());
+  if (noisy) {
+    if (v.summary)
+      log("i2c", "%lu benign bus errors suppressed since last report", (unsigned long)v.count);
+    else if (v.emit)
       log("esp", "%s", buf);
-      return n;
-    }
-    i2c_suppressed++;
-    if (millis() - i2c_report_ms > 3600000UL) {  // hourly
-      i2c_report_ms = millis();
-      log("i2c", "%lu benign bus errors suppressed since last report",
-          (unsigned long)i2c_suppressed);
-      i2c_suppressed = 0;
-    }
     return n;
   }
 

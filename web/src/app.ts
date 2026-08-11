@@ -260,10 +260,13 @@ function setRange(days: number): void {
     b.className = Number(b.dataset['d']) === days ? 'on' : '';
   });
   $('chtitle').textContent = days === 1 ? 'LAST 24 HOURS' : `LAST ${days} DAYS`;
+  // One caption for every range now. It used to say "garage only -- the card
+  // keeps no outdoor series" on 7D/30D, which was true of the old wire format
+  // and became a flat contradiction of the screen once those ranges started
+  // carrying out_f: the outdoor line was drawn, the readout showed `out`, and
+  // the caption underneath said it did not exist.
   $('tcap').textContent =
-    days === 1
-      ? 'band = how much hotter the garage is than the yard · drag across to read any moment'
-      : 'garage only — the card keeps no outdoor series · drag across to read any moment';
+    'band = how much hotter the garage is than the yard · drag across to read any moment';
   void loadHistory();
 }
 
@@ -361,12 +364,27 @@ async function loadHistory(): Promise<void> {
   try {
     const raw = await api.getHistory(view.days);
     if (seq !== historySeq) return; // superseded by a newer range request
+    view.historyError = null;
     view.history = raw;
     view.series = build(raw);
     drawAll();
     paintHero();
-  } catch {
-    /* keep the last good chart rather than blanking it */
+  } catch (err) {
+    if (seq !== historySeq) return;
+    // Do NOT keep the previous chart. The firmware answers 503 for a range it
+    // cannot serve (card unmounted, clock unsynced) precisely so the caller is
+    // not handed a plausible substitute -- and silently retaining the old
+    // series undid that at the last step: picking 30D with no card relabelled
+    // the 7-day chart "LAST 30 DAYS" and showed nothing else. Say what
+    // happened and draw nothing.
+    view.historyError =
+      err instanceof Error && /50\d/.test(err.message)
+        ? 'this range is unavailable — the card is not mounted, or the clock has not synced'
+        : 'could not load history from the controller';
+    view.history = null;
+    view.series = null;
+    drawAll();
+    paintHero();
   }
 }
 

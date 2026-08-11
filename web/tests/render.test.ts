@@ -1,0 +1,113 @@
+// Tests for the rendering-side logic that had none.
+//
+// charts.ts, console.ts and format.ts carried several of the sweep's fixes with
+// zero automated coverage; every one of these was verified by hand against a
+// mock device first, then pinned here.
+
+import { describe, expect, it } from 'vitest';
+import { limits } from '../src/charts.js';
+import { isNewer } from '../src/console.js';
+import { cardTight, storage } from '../src/format.js';
+import type { DeviceState } from '../src/types.js';
+
+describe('limits: minimum y-span', () => {
+  it('does not magnify a flat series', () => {
+    // A calm night at 40.1-40.5 %RH used to fill the whole chart height while
+    // all three gridlines read "40" -- the axis said nothing was happening and
+    // the line said everything was, and the line is what gets read.
+    const sc = limits([40.1, 40.2, 40.5, 40.3])!;
+    expect(sc.max - sc.min).toBeGreaterThanOrEqual(2);
+  });
+
+  it('centres the floor on the data rather than pinning it to an edge', () => {
+    const sc = limits([40, 40, 40])!;
+    const mid = (sc.min + sc.max) / 2;
+    expect(mid).toBeCloseTo(40, 6);
+  });
+
+  it('leaves a genuinely wide series alone', () => {
+    const sc = limits([10, 90])!;
+    expect(sc.min).toBeLessThan(10);
+    expect(sc.max).toBeGreaterThan(90);
+    expect(sc.max - sc.min).toBeGreaterThan(80);
+  });
+
+  it('takes a per-series floor, so battery is not flattened', () => {
+    // A LiPo's entire working range is ~0.7 V. The 2-unit default would render
+    // every real discharge curve as a straight line.
+    const sc = limits([3.95, 4.05, 4.2], 0.1)!;
+    expect(sc.max - sc.min).toBeLessThan(0.5);
+  });
+
+  it('returns null when there is nothing to scale', () => {
+    expect(limits([])).toBeNull();
+    expect(limits([null, null])).toBeNull();
+  });
+
+  it('never produces a zero-height scale (no divide-by-zero in yAt)', () => {
+    for (const vals of [[5], [0, 0], [-3, -3, -3]]) {
+      const sc = limits(vals)!;
+      expect(sc.max - sc.min).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('isNewer: frame ordering', () => {
+  const st = (over: Partial<DeviceState>): DeviceState =>
+    ({ boots: 41, uptime_s: 1000, speed: 5, ...over }) as DeviceState;
+
+  it('accepts the first frame', () => {
+    expect(isNewer(st({}), null)).toBe(true);
+  });
+
+  it('rejects a poll that was issued before the state we already have', () => {
+    // The concrete bug: click a speed, its response paints, then a poll issued
+    // 300 ms earlier lands and repaints the rail back to the old speed.
+    expect(isNewer(st({ uptime_s: 900 }), st({ uptime_s: 1000 }))).toBe(false);
+  });
+
+  it('accepts a later frame from the same boot', () => {
+    expect(isNewer(st({ uptime_s: 1015 }), st({ uptime_s: 1000 }))).toBe(true);
+  });
+
+  it('accepts a frame with equal uptime (same-second responses)', () => {
+    expect(isNewer(st({ uptime_s: 1000 }), st({ uptime_s: 1000 }))).toBe(true);
+  });
+
+  it('accepts a reboot, whose uptime goes backwards', () => {
+    // uptime alone would reject this forever; boots is what breaks the tie.
+    expect(isNewer(st({ boots: 42, uptime_s: 3 }), st({ boots: 41, uptime_s: 9000 }))).toBe(true);
+  });
+
+  it('rejects a straggler from the PREVIOUS boot', () => {
+    expect(isNewer(st({ boots: 41, uptime_s: 9000 }), st({ boots: 42, uptime_s: 3 }))).toBe(false);
+  });
+});
+
+describe('storage: a nearly-full card has to look nearly full', () => {
+  it('stays terse when there is plenty of room', () => {
+    expect(storage(1024, 29000, 27976)).toBe('1.00 / 28.3 GB');
+  });
+
+  it('names the free space once the card is tight', () => {
+    // The deployed card: 210 MB free of 28887, which read as an unremarkable
+    // "28.00 / 28.2 GB" and was the reason nobody noticed.
+    const s = storage(28677, 28887, 210);
+    expect(s).toContain('210 MB free');
+    expect(s).toContain('99% full');
+  });
+
+  it('switches to GB for larger remainders', () => {
+    expect(storage(27000, 29000, 2000)).toContain('2.0 GB free');
+  });
+
+  it('omits the detail when the device did not report free space', () => {
+    expect(storage(28677, 28887)).toBe('28.00 / 28.2 GB');
+  });
+
+  it('cardTight fires at 90% and not before', () => {
+    expect(cardTight(8999, 10000)).toBe(false);
+    expect(cardTight(9000, 10000)).toBe(true);
+    expect(cardTight(0, 0)).toBe(false); // no card: not "tight", just absent
+  });
+});

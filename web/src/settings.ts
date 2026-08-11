@@ -203,7 +203,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
           'Log storage',
           'microSD card holding the per-month CSV files behind the 7-day and 30-day ranges.',
           s.sd_total_mb
-            ? storage(s.sd_used_mb, s.sd_total_mb)
+            ? storage(s.sd_used_mb, s.sd_total_mb, s.sd_free_mb)
             : s.sd_q
               ? 'quarantined'
               : 'not mounted',

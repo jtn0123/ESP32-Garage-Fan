@@ -16,7 +16,7 @@ import {
   drawTemperature,
 } from './charts.js';
 import { $, at, el, show } from './dom.js';
-import { ago, airflow, clock, hoursMinutes, signed, storage } from './format.js';
+import { ago, airflow, cardTight, clock, hoursMinutes, signed, storage } from './format.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
 import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
@@ -210,13 +210,16 @@ function bitValues(): { value: string; colour: string }[] {
   const s = view.state;
   if (!s) return [];
   const card = s.sd_total_mb
-    ? storage(s.sd_used_mb, s.sd_total_mb)
+    ? storage(s.sd_used_mb, s.sd_total_mb, s.sd_free_mb)
     : s.sd_q
       ? 'quarantined'
       : 'not mounted';
+  // A card with no room left stops being a flight recorder, so it reads as a
+  // warning rather than as ordinary status text.
+  const cardTense = s.sd_total_mb > 0 && cardTight(s.sd_used_mb, s.sd_total_mb);
   return [
     { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
-    { value: card, colour: s.sd_total_mb ? OUT : DIM },
+    { value: card, colour: !s.sd_total_mb ? DIM : cardTense ? OR : OUT },
     { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
@@ -288,7 +291,19 @@ function paintReadouts(): void {
 export function drawAll(): void {
   if (view.screen !== 'console') return;
   const s = view.series;
-  if (!s) return;
+  if (!s) {
+    // No series and a reason for it: blank the plots and say why, rather than
+    // leaving the previous range's picture under the new range's title.
+    if (view.historyError) {
+      $('tcap').textContent = view.historyError;
+      for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
+        const c = document.getElementById(id) as HTMLCanvasElement | null;
+        const ctx = c?.getContext('2d');
+        if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+      }
+    }
+    return;
+  }
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub);
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
@@ -353,7 +368,7 @@ export function paintChips(): void {
  * and `boots` increments across one, so the pair orders every frame without a
  * wire change.
  */
-function isNewer(next: DeviceState, cur: DeviceState | null): boolean {
+export function isNewer(next: DeviceState, cur: DeviceState | null): boolean {
   if (!cur) return true;
   if (next.boots !== cur.boots) return next.boots > cur.boots;
   return next.uptime_s >= cur.uptime_s;
