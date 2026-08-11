@@ -191,6 +191,7 @@ def main():
     mqtt_pass = str(os.getenv("MQTT_PASSWORD") or mqtt.get("password", "") or "")
     mqtt_pub = base_topics.get("publish", "sensors/" + room_name.lower())
     mqtt_sub = base_topics.get("subscribe", "home/outdoor")
+
     # Where this device lives, for the firmware's direct weather poll. From the
     # gitignored .env only (coordinates are private, like credentials): a clone
     # without them builds with the poller disabled and the fan falls back to

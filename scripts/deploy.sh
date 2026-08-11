@@ -127,7 +127,9 @@ while [ $SECONDS -lt $deadline ]; do
         echo "SMOKE WARN: SD card not mounted - the flight recorder has no"
         echo "persistence; check $HOST/api/events for the mount failure line."
       fi
-      echo "VERIFIED: $HOST online, running $fw, image confirmed, smoke passed ($((SECONDS - started))s)"
+      # NOSONAR below: S5332 again -- $fw is traced from the plain-HTTP curl,
+      # which is this LAN-only device's only protocol (see block comment above).
+      echo "VERIFIED: $HOST online, running $fw, image confirmed, smoke passed ($((SECONDS - started))s)"  # NOSONAR
       exit 0
     elif [ "$fw" = "$EXPECTED_FW" ]; then
       echo "  running $fw but not yet confirmed (needs the broker), waiting..."
