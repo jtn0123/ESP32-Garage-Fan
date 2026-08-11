@@ -13,7 +13,7 @@
 export PATH=/opt/homebrew/bin:/usr/bin:/bin
 
 ENV_FILE="${GARAGE_FAN_ENV:-$HOME/.local/garage-fan/env}"
-[ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE" >&2; exit 1; }
+[[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
 set -a
 . "$ENV_FILE"
 set +a
@@ -23,7 +23,7 @@ set +a
 : "${MQTT_PASS:?MQTT_PASS not set}"
 
 LOG=~/.local/garage-fan/climate_log.csv
-[ -f "$LOG" ] || echo "epoch,payload" >> "$LOG"
+[[ -f "$LOG" ]] || echo "epoch,payload" >> "$LOG"
 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -t garage/climate | while read -r line; do
   echo "$(date +%s),$line" >> "$LOG"
 done
