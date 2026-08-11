@@ -28,7 +28,7 @@ VERIFY_TIMEOUT="${DEPLOY_VERIFY_TIMEOUT:-300}"
 HDR="$ROOT/firmware/arduino/src/generated_config.h"
 HDR_TOKEN=$(sed -n 's/^#define FAN_OTA_TOKEN "\(.*\)"$/\1/p' "$HDR" 2>/dev/null | head -1)
 TOKEN="${FAN_OTA_TOKEN:-${HDR_TOKEN:-iliving-ota}}"
-if [ "$TOKEN" = "iliving-ota" ]; then
+if [[ "$TOKEN" = "iliving-ota" ]]; then
   echo "WARNING: using the public default OTA token. Set FAN_OTA_TOKEN in .env"
   echo "         (and reflash) so token-gated endpoints stop accepting the"
   echo "         value committed to a public repository."
@@ -37,7 +37,7 @@ fi
 pio run -d "$ROOT/firmware/arduino" -e "$ENV"
 
 BIN="$ROOT/firmware/arduino/.pio/build/$ENV/firmware.bin"
-[ -f "$BIN" ] || { echo "ABORT: no firmware.bin at $BIN"; exit 1; }
+[[ -f "$BIN" ]] || { echo "ABORT: no firmware.bin at $BIN"; exit 1; }
 
 # The version this build carries. Read from the generated header rather than
 # the VERSION file, because the header is what the compiler actually saw: if a
@@ -46,7 +46,7 @@ BIN="$ROOT/firmware/arduino/.pio/build/$ENV/firmware.bin"
 # which version we EXPECTED to see.
 EXPECTED_FW=$(sed -n 's/^#define FW_VERSION "\(.*\)"$/\1/p' \
   "$ROOT/firmware/arduino/src/generated_config.h" 2>/dev/null | head -1)
-if [ -z "$EXPECTED_FW" ]; then
+if [[ -z "$EXPECTED_FW" ]]; then
   echo "ABORT: could not read FW_VERSION from generated_config.h."
   echo "Build first (make build) so the header exists. Without it the"
   echo "post-deploy verify would compare empty against empty and report"
@@ -62,7 +62,7 @@ fi
 # gate; this is.
 BUILT_SSID=$(sed -n 's/#define WIFI_SSID "\(.*\)"/\1/p' \
   "$ROOT/firmware/arduino/src/generated_config.h" 2>/dev/null | head -1)
-if [ -z "$BUILT_SSID" ]; then
+if [[ -z "$BUILT_SSID" ]]; then
   echo "ABORT: the built image has an EMPTY WiFi SSID."
   echo "Source the repo .env (or set WIFI_SSID/WIFI_PASSWORD) and rebuild;"
   echo "flashing this image would leave the device unreachable over the network."
@@ -71,8 +71,8 @@ fi
 
 echo "Uploading $(basename "$BIN") ($(wc -c <"$BIN" | tr -d ' ') bytes) to $HOST..."
 code=$(curl -s -o /tmp/fan-ota-resp.txt -w '%{http_code}' -m 180 \
-  -F "firmware=@$BIN" "http://$HOST/update?token=$TOKEN")
-if [ "$code" != "200" ]; then
+  -F "firmware=@$BIN" "http://$HOST/update?token=$TOKEN")  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+if [[ "$code" != "200" ]]; then
   echo "ABORT: /update returned HTTP $code"
   echo "  $(head -c 300 /tmp/fan-ota-resp.txt)"
   echo "  (401/403 means a wrong FAN_OTA_TOKEN)"
@@ -87,12 +87,12 @@ echo "Uploaded; device rebooting - verifying it comes back confirmed..."
 started=$SECONDS
 deadline=$((SECONDS + VERIFY_TIMEOUT))
 fw=""
-while [ $SECONDS -lt $deadline ]; do
-  state=$(curl -s -m 5 "http://$HOST/api/state" 2>/dev/null || true)
-  if [ -n "$state" ]; then
-    fw=$(echo "$state" | sed -n 's/.*"fw":"\([^"]*\)".*/\1/p')
-    confirmed=$(echo "$state" | sed -n 's/.*"confirmed":\(true\|false\).*/\1/p')
-    if [ "$fw" = "$EXPECTED_FW" ] && [ "$confirmed" = "true" ]; then
+while [[ $SECONDS -lt $deadline ]]; do
+  state=$(curl -s -m 5 "http://$HOST/api/state" 2>/dev/null || true)  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+  if [[ -n "$state" ]]; then
+    fw=$(echo "$state" | sed -n 's/.*"fw":"\([^"]*\)".*/\1/p')  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+    confirmed=$(echo "$state" | sed -n 's/.*"confirmed":\(true\|false\).*/\1/p')  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+    if [[ "$fw" = "$EXPECTED_FW" && "$confirmed" = "true" ]]; then
       # --- post-deploy smoke ---------------------------------------------------
       # The version match proves the bytes arrived; these prove the boot is
       # healthy. Added 2026-08-09 after an OTA upload starved the task watchdog
@@ -134,21 +134,21 @@ while [ $SECONDS -lt $deadline ]; do
       # which is this LAN-only device's only protocol (see block comment above).
       echo "VERIFIED: $HOST online, running $fw, image confirmed, smoke passed ($((SECONDS - started))s)"  # NOSONAR
       exit 0
-    elif [ "$fw" = "$EXPECTED_FW" ]; then
-      echo "  running $fw but not yet confirmed (needs the broker), waiting..."
-    elif [ -n "$fw" ]; then
-      echo "  online but reporting $fw (want $EXPECTED_FW), waiting..."
+    elif [[ "$fw" = "$EXPECTED_FW" ]]; then
+      echo "  running $fw but not yet confirmed (needs the broker), waiting..."  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+    elif [[ -n "$fw" ]]; then
+      echo "  online but reporting $fw (want $EXPECTED_FW), waiting..."  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
     fi
   fi
   sleep 5
 done
 
-if [ "$fw" = "$EXPECTED_FW" ]; then
+if [[ "$fw" = "$EXPECTED_FW" ]]; then
   echo "DEPLOY UNCONFIRMED: $HOST runs $EXPECTED_FW but never confirmed the image."
   echo "It could not reach the MQTT broker; boot-health will roll it back after"
   echo "three failed boots. Check the broker before power-cycling."
-elif [ -n "$fw" ]; then
-  echo "DEPLOY ROLLED BACK: $HOST is online but reports $fw, not $EXPECTED_FW."
+elif [[ -n "$fw" ]]; then
+  echo "DEPLOY ROLLED BACK: $HOST is online but reports $fw, not $EXPECTED_FW."  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
   echo "The new image never reached the broker and boot-health reverted it."
 else
   echo "DEPLOY UNVERIFIED: $HOST did not answer /api/state within ${VERIFY_TIMEOUT}s."

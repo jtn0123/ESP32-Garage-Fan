@@ -17,7 +17,7 @@ echo "Credential rotation checklist"
 echo "============================="
 echo
 
-if [ -f "$ENV_FILE" ]; then
+if [[ -f "$ENV_FILE" ]]; then
   echo "Keys currently defined in .env (values not shown):"
   # Print key names only. Never echo the right-hand side.
   grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null \
