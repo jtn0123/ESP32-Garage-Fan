@@ -291,20 +291,27 @@ function paintReadouts(): void {
     bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
 }
 
+/**
+ * Blank every plot and put the reason in the caption.
+ *
+ * Used when a range cannot be served: leaving the previous range's picture
+ * under the new range's title is the failure the firmware's 503 exists to
+ * prevent, and silently keeping it undid that at the last step.
+ */
+function clearPlots(reason: string): void {
+  $('tcap').textContent = reason;
+  for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
+    const c = document.getElementById(id) as HTMLCanvasElement | null;
+    const ctx = c?.getContext('2d');
+    if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+  }
+}
+
 export function drawAll(): void {
   if (view.screen !== 'console') return;
   const s = view.series;
   if (!s) {
-    // No series and a reason for it: blank the plots and say why, rather than
-    // leaving the previous range's picture under the new range's title.
-    if (view.historyError) {
-      $('tcap').textContent = view.historyError;
-      for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
-        const c = document.getElementById(id) as HTMLCanvasElement | null;
-        const ctx = c?.getContext('2d');
-        if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
-      }
-    }
+    if (view.historyError) clearPlots(view.historyError);
     return;
   }
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub);

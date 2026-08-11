@@ -136,6 +136,25 @@ def coerce_scen(key: str, raw: str):
     return int(raw)
 
 
+def scen_snapshot():
+    """Rebuild the knob state from primitives for the response.
+
+    coerce_scen already guarantees every stored value is a bool, an int in
+    range, or None -- no caller string can reach SCEN. This rebuilds the dict
+    from those primitives anyway rather than handing back the live state
+    object, so the response is constructed from known types at the point it is
+    serialised instead of relying on an invariant established elsewhere.
+    """
+    out = {}
+    for key, spec in SCEN_SPEC.items():
+        value = SCEN[key]
+        if spec is bool:
+            out[key] = bool(value)
+        else:
+            out[key] = None if value is None else int(value)
+    return out
+
+
 def history():
     n = SCEN["rows"]
     end = int(time.time())
@@ -173,7 +192,10 @@ def history():
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *a):
+    def log_message(self, *args):
+        # Silence BaseHTTPRequestHandler's per-request stderr line. The console
+        # polls every 15 s and redraws on every frame, so the default access
+        # log buries the tracebacks this harness exists to surface.
         pass
 
     def _send(self, code, body, ctype="application/json"):
@@ -247,7 +269,7 @@ class H(BaseHTTPRequestHandler):
                 SCEN[key] = coerce_scen(key, values[0])
             except ValueError as exc:
                 return self._json(400, {"error": str(exc)})
-        return self._json(200, dict(SCEN))
+        return self._json(200, scen_snapshot())
 
     # --- reads ------------------------------------------------------------
     def _page(self, _query):
