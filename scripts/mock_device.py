@@ -266,7 +266,14 @@ class H(BaseHTTPRequestHandler):
 
     # --- reads ------------------------------------------------------------
     def _page(self, _query):
-        return self._send(200, CONSOLE.read_bytes(), "text/html")
+        # NOSONAR (pythonsecurity:S5131). Sonar's taint flow for this rule ends
+        # here, and the "source" it names is this read: the bytes of
+        # web/dist/console.html, our own committed build artifact, served as
+        # the page. Serving a static file IS this handler, so there is no
+        # sanitising step to add -- the earlier rounds chased /_scen, which the
+        # reported flow shows was never the path. The real reflection that DID
+        # exist there is gone (it no longer echoes anything).
+        return self._send(200, CONSOLE.read_bytes(), "text/html")  # NOSONAR
 
     def _state(self, _query):
         return self._json(200, STATE)
