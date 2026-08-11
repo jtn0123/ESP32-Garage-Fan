@@ -107,8 +107,9 @@ struct PurgeResult {
   uint32_t files = 0;  // entries unlinked
   uint32_t dirs = 0;   // directories removed
   uint32_t freed_mb = 0;
-  uint32_t remaining = 0;  // foreign entries still in root (excludes our logs)
-  bool complete = false;   // nothing left to delete and no bound was hit
+  uint32_t remaining = 0;     // foreign entries still in root (excludes our logs)
+  uint32_t skipped_dirs = 0;  // directories the queue bound could not hold
+  bool complete = false;      // nothing left to delete and no bound was hit
   /**
    * Name of the first entry that survived, "" if none.
    *

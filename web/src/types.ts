@@ -8,9 +8,13 @@
 //
 // `| null` is used where the firmware literally emits the JSON token `null`
 // (a missing sensor, no outdoor feed, no battery). Optional `?` is used where
-// the firmware omits the key entirely -- which /api/history does for the
-// 7-day and 30-day ranges, because those come off the SD card and it only
-// stores temperature, humidity and pressure.
+// the firmware omits the key entirely.
+//
+// /api/history used to be the example of that second case: its 7- and 30-day
+// responses carried temperature, humidity and pressure only. They now carry
+// the same seven series and a real per-row timestamp as the 24 h range, and
+// tests/test_web_contract.py::test_history_branches_agree keeps both firmware
+// branches emitting the identical set.
 
 /** GET /api/state -- also the payload pushed over SSE on port 8081. */
 export interface DeviceState {
@@ -135,4 +139,31 @@ export interface History {
   spd: number[];
   batt_v: (number | null)[];
   chg: number[]; // 1 charging, 0 not, -1 no battery
+}
+
+/**
+ * `POST /api/sdpurge` — deleting the card's contents without reformatting.
+ *
+ * Declared here so the wire-contract test holds this endpoint to the same rule
+ * as the rest: the firmware and the console cannot drift apart silently.
+ *
+ * `complete` is not simply "ok". It means nothing foreign is left, no bound was
+ * hit, AND the verification pass actually ran; `note` explains which of those
+ * failed. `remaining`/`leftover` name what survived (in practice macOS's
+ * `.Spotlight-V100`, which FAT will not remove and re-running cannot fix), and
+ * `skipped_dirs` is the walk-queue bound, which is NOT the entry budget.
+ */
+export interface PurgeResult {
+  ok: boolean;
+  files: number;
+  dirs: number;
+  remaining: number;
+  skipped_dirs: number;
+  leftover: string;
+  free_before_mb: number;
+  free_mb: number;
+  complete: boolean;
+  /** The device reboots after a purge; see handle_sd_purge for why. */
+  restarting: boolean;
+  note: string;
 }

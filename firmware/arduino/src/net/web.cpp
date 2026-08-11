@@ -659,11 +659,14 @@ static void handle_sd_purge() {
   }
   const uint32_t free_before = sdcard::free_mb();
   const sdcard::PurgeResult r = sdcard::purge();
-  // Say which of the two "not finished" cases it was. The first real purge
-  // reclaimed all 28 GB and then reported "stopped at the entry bound; run
-  // again" -- the bound was nowhere near hit (208 entries of 20000); the card
-  // simply had the fan's own log back in it by the time the check ran.
-  char note[160];
+  // Three distinct "not finished" cases, and they need different advice. The
+  // first real purge reclaimed all 28 GB and then reported "stopped at the
+  // entry bound; run again" -- the bound was nowhere near hit (208 entries of
+  // 20000); the card simply had the fan's own log back in it by the time the
+  // check ran. A queue-bound stop is likewise NOT the entry bound, and saying
+  // so pointed the operator at a limit they could not reconcile with what the
+  // purge had actually touched.
+  char note[192];
   if (r.complete) {
     snprintf(note, sizeof(note), "card contents deleted; filesystem left in place");
   } else if (r.remaining) {
@@ -674,17 +677,21 @@ static void handle_sd_purge() {
     snprintf(note, sizeof(note),
              "space reclaimed; %lu entr%s the filesystem will not remove (first: %s)",
              (unsigned long)r.remaining, r.remaining == 1 ? "y remains" : "ies remain", r.leftover);
+  } else if (r.skipped_dirs) {
+    snprintf(note, sizeof(note),
+             "%lu director%s did not fit the walk queue; run again to reach them",
+             (unsigned long)r.skipped_dirs, r.skipped_dirs == 1 ? "y" : "ies");
   } else {
     snprintf(note, sizeof(note), "stopped at the entry bound; run again to continue");
   }
-  char buf[512];
+  char buf[576];
   snprintf(buf, sizeof(buf),
-           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"remaining\":%lu,\"leftover\":\"%s\","
-           "\"free_before_mb\":%lu,\"free_mb\":%lu,\"complete\":%s,\"restarting\":true,"
-           "\"note\":\"%s\"}",
-           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)r.remaining, r.leftover,
-           (unsigned long)free_before, (unsigned long)sdcard::free_mb(),
-           r.complete ? "true" : "false", note);
+           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"remaining\":%lu,\"skipped_dirs\":%lu,"
+           "\"leftover\":\"%s\",\"free_before_mb\":%lu,\"free_mb\":%lu,\"complete\":%s,"
+           "\"restarting\":true,\"note\":\"%s\"}",
+           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)r.remaining,
+           (unsigned long)r.skipped_dirs, r.leftover, (unsigned long)free_before,
+           (unsigned long)sdcard::free_mb(), r.complete ? "true" : "false", note);
   g_http.send(200, "application/json", buf);
 
   // Restart after a purge, deliberately.

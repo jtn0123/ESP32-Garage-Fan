@@ -291,15 +291,62 @@ constexpr uint32_t kPurgeMaxEntries = 20000;
 // Deleting is still collect-then-delete against a CLOSED handle: FATFS does
 // not promise consistent iteration while entries are being removed from the
 // directory being iterated.
-constexpr size_t kBatch = 16;
+// A far larger batch than the walk started with, and it lives in PSRAM only
+// while a purge is running.
+//
+// Two problems with the first version, both real:
+//
+//  * 7.7 KB of PERMANENT .bss on a board that has already fought heap
+//    exhaustion, and whose mount guard refuses to keep the card mounted unless
+//    10 KB stays contiguous afterwards. The graph scratch was moved to PSRAM
+//    for exactly this reason; putting the purge's buffers in DRAM undid that
+//    lesson in the same file.
+//
+//  * Rescanning was quadratic. Each pass reopened the directory, enumerated
+//    from entry zero and removed at most kBatch files, so one directory of N
+//    entries cost about N^2/(2*kBatch) openNextFile calls. The measured card
+//    held 208 entries so it never showed; at the 20000-entry budget it is on
+//    the order of ten million directory reads, with the task watchdog deleted
+//    for the duration -- the board would sit unresponsive rather than reset.
+//    A batch this size collapses a realistic directory into a handful of
+//    passes.
+constexpr size_t kBatch = 2048;
 constexpr size_t kPathMax = purge_logic::kMaxPathLen;
 
-char g_batch[kBatch][kPathMax];
-bool g_batch_dir[kBatch];
-purge_logic::Queue g_dirq;
+struct PurgeScratch {
+  char batch[kBatch][kPathMax];
+  bool batch_dir[kBatch];
+  purge_logic::Queue dirq;
+};
+
+PurgeScratch* g_scratch = nullptr;
+
+bool scratch_alloc() {
+  if (g_scratch)
+    return true;
+  void* m = heap_caps_calloc(1, sizeof(PurgeScratch), MALLOC_CAP_SPIRAM);
+  if (!m)  // no PSRAM on this board variant; the internal heap is the fallback
+    m = heap_caps_calloc(1, sizeof(PurgeScratch), MALLOC_CAP_8BIT);
+  if (!m) {
+    eventlog::log("sd", "purge: no memory for %u-entry scratch", (unsigned)kBatch);
+    return false;
+  }
+  g_scratch = new (m) PurgeScratch();
+  return true;
+}
+
+void scratch_free() {
+  if (!g_scratch)
+    return;
+  g_scratch->~PurgeScratch();
+  heap_caps_free(g_scratch);
+  g_scratch = nullptr;
+}
 
 // Fill the batch from `path`. Returns entries read; 0 means the directory is
-// empty (or gone).
+// empty (or gone). Deleting still happens against a CLOSED handle: FATFS does
+// not promise consistent iteration while entries are being removed from the
+// directory being walked.
 size_t scan_dir(const char* path) {
   File dir = SD.open(path);
   if (!dir || !dir.isDirectory()) {
@@ -312,16 +359,18 @@ size_t scan_dir(const char* path) {
     File e = dir.openNextFile();
     if (!e)
       break;
-    snprintf(g_batch[n], kPathMax, "%s", e.path());
-    g_batch_dir[n] = e.isDirectory();
+    snprintf(g_scratch->batch[n], kPathMax, "%s", e.path());
+    g_scratch->batch_dir[n] = e.isDirectory();
     e.close();
     // Queue subdirectories for their own pass rather than descending here.
     // Queue::push owns the dedupe and the bound -- see purge_logic.h for why
     // both matter (a parent rescanned for more files sees its children every
     // time).
-    if (g_batch_dir[n])
-      g_dirq.push(g_batch[n]);
+    if (g_scratch->batch_dir[n])
+      g_scratch->dirq.push(g_scratch->batch[n]);
     n++;
+    if ((n & 0x3F) == 0)
+      esp_task_wdt_reset();
   }
   dir.close();
   return n;
@@ -339,23 +388,30 @@ PurgeResult purge() {
   CRUMB("sd_purge");
   const uint32_t before = free_mb();
   uint32_t budget = kPurgeMaxEntries;
+  if (!scratch_alloc()) {
+    crashlog::rtc_sd_sentinel = 0;
+    CRUMB_CLEAR();
+    esp_task_wdt_add(NULL);
+    return r;  // complete stays false; nothing was touched
+  }
 
   // Breadth-first over a bounded queue. Files go immediately; directories are
   // queued and emptied in their own pass, then removed deepest-first at the
   // end (a later queue entry is always at least as deep as an earlier one, so
   // reverse order suffices).
-  g_dirq.reset();
-  g_dirq.push("/");
-  for (size_t qi = 0; qi < g_dirq.size() && budget > 0; qi++) {
+  purge_logic::Queue& dirq = g_scratch->dirq;
+  dirq.reset();
+  dirq.push("/");
+  for (size_t qi = 0; qi < dirq.size() && budget > 0; qi++) {
     for (;;) {
-      const size_t n = scan_dir(g_dirq.at(qi));
+      const size_t n = scan_dir(dirq.at(qi));
       size_t removed = 0;
       for (size_t i = 0; i < n && budget > 0; i++) {
         budget--;
         esp_task_wdt_reset();
-        if (g_batch_dir[i])
+        if (g_scratch->batch_dir[i])
           continue;  // emptied later from the queue
-        if (SD.remove(g_batch[i])) {
+        if (SD.remove(g_scratch->batch[i])) {
           r.files++;
           removed++;
         }
@@ -367,14 +423,15 @@ PurgeResult purge() {
     }
   }
   // Deepest-first so a parent is only removed once its children are gone.
-  for (size_t i = g_dirq.size(); i-- > 1;) {
+  for (size_t i = dirq.size(); i-- > 1;) {
     esp_task_wdt_reset();
-    if (SD.rmdir(g_dirq.at(i)))
+    if (SD.rmdir(dirq.at(i)))
       r.dirs++;
   }
-  const size_t skipped_dirs = g_dirq.skipped();
-  if (skipped_dirs)
-    eventlog::log("sd", "purge: %u dirs beyond the queue bound; run again", (unsigned)skipped_dirs);
+  r.skipped_dirs = dirq.skipped();
+  if (r.skipped_dirs)
+    eventlog::log("sd", "purge: %u dirs beyond the queue bound; run again",
+                  (unsigned)r.skipped_dirs);
   // Verify by looking, not by inferring from the budget. "We did not run out
   // of allowance" is not the same claim as "the card is empty" -- a directory
   // that refused every delete also leaves budget to spare, and the endpoint
@@ -385,8 +442,10 @@ PurgeResult purge() {
   // first real purge reported (partial) and told the operator to run it again
   // after it had already reclaimed all 28 GB. Ours do not count against it.
   r.remaining = 0;
+  bool verified = false;
   File root = SD.open("/");
   if (root && root.isDirectory()) {
+    verified = true;
     for (;;) {
       File e = root.openNextFile();
       if (!e)
@@ -406,7 +465,11 @@ PurgeResult purge() {
   }
   if (root)
     root.close();
-  r.complete = budget > 0 && skipped_dirs == 0 && r.remaining == 0;
+  // `verified` matters: if the root would not open, the loop never ran and
+  // r.remaining stayed 0, which would have made this true and told the operator
+  // "card contents deleted" on the strength of a check that did not happen --
+  // the exact inference the comment above rejects.
+  r.complete = verified && purge_logic::complete(budget, r.skipped_dirs, r.remaining);
   // Name the first survivor. "Some entries could not be deleted" with no
   // indication of WHICH is the kind of report that cannot be acted on.
   if (r.remaining)
@@ -414,6 +477,7 @@ PurgeResult purge() {
                   r.remaining == 1 ? "y" : "ies", r.leftover);
   const uint32_t after = free_mb();
   r.freed_mb = after > before ? after - before : 0;
+  scratch_free();
   crashlog::rtc_sd_sentinel = 0;
   CRUMB_CLEAR();
   esp_task_wdt_add(NULL);

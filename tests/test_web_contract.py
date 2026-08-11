@@ -172,3 +172,12 @@ def test_history_branches_agree():
     assert (
         len(re.findall(r'\\"source\\":', body)) == 2
     ), "both branches must report which store answered"
+
+
+def test_handle_sd_purge_matches_purgeresult():
+    """The purge response is part of the wire contract like any other.
+
+    It was the one endpoint whose fields nothing pinned, and it grew three of
+    them (remaining, leftover, skipped_dirs) while being debugged live.
+    """
+    check("handle_sd_purge", "PurgeResult", "ApiError")
