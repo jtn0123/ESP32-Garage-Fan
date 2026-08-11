@@ -13,6 +13,7 @@
 #include "config.h"
 #include "esp_task_wdt.h"
 #include "system/crashlog.h"
+#include "storage/line_reader.h"
 #include "system/eventlog.h"
 
 namespace sdcard {
@@ -65,7 +66,14 @@ static bool begin_attempt(uint32_t freq, bool format_if_failed) {
 // while "working". If a mount leaves less than this contiguous, undo it.
 constexpr uint32_t kMinLargestAfterMount = 10 * 1024;
 
+// The last mount attempt succeeded but was undone for heap headroom. Heap
+// pressure is transient in a way a dead card is not, so retry_tick must not
+// charge these against the 10-failure cap -- ten heap rejections would
+// otherwise permanently stop retries in exactly the situation that can heal.
+bool g_heap_denied = false;
+
 static void mount() {
+  g_heap_denied = false;
   for (size_t i = 0; i < kFreqCount; i++) {
     if (i > 0)
       bus_restart();
@@ -73,6 +81,7 @@ static void mount() {
       const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
       if (largest < kMinLargestAfterMount) {
         SD.end();
+        g_heap_denied = true;
         eventlog::log("sd", "mount undone: leaves largest=%lu (<%lu); network first",
                       (unsigned long)largest, (unsigned long)kMinLargestAfterMount);
         return;
@@ -159,23 +168,15 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
       File f = SD.open(paths[i], FILE_READ);
       if (!f)
         continue;
-      // Line-buffered scan; lines are short and epoch-prefixed.
+      // Block-buffered scan; lines are short and epoch-prefixed.
+      storage::LineReader<File> rd(f);
       char line[96];
-      size_t ll = 0;
       uint32_t fed = 0;
-      while (f.available()) {
-        // Two passes over up to two month files is normally ~3 s, but a
-        // corrupt oversized file must not ride into the 60 s task watchdog.
-        if ((++fed & 0x3FF) == 0)
+      while (rd.next(line, sizeof(line))) {
+        // Two passes over up to two month files, but a corrupt oversized file
+        // must not ride into the 60 s task watchdog.
+        if ((++fed & 0x3F) == 0)
           esp_task_wdt_reset();
-        const char c = static_cast<char>(f.read());
-        if (c != '\n') {
-          if (ll < sizeof(line) - 1)
-            line[ll++] = c;
-          continue;
-        }
-        line[ll] = '\0';
-        ll = 0;
         const long epoch = strtol(line, nullptr, 10);
         if (epoch < cutoff)
           continue;
@@ -318,7 +319,13 @@ void retry_tick() {
   tried = true;
   backoff = 0;
   mount_guarded();
-  g_fails = g_ok ? 0 : g_fails + 1;
+  // A heap-denied attempt proved the CARD is fine (it mounted); only the
+  // moment was wrong. Charging it against the cap would end all retries
+  // after ten tight-heap ticks -- the one failure mode that heals itself.
+  if (g_ok)
+    g_fails = 0;
+  else if (!g_heap_denied)
+    g_fails++;
 }
 
 void on_network_up() {

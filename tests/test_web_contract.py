@@ -116,7 +116,9 @@ def test_handle_sensors_matches_sensors():
 
 
 def test_handle_history_matches_history():
-    check("handle_history", "History")
+    # ApiError covers the 400 branch: days is required to be 1|7|30 and the
+    # rejection body is part of the wire contract like any other response.
+    check("handle_history", "History", "ApiError")
 
 
 def test_duty_table_matches_protocol():

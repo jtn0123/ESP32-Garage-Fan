@@ -263,14 +263,24 @@ static void handle_config() {
 }
 
 static void handle_sensors() {
-  if (!climate::ok() || history::count() == 0) {
+  // A LIVE read, not the newest ring entry. History is stored
+  // already-corrected -- deliberately, so changing an offset never rewrites
+  // what was already logged -- and it is only appended every 5 minutes, so
+  // serving it here made a freshly changed offset appear to do nothing at
+  // all. Calibrating against a display that will not move is precisely how
+  // this board ended up reading ~10 F low: the offset was pushed further and
+  // further to chase a number that could not respond until the next sample
+  // (2026-08-09). The console polls this once a minute and calls the result
+  // `live`; it should be live. Costs one forced BME280 conversion.
+  float t;
+  float h;
+  float p;
+  if (!climate::sample(&t, &h, &p)) {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
   char buf[128];
-  const uint16_t i = history::count() - 1;
-  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}",
-           history::temp()[i], history::rh()[i], history::hpa()[i]);
+  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
   g_http.send(200, "application/json", buf);
 }
 
@@ -296,7 +306,23 @@ static void append_series(String& out, const char* name, const float* v, uint16_
 }
 
 static void handle_history() {
-  const int days = g_http.hasArg("days") ? g_http.arg("days").toInt() : 1;
+  // Reject anything but the documented ?days=1|7|30 instead of quietly
+  // serving the RAM ring. A caller who typos the parameter (?range=7d) used
+  // to receive a syntactically valid ring response wearing the wrong data --
+  // which is how this repo's own SD-read verification fooled itself on
+  // 2026-08-10: the LineReader refactor was "confirmed" against a response
+  // that never touched the card. Malformed questions get errors, not
+  // plausible answers; that rule has now paid for itself three times here
+  // (sdformat "ok", /api/sensors "live", and this).
+  // The parameter is REQUIRED, not defaulted: a defaulted absent parameter is
+  // exactly how ?range=7d (a typo for ?days=7) sailed through and served ring
+  // data as if it were the card's. The console always sends days= explicitly.
+  const String days_arg = g_http.hasArg("days") ? g_http.arg("days") : "";
+  const int days = days_arg.toInt();
+  if (days_arg != "1" && days_arg != "7" && days_arg != "30") {
+    g_http.send(400, "application/json", "{\"error\":\"days must be 1, 7 or 30\"}");
+    return;
+  }
   String out;
   out.reserve(13000);
   if (days <= 1 || !sdcard::ok() || !time_synced()) {
@@ -357,13 +383,43 @@ static void handle_sd_format() {
     g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
     return;
   }
-  const bool ok = sdcard::format();
-  eventlog::log("sd", "format %s (%lu MB)", ok ? "ok" : "FAILED",
-                (unsigned long)sdcard::total_mb());
-  char buf[80];
-  snprintf(buf, sizeof(buf), "{\"ok\":%s,\"total_mb\":%lu}", ok ? "true" : "false",
-           (unsigned long)sdcard::total_mb());
-  g_http.send(ok ? 200 : 500, "application/json", buf);
+  // "ok" used to mean only "the card mounted afterwards", so this endpoint
+  // claimed success for work it had not done. SD.begin's format_if_empty
+  // formats an UNMOUNTABLE card only; on a card that already carries a
+  // filesystem it is a remount that erases nothing. A 99%-full 28 GB card
+  // answered {"ok":true} in 166 ms with every byte still on it (2026-08-09).
+  // Report what actually happened, and let the caller see the numbers.
+  // used_mb() reads 0 while unmounted -- and an unmountable card is the
+  // NORMAL reason to call this endpoint. Without a measurable baseline the
+  // erased verdict would be a guess in the dangerous direction ("nothing
+  // erased" right after format_if_empty legitimately wrote a fresh FAT32
+  // over the card), so the baseline-less case says unknown instead.
+  const bool baseline_known = sdcard::ok();
+  const uint32_t used_before = sdcard::used_mb();
+  const bool mounted = sdcard::format();
+  const uint32_t used_after = sdcard::used_mb();
+  const bool erased = baseline_known && mounted && used_after < used_before;
+  eventlog::log("sd", "format: mounted=%d baseline=%d erased=%d used %lu->%lu MB", mounted ? 1 : 0,
+                baseline_known ? 1 : 0, erased ? 1 : 0, (unsigned long)used_before,
+                (unsigned long)used_after);
+  const char* note = "nothing erased: the card already held a mountable filesystem";
+  const char* erased_json = "false";
+  if (!baseline_known) {
+    note =
+        "card was not mounted before the call; whether the filesystem was "
+        "rewritten cannot be measured from here";
+    erased_json = "null";
+  } else if (erased) {
+    note = "erased";
+    erased_json = "true";
+  }
+  char buf[352];
+  snprintf(buf, sizeof(buf),
+           "{\"ok\":%s,\"erased\":%s,\"total_mb\":%lu,\"used_before_mb\":%lu,\"used_mb\":%lu,"
+           "\"note\":\"%s\"}",
+           mounted ? "true" : "false", erased_json, (unsigned long)sdcard::total_mb(),
+           (unsigned long)used_before, (unsigned long)used_after, note);
+  g_http.send(mounted ? 200 : 500, "application/json", buf);
 }
 
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.
