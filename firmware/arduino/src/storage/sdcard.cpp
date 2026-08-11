@@ -111,7 +111,8 @@ void mount_guarded() {
   crashlog::rtc_sd_sentinel = 0;
 }
 
-void log_sample(time_t now, float t, float h, float p, float out_f, int speed) {
+void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
+                int chg) {
   if (!g_ok)
     return;
   struct tm tm_now;
@@ -126,8 +127,11 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed) {
     return;
   }
   char line[96];
-  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d\n", (long)now, t, h, p,
-                   isnan(out_f) ? -999.0f : out_f, speed);
+  // batt_v/chg appended 1.14.23 so the card carries the same seven series the
+  // console draws; read_range still parses the six-field rows written before.
+  // -999 is the "no reading" sentinel for both float columns.
+  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d\n", (long)now, t, h, p,
+                   isnan(out_f) ? -999.0f : out_f, speed, isnan(batt_v) ? -999.0f : batt_v, chg);
   if (n < 0 || n >= static_cast<int>(sizeof(line))) {
     f.close();  // a truncated row would corrupt the CSV for every later reader
     CRUMB_CLEAR();
@@ -142,10 +146,10 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed) {
 
 // Stream the month files covering [cutoff, now], decimating by stride into
 // the caller's arrays. Two passes: count, then collect every (count/max)th.
-uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pts) {
-  CRUMB("sd_read");
-  time_t now = time(nullptr);
-  char paths[2][36];
+// The month files spanning [cutoff, now]. At most two, which covers every
+// supported range (days <= 30 touches at most two calendar months).
+static int month_paths(time_t cutoff, char paths[2][36]) {
+  const time_t now = time(nullptr);
   int npaths = 0;
   for (time_t at = cutoff; npaths < 2; at = now) {
     struct tm tmv;
@@ -159,6 +163,45 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
     if (at == now)
       break;
   }
+  return npaths;
+}
+
+uint32_t stream_range(time_t cutoff, LineSink sink, void* ctx) {
+  if (!g_ok || !sink)
+    return 0;
+  CRUMB("sd_stream");
+  char paths[2][36];
+  const int npaths = month_paths(cutoff, paths);
+  uint32_t sent = 0;
+  for (int i = 0; i < npaths; i++) {
+    File f = SD.open(paths[i], FILE_READ);
+    if (!f)
+      continue;
+    storage::LineReader<File> rd(f);
+    char line[96];
+    uint32_t fed = 0;
+    while (rd.next(line, sizeof(line))) {
+      if ((++fed & 0x3F) == 0)
+        esp_task_wdt_reset();
+      if (strtol(line, nullptr, 10) < cutoff)
+        continue;
+      if (!sink(line, ctx)) {
+        f.close();
+        CRUMB_CLEAR();
+        return sent;
+      }
+      sent++;
+    }
+    f.close();
+  }
+  CRUMB_CLEAR();
+  return sent;
+}
+
+uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
+  CRUMB("sd_read");
+  char paths[2][36];
+  const int npaths = month_paths(cutoff, paths);
   uint32_t rows = 0;
   for (int pass = 0; pass < 2; pass++) {
     const uint32_t stride = pass ? (rows > max_pts ? rows / max_pts + 1 : 1) : 1;
@@ -188,13 +231,25 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
           continue;
         if (kept >= max_pts)
           break;
-        float tv, hv, pv;
-        if (sscanf(line, "%*d,%f,%f,%f", &tv, &hv, &pv) == 3) {
-          t[kept] = tv;
-          h[kept] = hv;
-          p[kept] = pv;
-          kept++;
-        }
+        float tv, hv, pv, ov, bv;
+        int sp;
+        int cg;
+        // Eight fields since 1.14.23, six before it. Parse the wide form
+        // first and fall back, so a card that spans the change reads whole
+        // instead of dropping every older row.
+        const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d", &tv, &hv, &pv, &ov, &sp, &bv, &cg);
+        if (got < 3)
+          continue;
+        out.ts[kept] = static_cast<time_t>(epoch);
+        out.temp_c[kept] = tv;
+        out.rh[kept] = hv;
+        out.hpa[kept] = pv;
+        // -999 is the sentinel log_sample writes when no yard reading existed.
+        out.out_f[kept] = (got >= 4 && ov > -100.0f) ? ov : NAN;
+        out.spd[kept] = got >= 5 ? static_cast<int8_t>(sp) : 0;
+        out.batt_v[kept] = (got >= 6 && bv > 0.0f) ? bv : NAN;
+        out.chg[kept] = got >= 7 ? static_cast<int8_t>(cg) : -1;
+        kept++;
       }
       f.close();
     }
@@ -209,6 +264,122 @@ uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pt
   }
   CRUMB_CLEAR();
   return 0;
+}
+
+uint32_t free_mb() {
+  if (!g_ok)
+    return 0;
+  const uint64_t total = SD.totalBytes();
+  const uint64_t used = SD.usedBytes();
+  return used >= total ? 0 : static_cast<uint32_t>((total - used) / 1048576);
+}
+
+namespace {
+// Bound on entries touched in one purge. A card with a pathological directory
+// count must not hold the loop indefinitely; the caller is told it stopped
+// early and can run it again.
+constexpr uint32_t kPurgeMaxEntries = 20000;
+
+// Depth-first delete of `path`'s contents. Recursion is bounded by kMaxDepth
+// because the loop thread's stack is not large and a crafted tree should not
+// be able to reach it.
+void purge_dir(const char* path, PurgeResult& r, uint32_t& budget, int depth) {
+  constexpr int kMaxDepth = 8;
+  if (depth > kMaxDepth || budget == 0)
+    return;
+  // Collect a batch, CLOSE the directory, then delete -- genuinely, not just
+  // in the comment. Deleting through an open handle while calling
+  // openNextFile() on it is not something FATFS promises to keep consistent,
+  // and the failure is silent in the worst way: entries get skipped, the walk
+  // returns with the card still populated, budget is untouched, and purge()
+  // therefore reports complete=true and the endpoint tells the operator the
+  // card was emptied. Re-opening per batch costs a directory rewind and buys
+  // a result that can be trusted.
+  constexpr size_t kBatch = 24;
+  for (;;) {
+    char names[kBatch][128];
+    bool is_dir[kBatch];
+    size_t n = 0;
+
+    File dir = SD.open(path);
+    if (!dir || !dir.isDirectory()) {
+      if (dir)
+        dir.close();
+      return;
+    }
+    while (n < kBatch) {
+      File e = dir.openNextFile();
+      if (!e)
+        break;
+      snprintf(names[n], sizeof(names[n]), "%s", e.path());
+      is_dir[n] = e.isDirectory();
+      e.close();
+      n++;
+    }
+    dir.close();
+    if (n == 0)
+      return;  // directory is empty
+
+    size_t removed = 0;
+    for (size_t i = 0; i < n; i++) {
+      if (budget == 0)
+        return;
+      budget--;
+      esp_task_wdt_reset();
+      if (is_dir[i]) {
+        purge_dir(names[i], r, budget, depth + 1);
+        if (SD.rmdir(names[i])) {
+          r.dirs++;
+          removed++;
+        }
+      } else if (SD.remove(names[i])) {
+        r.files++;
+        removed++;
+      }
+    }
+    // Nothing in a full batch could be deleted: retrying would spin on the
+    // same entries forever. Leave the budget alone and let the caller see an
+    // incomplete result rather than looping.
+    if (removed == 0)
+      return;
+  }
+}
+}  // namespace
+
+PurgeResult purge() {
+  PurgeResult r;
+  if (!g_ok)
+    return r;
+  Serial.println("[SD] purge requested");
+  esp_task_wdt_delete(NULL);  // deleting tens of thousands of entries takes time
+  crashlog::rtc_sd_sentinel = crashlog::kSdSentinelMagic;
+  CRUMB("sd_purge");
+  const uint32_t before = free_mb();
+  uint32_t budget = kPurgeMaxEntries;
+  purge_dir("/", r, budget, 0);
+  // Verify by looking, not by inferring from the budget. "We did not run out
+  // of allowance" is not the same claim as "the card is empty" -- a directory
+  // that refused every delete also leaves budget to spare, and the endpoint
+  // would have told the operator their card was cleared.
+  {
+    File root = SD.open("/");
+    if (root && root.isDirectory()) {
+      File first = root.openNextFile();
+      r.complete = !first;
+      if (first)
+        first.close();
+    }
+    if (root)
+      root.close();
+  }
+  const uint32_t after = free_mb();
+  r.freed_mb = after > before ? after - before : 0;
+  crashlog::rtc_sd_sentinel = 0;
+  CRUMB_CLEAR();
+  esp_task_wdt_add(NULL);
+  eventlog::log("sd", "purge: %lu files %lu dirs, +%lu MB free%s", (unsigned long)r.files,
+                (unsigned long)r.dirs, (unsigned long)r.freed_mb, r.complete ? "" : " (partial)");
+  return r;
 }
 
 bool format() {
@@ -228,6 +399,21 @@ bool format() {
   crashlog::rtc_sd_sentinel = 0;
   CRUMB_CLEAR();
   esp_task_wdt_add(NULL);
+  // Same headroom rule mount() enforces, for the same reason: a successful
+  // mount whose filesystem context eats the last contiguous block takes the
+  // board off the network while it looks healthy, and this path is reachable
+  // from a button in the console. Without this check format() was the one way
+  // to reach that state and then be unable to call back in to undo it.
+  if (ok) {
+    const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (largest < kMinLargestAfterMount) {
+      SD.end();
+      ok = false;
+      g_heap_denied = true;
+      eventlog::log("sd", "format mounted but undone: largest=%lu (<%lu); network first",
+                    (unsigned long)largest, (unsigned long)kMinLargestAfterMount);
+    }
+  }
   g_ok = ok;
   g_fails = 0;
   return ok;

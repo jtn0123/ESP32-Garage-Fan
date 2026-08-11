@@ -4,6 +4,7 @@ import {
   evaluate,
   pickChecksumAsset,
   pickFirmwareAsset,
+  sha256,
   type FetchLike,
   type Release,
   type ReleaseAsset,
@@ -75,8 +76,21 @@ describe('evaluate', () => {
     expect(evaluate('1.13.0', [release('v1.13.0')]).kind).toBe('up-to-date');
   });
 
-  it('reports up to date when the device is ahead', () => {
-    expect(evaluate('1.14.0', [release('v1.13.0')]).kind).toBe('up-to-date');
+  it('reports "ahead" -- not "up to date" -- when the device leads the feed', () => {
+    // These mean opposite things about the release channel. The deployed fan
+    // ran 1.14.22 against a newest tag of v1.14.0 and the console showed a
+    // green all-clear for a channel that had been dead for 22 versions.
+    const got = evaluate('1.14.0', [release('v1.13.0')]);
+    expect(got.kind).toBe('ahead');
+    if (got.kind === 'ahead') {
+      expect(got.running).toBe('1.14.0');
+      expect(got.latest).toBe('v1.13.0');
+    }
+  });
+
+  it('never offers a downgrade', () => {
+    const got = evaluate('1.14.0', [release('v1.13.0')]);
+    expect(got.kind).not.toBe('available');
   });
 
   it('skips drafts and pre-releases', () => {
@@ -112,12 +126,13 @@ describe('evaluate', () => {
     expect(got.kind).toBe('unknown');
   });
 
-  it('still reports available when the release has no attached binary', () => {
-    // The banner should link to the release page even if CI has not finished
-    // attaching the image -- silence would look like "no update exists".
+  it('separates a release with no binary from an installable one', () => {
+    // Still surfaced -- silence would look like "no update exists" -- but as
+    // its own kind, because "available" drives an install affordance the
+    // operator cannot actually use when CI has attached no image.
     const got = evaluate('1.13.0', [release('v1.14.0', { assets: [] })]);
-    expect(got.kind).toBe('available');
-    if (got.kind === 'available') expect(got.asset).toBeNull();
+    expect(got.kind).toBe('no-binary');
+    if (got.kind === 'no-binary') expect(got.release.html_url).toContain('v1.14.0');
   });
 });
 
@@ -152,5 +167,55 @@ describe('checkForUpdate', () => {
   it('degrades to unknown when the payload is not an array', async () => {
     const doFetch = vi.fn<FetchLike>(async () => ok({ message: 'Not Found' }));
     expect((await checkForUpdate('a/b', '1.13.0', doFetch)).kind).toBe('unknown');
+  });
+});
+
+describe('sha256 (plain-JS fallback)', () => {
+  // The device serves the console over plain HTTP, where crypto.subtle does
+  // not exist, so this implementation IS the integrity check in production.
+  // Vectors from FIPS 180-4 and the usual references.
+  const hex = (b: Uint8Array) =>
+    Array.from(b)
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('');
+  const of = (s: string) => hex(sha256(new TextEncoder().encode(s)));
+
+  it('hashes the empty string', () => {
+    expect(of('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  });
+
+  it('hashes "abc"', () => {
+    expect(of('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
+
+  it('hashes the 56-byte vector that straddles the padding boundary', () => {
+    expect(of('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')).toBe(
+      '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
+    );
+  });
+
+  it('hashes a multi-block message (1000 x "a")', () => {
+    expect(of('a'.repeat(1000))).toBe(
+      '41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3',
+    );
+  });
+
+  it('agrees with a length that crosses a block boundary exactly (64 bytes)', () => {
+    expect(of('a'.repeat(64))).toBe(
+      'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb',
+    );
+  });
+
+  it('pads minimally at length % 64 == 55', () => {
+    // The one case the published vectors miss and the first implementation got
+    // wrong: message + 0x80 + 8-byte length lands on exactly one block, so a
+    // formula that always adds a block produces a valid-looking buffer with
+    // the wrong digest. Found by differential-testing against Node's crypto.
+    expect(of('a'.repeat(55))).toBe(
+      '9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318',
+    );
+    expect(of('a'.repeat(119))).toBe(
+      '31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb',
+    );
   });
 });

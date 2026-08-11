@@ -21,12 +21,12 @@ import {
 } from './console.js';
 import { $, clear, el, show } from './dom.js';
 import { drawPreview, drawScope } from './pwm.js';
-import { build, mergeCache } from './series.js';
+import { build } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
 import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 import type { DeviceState } from './types.js';
-import { checkForUpdate } from './update.js';
+import { checkForUpdate, parseChecksum, sha256Hex } from './update.js';
 
 
 
@@ -36,6 +36,34 @@ function paintSettings(): void {
     clear($('groups'));
     return;
   }
+  // Never rebuild the settings DOM out from under someone who is using it.
+  //
+  // renderSettings() calls host.replaceChildren(), and paint() runs on every
+  // SSE frame and every 15 s poll. That destroyed and recreated the update
+  // token field mid-typing (upload then POSTed token="" and 403'd), stole
+  // focus from the +/- steppers so keyboard repeat died after one press, and
+  // detached the OTA progress node so a ~1 MB upload -- which always outlives
+  // 15 s -- reported neither success nor failure and looked hung forever.
+  //
+  // The OTA row is additionally kept as a stable node (see otaControl), so an
+  // upload in flight survives even a rebuild triggered by leaving and
+  // returning to the screen.
+  // Only an element whose CONTENT is being edited blocks the repaint. Keying
+  // on "focus is anywhere inside #groups" was too broad: a stepper button or a
+  // toggle pill keeps focus after a click, which would freeze every later
+  // repaint and leave the whole screen showing stale values until focus moved
+  // out of the host.
+  const host = $('groups');
+  const active = document.activeElement as HTMLElement | null;
+  const editing =
+    !!active &&
+    host.contains(active) &&
+    (active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLSelectElement ||
+      active.isContentEditable);
+  if (editing) return;
+
   renderSettings(
     $('groups'),
     buildGroups({
@@ -46,6 +74,7 @@ function paintSettings(): void {
       toggleAuto: () => void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`)),
       restart: () => void maintenance('restart'),
       formatCard: () => void maintenance('format'),
+      purgeCard: () => void maintenance('purge'),
       recheckUpdate: () => void runUpdateCheck(true),
     }),
   );
@@ -73,24 +102,83 @@ function tokenFromFieldOrPrompt(question: string): string | null {
   return window.prompt(question);
 }
 
-async function maintenance(kind: 'restart' | 'format'): Promise<void> {
-  const token = tokenFromFieldOrPrompt(
-    kind === 'restart'
-      ? 'Update token to restart the controller:'
-      : 'Update token to format the card:',
-  );
+const MAINTENANCE = {
+  restart: {
+    prompt: 'Update token to restart the controller:',
+    confirm: 'Reboot the controller? The fan keeps its current speed through the reset.',
+    run: api.restart,
+  },
+  format: {
+    prompt: 'Update token to format the card:',
+    confirm: 'Formatting erases every sample stored on the card. Continue?',
+    run: api.formatCard,
+  },
+  purge: {
+    prompt: 'Update token to delete the card contents:',
+    // Names what is actually at stake: this deletes EVERYTHING on the card,
+    // including whatever was on it before the fan ever used it.
+    confirm:
+      'Delete every file on the SD card? This unlinks all contents — the fan’s logs AND anything else stored on the card — leaving the filesystem in place. It cannot be undone.',
+    run: api.purgeCard,
+  },
+} as const;
+
+async function maintenance(kind: keyof typeof MAINTENANCE): Promise<void> {
+  const op = MAINTENANCE[kind];
+  const token = tokenFromFieldOrPrompt(op.prompt);
   if (!token) return;
-  const confirmed = window.confirm(
-    kind === 'restart'
-      ? 'Reboot the controller? The fan keeps its current speed through the reset.'
-      : 'Formatting erases every sample stored on the card. Continue?',
-  );
-  if (!confirmed) return;
+  if (!window.confirm(op.confirm)) return;
   try {
-    window.alert(await (kind === 'restart' ? api.restart(token) : api.formatCard(token)));
+    window.alert(await op.run(token));
   } catch (err) {
     window.alert(`request failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+/**
+ * Hash the picked image and, when a published sum exists, compare against it.
+ *
+ * There is no secure boot and /update accepts whatever bytes it is handed, so
+ * the release's `.sha256` sidecar is the only thing standing between GitHub
+ * and the flash -- and nothing consulted it until now. Two rules:
+ *
+ *  - Fail closed. "We could not hash it" is not a reason to write it anyway.
+ *  - Say whether anything was actually COMPARED. Printing a digest on its own
+ *    reads like a passed check, and in the common cases (a locally built
+ *    image, or a check that came back ahead/no-binary/up-to-date) there is no
+ *    published sum and nothing was verified at all.
+ */
+async function verifyImage(file: File): Promise<{ ok: boolean; note: string }> {
+  let digest: string;
+  try {
+    digest = await sha256Hex(file);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return { ok: false, note: `ABORTED: could not hash the image (${why}).` };
+  }
+  const short = `${digest.slice(0, 16)}…`;
+  const upd = view.update;
+  if (upd?.kind !== 'available') {
+    return { ok: true, note: `NOT VERIFIED — no published checksum to compare; sha256 ${short}` };
+  }
+  const { asset, latest } = upd;
+  const expected = await fetch(`${asset.browser_download_url}.sha256`)
+    .then((r) => (r.ok ? r.text() : null))
+    .then((t) => (t ? parseChecksum(t) : null))
+    .catch(() => null);
+  if (!expected) {
+    return {
+      ok: true,
+      note: `NOT VERIFIED — could not fetch ${latest}'s published sum; sha256 ${short}`,
+    };
+  }
+  if (expected !== digest) {
+    return {
+      ok: false,
+      note: `ABORTED: this file's SHA-256 does not match ${latest}. Do not flash it.`,
+    };
+  }
+  return { ok: true, note: `verified against ${latest} (sha256 ${short})` };
 }
 
 async function uploadFirmware(): Promise<void> {
@@ -102,9 +190,18 @@ async function uploadFirmware(): Promise<void> {
     msg.textContent = 'pick firmware.bin first';
     return;
   }
-  msg.textContent = `uploading ${(file.size / 1024).toFixed(0)} KB…`;
+  msg.textContent = 'checking image…';
+  const check = await verifyImage(file);
+  msg.textContent = check.note;
+  if (!check.ok) return;
+
+  const size = `${(file.size / 1024).toFixed(0)} KB`;
+  const prefix = msg.textContent ? `${msg.textContent} — ` : '';
+  msg.textContent = `${prefix}uploading ${size}…`;
   try {
-    msg.textContent = await api.uploadFirmware(file, token);
+    const body = await api.uploadFirmware(file, token);
+    // The endpoint answers JSON for both outcomes; surface the failure as one.
+    msg.textContent = /"error"/.test(body) ? `upload failed: ${body}` : body;
   } catch (err) {
     msg.textContent = `upload failed: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -172,10 +269,13 @@ function setRange(days: number): void {
     b.className = Number(b.dataset['d']) === days ? 'on' : '';
   });
   $('chtitle').textContent = days === 1 ? 'LAST 24 HOURS' : `LAST ${days} DAYS`;
+  // One caption for every range now. It used to say "garage only -- the card
+  // keeps no outdoor series" on 7D/30D, which was true of the old wire format
+  // and became a flat contradiction of the screen once those ranges started
+  // carrying out_f: the outdoor line was drawn, the readout showed `out`, and
+  // the caption underneath said it did not exist.
   $('tcap').textContent =
-    days === 1
-      ? 'band = how much hotter the garage is than the yard · drag across to read any moment'
-      : 'garage only — the card keeps no outdoor series · drag across to read any moment';
+    'band = how much hotter the garage is than the yard · drag across to read any moment';
   void loadHistory();
 }
 
@@ -261,22 +361,39 @@ function buildCaptureTable(): void {
   );
 }
 
+// Monotonic request id. Range switching used to have no sequencing at all:
+// the handler read view.days again AFTER the await, so clicking 24H then 7D
+// quickly could let the 24 h response land last and be drawn under the 7-day
+// title, with the axis formatted for a week. A late response for a range the
+// user has already left is now discarded rather than rendered.
+let historySeq = 0;
+
 async function loadHistory(): Promise<void> {
+  const seq = ++historySeq;
   try {
     const raw = await api.getHistory(view.days);
-    let hist = raw;
-    let stamps: number[] | null = null;
-    if (view.days === 1) {
-      const merged = mergeCache(raw);
-      hist = merged.h;
-      stamps = merged.ts; // the union's real epochs -- holes and all
-    }
-    view.history = hist;
-    view.series = build(hist, stamps ?? undefined);
+    if (seq !== historySeq) return; // superseded by a newer range request
+    view.historyError = null;
+    view.history = raw;
+    view.series = build(raw);
     drawAll();
     paintHero();
-  } catch {
-    /* keep the last good chart rather than blanking it */
+  } catch (err) {
+    if (seq !== historySeq) return;
+    // Do NOT keep the previous chart. The firmware answers 503 for a range it
+    // cannot serve (card unmounted, clock unsynced) precisely so the caller is
+    // not handed a plausible substitute -- and silently retaining the old
+    // series undid that at the last step: picking 30D with no card relabelled
+    // the 7-day chart "LAST 30 DAYS" and showed nothing else. Say what
+    // happened and draw nothing.
+    view.historyError =
+      err instanceof Error && /50\d/.test(err.message)
+        ? 'this range is unavailable — the card is not mounted, or the clock has not synced'
+        : 'could not load history from the controller';
+    view.history = null;
+    view.series = null;
+    drawAll();
+    paintHero();
   }
 }
 
@@ -296,11 +413,52 @@ async function refreshClimate(): Promise<void> {
   paintHero();
 }
 
+// Three missed polls. Long enough that one dropped request or a brief WiFi
+// flap does not cry wolf, short enough that a page left open on a dead
+// controller stops presenting its last readings as current.
+const OFFLINE_AFTER_MS = 45_000;
+
 async function poll(): Promise<void> {
   try {
     paint(await api.getState());
   } catch {
-    /* SSE or the next poll will catch up */
+    // The catch used to be entirely empty, which is how a dead device kept
+    // rendering as a live one. Failing is information; record it.
+    if (view.lastOk && Date.now() - view.lastOk > OFFLINE_AFTER_MS && !view.offline) {
+      view.offline = true;
+      paint();
+    }
+  }
+}
+
+/**
+ * Fetch the immutable device facts, retrying until they arrive.
+ *
+ * This used to be a single attempt at boot whose failure was swallowed with a
+ * comment claiming "the duty table falls back to its defaults". There is no
+ * such fallback: console.ts reads `view.info?.high_us[speed] ?? 0`, so one
+ * timed-out request (10 s abort, reachable on a weak link) left the PWM DUTY
+ * tile reading 0.0%, the scope badge showing IDLE and the capture grid empty
+ * while the gate pin was actually transmitting -- permanently, because nothing
+ * ever asked again. It also stranded the update check, which returns early
+ * without `info.repo`, leaving the UPDATE row on "checking…" with a "Check
+ * again" button that could not do anything.
+ */
+async function loadDevice(attempt = 0): Promise<void> {
+  try {
+    view.info = await api.getDevice();
+    buildCaptureTable();
+    paintPwm();
+    // The update check needs info.repo and returns early without it, so a
+    // late-arriving device fetch has to nudge it. Guarded internally against
+    // running twice.
+    void runUpdateCheck();
+    if (view.screen === 'settings') paintSettings();
+  } catch {
+    // Back off to a minute and keep trying; these facts never change, so a
+    // late answer is still the right answer.
+    const delay = Math.min(60_000, 2_000 * 2 ** attempt);
+    window.setTimeout(() => void loadDevice(attempt + 1), delay);
   }
 }
 
@@ -343,12 +501,7 @@ export async function boot(): Promise<void> {
     if (view.scopeOpen) drawScope($<HTMLCanvasElement>('cv_pw'), waveform(), view.phase, performance.now());
   });
 
-  try {
-    view.info = await api.getDevice();
-    buildCaptureTable();
-  } catch {
-    /* the duty table falls back to its defaults; the rest of the page works */
-  }
+  await loadDevice();
 
   await poll();
   await refreshClimate();

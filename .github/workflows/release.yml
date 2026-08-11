@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # Callable so tag-release.yml can build and publish directly after creating
+  # the tag. It has to: a tag pushed with the default GITHUB_TOKEN does NOT
+  # raise a `push` event, so the trigger above would never fire for an
+  # automatically created tag and the release would silently never be built.
+  # Calling this workflow keeps it in the same run, with no PAT to provision.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build and publish, e.g. v1.14.23'
+        required: true
+        type: string
 
 # The release job attaches binaries to a GitHub Release, which needs write
 # access to repository contents. Scoped at job level rather than workflow level.
@@ -20,6 +31,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Build the tag's tree. Under workflow_call the default ref is the
+          # caller's branch, which could have moved past the tag by the time
+          # this runs -- the published binary must be the tagged commit.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -41,8 +56,13 @@ jobs:
       # phantom update forever or never sees a real one.
       - name: Derive FW_VERSION from tag and check it matches VERSION
         id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
+          # Either trigger: the workflow_call input when tag-release invoked us,
+          # otherwise the pushed ref.
+          TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
           # Strip leading 'v' if present for FW_VERSION canonical format
           FW=${TAG#v}
           FILE=$(tr -d '[:space:]' < VERSION)
@@ -100,8 +120,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          # steps.ver.outputs.tag, not github.ref_name: under workflow_call the
+          # ref is the caller's branch (main), which would publish the release
+          # against the wrong target entirely.
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Release ${{ steps.ver.outputs.tag }}
           draft: false
           prerelease: false
           fail_on_unmatched_files: true

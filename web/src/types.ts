@@ -35,6 +35,12 @@ export interface DeviceState {
   sd_q: boolean; // card quarantined after a mount crashed a boot
   sd_total_mb: number; // 0 when no card is mounted
   sd_used_mb: number;
+  /**
+   * Free space, MB. Surfaced because the deployed card sat at 210 MB free of
+   * 28887 -- 99.3% full with data this firmware never wrote -- and nothing
+   * reported it, so nothing could notice.
+   */
+  sd_free_mb: number;
   batt: BatteryState | null;
   rssi: number;
   drops: number; // WiFi disconnects since boot -- the flight recorder's counter
@@ -101,23 +107,32 @@ export interface ApiError {
  * ApiError. (It used to default to 1, which served RAM-ring data to typo'd
  * queries as if it were the card's -- 2026-08-10.)
  *
- * The optional series are present only for days=1, which is served from the
- * in-RAM ring. Longer ranges are decimated out of the monthly CSVs on the SD
- * card, which carry temperature, humidity and pressure only.
+ * Every range now returns the SAME shape, all seven series plus a real
+ * per-row `ts`. Previously the 7/30-day responses came out of a code path that
+ * emitted temperature, humidity and pressure only, with no timestamp at all --
+ * so switching the range dropped four of the seven lines and left the chart
+ * spacing whatever rows existed evenly across the whole requested window.
+ *
+ * A range the device cannot answer (card unmounted, clock unsynced) is now a
+ * 503 ApiError rather than ring data wearing the requested range's label.
  */
 export interface History {
-  interval_s: number;
   /**
-   * Present (0 before SNTP has synced) on the 24 h ring response; the 7/30-day
-   * SD responses omit it entirely -- their rows are decimated from month files
-   * and carry no anchor timestamp.
+   * Nominal sample spacing, for gap detection only. `ts` is the authority on
+   * where each row actually sits; this used to be days*86400/rows, which
+   * inflated by requested_span/actual_span whenever the card held less than
+   * the window asked for.
    */
-  end_ts?: number;
+  interval_s: number;
+  /** Which store answered: the SD card, or the in-RAM ring (no card yet). */
+  source: 'sd' | 'ring';
+  /** Epoch seconds per row, oldest first. 0 entries mean SNTP had not synced. */
+  ts: number[];
   temp_c: (number | null)[];
   rh: (number | null)[];
   hpa: (number | null)[];
-  out_f?: (number | null)[]; // -999 sentinel is normalised to null on ingest
-  spd?: number[];
-  batt_v?: (number | null)[];
-  chg?: number[]; // 1 charging, 0 not, -1 no battery
+  out_f: (number | null)[]; // -999 sentinel is normalised to null on ingest
+  spd: number[];
+  batt_v: (number | null)[];
+  chg: number[]; // 1 charging, 0 not, -1 no battery
 }

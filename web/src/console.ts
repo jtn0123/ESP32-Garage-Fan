@@ -16,7 +16,7 @@ import {
   drawTemperature,
 } from './charts.js';
 import { $, at, el, show } from './dom.js';
-import { ago, airflow, clock, hoursMinutes, signed, storage } from './format.js';
+import { ago, airflow, cardTight, clock, hoursMinutes, signed, storage } from './format.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
 import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
@@ -210,13 +210,19 @@ function bitValues(): { value: string; colour: string }[] {
   const s = view.state;
   if (!s) return [];
   const card = s.sd_total_mb
-    ? storage(s.sd_used_mb, s.sd_total_mb)
+    ? storage(s.sd_used_mb, s.sd_total_mb, s.sd_free_mb)
     : s.sd_q
       ? 'quarantined'
       : 'not mounted';
+  // A card with no room left stops being a flight recorder, so it reads as a
+  // warning rather than as ordinary status text.
+  const cardTense = s.sd_total_mb > 0 && cardTight(s.sd_used_mb, s.sd_total_mb);
+  let cardColour = OUT;
+  if (!s.sd_total_mb) cardColour = DIM;
+  else if (cardTense) cardColour = OR;
   return [
     { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
-    { value: card, colour: s.sd_total_mb ? OUT : DIM },
+    { value: card, colour: cardColour },
     { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
@@ -285,10 +291,29 @@ function paintReadouts(): void {
     bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
 }
 
+/**
+ * Blank every plot and put the reason in the caption.
+ *
+ * Used when a range cannot be served: leaving the previous range's picture
+ * under the new range's title is the failure the firmware's 503 exists to
+ * prevent, and silently keeping it undid that at the last step.
+ */
+function clearPlots(reason: string): void {
+  $('tcap').textContent = reason;
+  for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
+    const c = document.getElementById(id) as HTMLCanvasElement | null;
+    const ctx = c?.getContext('2d');
+    if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+  }
+}
+
 export function drawAll(): void {
   if (view.screen !== 'console') return;
   const s = view.series;
-  if (!s) return;
+  if (!s) {
+    if (view.historyError) clearPlots(view.historyError);
+    return;
+  }
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub);
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
@@ -296,8 +321,10 @@ export function drawAll(): void {
       (v) => v.toFixed(0), 'no humidity data', view.scrub);
   }
   if (view.rows.pressure) {
+    // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
+    // legible in the labels and does not need flattening.
     drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      (v) => v.toFixed(1), 'no pressure data', view.scrub);
+      (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
   drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
@@ -341,14 +368,43 @@ export function paintChips(): void {
   });
 }
 
+/**
+ * Is `next` actually newer than what we are already showing?
+ *
+ * Three sources write state -- the 15 s poll, the SSE stream, and every
+ * command's own response -- and none of them was ordered against the others.
+ * A poll issued before a speed change could land after it and repaint the rail
+ * back to the old speed for a full cycle. uptime_s is monotonic within a boot
+ * and `boots` increments across one, so the pair orders every frame without a
+ * wire change.
+ */
+export function isNewer(next: DeviceState, cur: DeviceState | null): boolean {
+  if (!cur) return true;
+  if (next.boots !== cur.boots) return next.boots > cur.boots;
+  return next.uptime_s >= cur.uptime_s;
+}
+
 export function paint(next?: DeviceState): void {
-  if (next) view.state = next;
+  if (next) {
+    view.lastOk = Date.now();
+    view.offline = false;
+    // A straggler still proves the device is reachable, so it clears `offline`
+    // -- but it must not be allowed to skip the repaint, or the page keeps
+    // showing "● NO CONTACT" and stays dimmed while the state says otherwise,
+    // for up to a full poll cycle. Drop only the stale VALUES, not the render.
+    if (isNewer(next, view.state)) view.state = next;
+  }
   const s = view.state;
   if (!s) return;
 
+  const stale = view.offline;
   const mqtt = $('hmq');
-  mqtt.textContent = s.mqtt ? '● BROKER UP' : '● BROKER DOWN';
-  mqtt.className = s.mqtt ? 'up' : '';
+  // Offline outranks every field in here: they are all last-known values, and
+  // the broker flag in particular would otherwise keep asserting "UP" about a
+  // device we have not heard from in minutes.
+  mqtt.textContent = stale ? '● NO CONTACT' : s.mqtt ? '● BROKER UP' : '● BROKER DOWN';
+  mqtt.className = stale ? 'stale' : s.mqtt ? 'up' : '';
+  document.body.classList.toggle('offline', stale);
   const batt = $('hbat');
   if (s.batt) {
     show(batt, true);

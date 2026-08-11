@@ -7,11 +7,13 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 
 #include "esp_log.h"
 #include "storage/sdcard.h"
 #include "system/eventlog_ring.h"
+#include "system/log_filter.h"
 #include "system/timeutil.h"
 
 namespace eventlog {
@@ -114,14 +116,29 @@ namespace {
 // esp_log vprintf hook: framework warnings become tape lines. 20 lines per
 // 10 s window, then dropped -- the SD driver's dying words fit easily; a
 // boot-time log storm must not evict the events that matter.
+// The noise decision itself lives in log_filter.h so the host can test it --
+// a mis-tuned filter is otherwise only discovered when a real fault turns out
+// to be missing from the tape.
 int esp_vlog_to_ring(const char* fmt, va_list ap) {
   static uint32_t win_start_ms = 0;
   static uint8_t in_window = 0;
+  static log_filter::NoiseGate gate;
   char buf[160];
   const int n = vsnprintf(buf, sizeof(buf), fmt, ap);
   for (int i = 0; buf[i]; i++)
     if (buf[i] == '\n' || buf[i] == '\r')
       buf[i] = ' ';
+
+  const bool noisy = log_filter::is_i2c_noise(buf);
+  const auto v = gate.feed(noisy, millis());
+  if (noisy) {
+    if (v.summary)
+      log("i2c", "%lu benign bus errors suppressed since last report", (unsigned long)v.count);
+    else if (v.emit)
+      log("esp", "%s", buf);
+    return n;
+  }
+
   if (millis() - win_start_ms > 10000) {
     win_start_ms = millis();
     in_window = 0;

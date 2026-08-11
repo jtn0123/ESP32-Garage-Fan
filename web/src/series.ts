@@ -1,8 +1,17 @@
 // Turning /api/history into something the charts can draw.
 //
-// Two jobs: normalise the wire format (Celsius -> Fahrenheit, the -999 outdoor
-// sentinel -> null, absent series -> empty), and merge the 24 h window with
-// what localStorage remembers so a device reboot does not blank the chart.
+// One job now: normalise the wire format (Celsius -> Fahrenheit, the -999
+// outdoor sentinel -> null, short series padded to length).
+//
+// The second job this module used to have -- merging the device's 24 h window
+// with a localStorage copy so a reboot did not blank the chart -- is gone.
+// That cache existed only because /api/history?days=1 was hardwired to the
+// device's RAM ring, which empties on every reboot; the firmware now serves
+// all three ranges from the SD card, so the card is the record and the browser
+// does not need to keep a shadow copy of it. Removing it also removes what
+// that cache got wrong: it was keyed on the constant 'gf24' with no device
+// identity, so a browser that opened two fans merged one's readings into the
+// other's chart.
 
 import type { History } from './types.js';
 
@@ -39,15 +48,28 @@ export interface Series {
  */
 const OUTDOOR_ABSENT_MAX = -100;
 
-export function build(h: History, explicitTs?: readonly number[]): Series {
+/**
+ * Pad a series to `n`, so a response whose columns disagree in length cannot
+ * put `undefined` into the charts.
+ *
+ * build() takes its length from temp_c and used to pass every other array
+ * through untouched. Any short series then read undefined past its end and
+ * plotted as NaN -- which is exactly what the old 7/30-day response did by
+ * omitting four series entirely.
+ */
+function pad<T>(a: readonly T[] | undefined, n: number, fill: T): T[] {
+  const out = (a ?? []).slice(0, n) as T[];
+  while (out.length < n) out.push(fill);
+  return out;
+}
+
+export function build(h: History): Series {
   const n = h.temp_c?.length ?? 0;
-  // The device response is uniformly spaced by construction; a cache-merged
-  // response is not (reboots leave holes), so the merge hands its real key
-  // list in as explicitTs and index arithmetic stops being the truth.
-  const ts = (i: number): number | null => {
-    if (explicitTs && explicitTs.length === n) return explicitTs[i] ?? null;
-    return h.end_ts ? h.end_ts - (n - 1 - i) * h.interval_s : null;
-  };
+  // Real per-row epochs from the device. A 0 means SNTP had not synced when
+  // that row was taken, which is "unknown", not 1970.
+  const stamps = pad<number>(h.ts, n, 0);
+  // A 0 means SNTP had not synced when that row was taken -- unknown, not 1970.
+  const ts = (i: number): number | null => stamps[i] || null;
 
   const t0 = ts(0);
   const tn = ts(n - 1);
@@ -74,132 +96,25 @@ export function build(h: History, explicitTs?: readonly number[]): Series {
     night.push(hr >= 20 || hr < 6);
   }
 
-  const keep = (a: (number | null)[] | undefined): (number | null)[] => a ?? [];
-
   return {
     n,
     ts,
     frac,
     gap,
     night,
-    tf: (h.temp_c ?? []).map((v) => (v === null ? null : v * 9 / 5 + 32)),
-    of: (h.out_f ?? []).map((v) => (v === null || v <= OUTDOOR_ABSENT_MAX ? null : v)),
-    rh: keep(h.rh),
-    hpa: keep(h.hpa),
-    spd: h.spd ?? [],
-    bv: keep(h.batt_v),
-    chg: h.chg ?? [],
+    tf: pad<number | null>(h.temp_c, n, null).map((v) => (v === null ? null : (v * 9) / 5 + 32)),
+    of: pad<number | null>(h.out_f, n, null).map((v) =>
+      v === null || v <= OUTDOOR_ABSENT_MAX ? null : v,
+    ),
+    rh: pad<number | null>(h.rh, n, null),
+    hpa: pad<number | null>(h.hpa, n, null),
+    spd: pad<number>(h.spd, n, 0),
+    bv: pad<number | null>(h.batt_v, n, null),
+    chg: pad<number>(h.chg, n, -1),
   };
 }
 
 /** Does a series carry at least one real reading? */
 export function hasData(series: readonly (number | null)[] | undefined): boolean {
   return !!series && series.some((v) => v !== null && !Number.isNaN(v));
-}
-
-interface CachedSample {
-  t: number | null;
-  r: number | null;
-  p: number | null;
-  o: number | null;
-  s: number;
-  b: number | null;
-  c: number;
-}
-
-const CACHE_KEY = 'gf24';
-const DAY_SECONDS = 86_400;
-
-export interface Merged {
-  h: History;
-  /**
-   * The real epoch of every row in `h`, oldest first -- the union's keys, so
-   * holes from reboots and outages are visible in it. Null on pass-through
-   * (no storage, no timestamp): the rows are then uniformly spaced and index
-   * arithmetic remains the truth.
-   */
-  ts: number[] | null;
-}
-
-/**
- * Union the freshly fetched 24 h window with the browser's own record of it.
- *
- * The device keeps history in RAM, so a reboot empties the ring and the chart
- * would otherwise restart from one point. Only applies to the 24 h range: the
- * longer ranges come off the SD card and are already complete.
- *
- * Storage is injected so the tests can exercise this without a real
- * localStorage, and so a browser with storage disabled degrades to
- * pass-through rather than throwing on every poll.
- */
-export function mergeCache(h: History, store: Storage | null = safeStorage()): Merged {
-  if (!h.end_ts || !store) return { h, ts: null };
-
-  let cache: Record<string, CachedSample> = {};
-  try {
-    cache = JSON.parse(store.getItem(CACHE_KEY) ?? '{}') as Record<string, CachedSample>;
-  } catch {
-    cache = {};
-  }
-
-  const n = h.temp_c?.length ?? 0;
-  for (let i = 0; i < n; i++) {
-    const ts = h.end_ts - (n - 1 - i) * h.interval_s;
-    cache[String(ts)] = {
-      t: h.temp_c[i] ?? null,
-      r: h.rh[i] ?? null,
-      p: h.hpa[i] ?? null,
-      o: h.out_f?.[i] ?? null,
-      s: h.spd?.[i] ?? 0,
-      b: h.batt_v?.[i] ?? null,
-      c: h.chg?.[i] ?? -1,
-    };
-  }
-
-  const cutoff = h.end_ts - DAY_SECONDS;
-  const keys = Object.keys(cache)
-    .map(Number)
-    .filter((t) => Number.isFinite(t) && t >= cutoff)
-    .sort((a, b) => a - b);
-  if (!keys.length) return { h, ts: null };
-
-  const out: History = {
-    interval_s: h.interval_s,
-    end_ts: keys[keys.length - 1]!,
-    temp_c: [],
-    rh: [],
-    hpa: [],
-    out_f: [],
-    spd: [],
-    batt_v: [],
-    chg: [],
-  };
-  const pruned: Record<string, CachedSample> = {};
-  for (const t of keys) {
-    const c = cache[String(t)]!;
-    out.temp_c.push(c.t);
-    out.rh.push(c.r);
-    out.hpa.push(c.p);
-    out.out_f!.push(c.o);
-    out.spd!.push(c.s);
-    out.batt_v!.push(c.b ?? null);
-    out.chg!.push(c.c ?? -1);
-    pruned[String(t)] = c;
-  }
-
-  try {
-    store.setItem(CACHE_KEY, JSON.stringify(pruned));
-  } catch {
-    // Quota exceeded or storage disabled: the merge still stands for this
-    // render, we just will not remember it next time.
-  }
-  return { h: out, ts: keys };
-}
-
-function safeStorage(): Storage | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null; // Safari throws outright when storage is blocked.
-  }
 }

@@ -6,6 +6,7 @@
 
 #include <ctime>
 
+#include "system/odometer_logic.h"
 #include "system/timeutil.h"
 
 namespace odometer {
@@ -36,20 +37,31 @@ void tick(int speed, float watts) {
   const uint32_t elapsed_s = (millis() - g_last_count_ms) / 1000;
   if (elapsed_s >= 1) {
     g_last_count_ms += elapsed_s * 1000;
-    if (speed > 0) {
-      g_run_total_s += elapsed_s;
-      g_run_today_s += elapsed_s;
-      g_energy_wh += watts * elapsed_s / 3600.0f;
-    }
-    if (time_synced()) {
+
+    // The calendar reasoning lives in odometer_logic.h so it can be tested on
+    // the host; see there for what each of the two bugs was.
+    uint32_t ymd = 0, since_midnight = 0;
+    const bool clock_valid = time_synced();
+    if (clock_valid) {
       struct tm lt;
-      time_t now = time(nullptr);
-      gmtime_r(&now, &lt);
-      const uint32_t ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
-      if (g_today_ymd != 0 && ymd != g_today_ymd)
-        g_run_today_s = 0;
-      g_today_ymd = ymd;
+      const time_t now = time(nullptr);
+      // localtime_r, not gmtime_r: this is the OPERATOR's day, not UTC's. TZ
+      // is set in wifi_link::begin(); the stored clock is still UTC.
+      localtime_r(&now, &lt);
+      ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+      since_midnight = static_cast<uint32_t>(lt.tm_hour) * 3600U +
+                       static_cast<uint32_t>(lt.tm_min) * 60U + static_cast<uint32_t>(lt.tm_sec);
     }
+    const auto c =
+        odometer_logic::credit(elapsed_s, speed > 0, clock_valid, ymd, g_today_ymd, since_midnight);
+    if (c.reset_today)
+      g_run_today_s = 0;
+    g_run_total_s += c.total_s;
+    g_run_today_s += c.today_s;
+    if (speed > 0)
+      g_energy_wh += watts * elapsed_s / 3600.0f;
+    if (clock_valid)
+      g_today_ymd = ymd;
   }
   if (g_prefs && millis() - g_last_nvs_ms >= 15 * 60 * 1000) {
     g_last_nvs_ms = millis();

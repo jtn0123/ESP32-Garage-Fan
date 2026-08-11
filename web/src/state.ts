@@ -16,6 +16,8 @@ export interface View {
   live: Sensors | null;
   series: Series | null;
   history: History | null;
+  /** Why the last history fetch failed, or null. Shown in place of the chart. */
+  historyError: string | null;
   update: UpdateStatus | null;
   days: number;
   scrub: number;
@@ -26,6 +28,17 @@ export interface View {
   rows: Record<RowKey, boolean>;
   phase: number;
   raf: number | null;
+  /**
+   * Date.now() of the last state we successfully received, 0 if never.
+   *
+   * Nothing used to record this, so nothing could tell a live page from a dead
+   * one: unplugging the controller left "● BROKER UP", the speed rail, the
+   * hero temperature under its `NOW` label and a frozen UPTIME on screen
+   * indefinitely, visually identical to a working device.
+   */
+  lastOk: number;
+  /** True once contact has been lost long enough to distrust what is shown. */
+  offline: boolean;
 }
 
 export const view: View = {
@@ -35,6 +48,7 @@ export const view: View = {
   live: null,
   series: null,
   history: null,
+  historyError: null,
   update: null,
   days: 1,
   scrub: -1,
@@ -45,6 +59,8 @@ export const view: View = {
   rows: { fan: true, humidity: false, pressure: false, battery: false },
   phase: 0,
   raf: null,
+  lastOk: 0,
+  offline: false,
 };
 
 export const ROW_IDS: Record<RowKey, { sub: string; canvas: string; readout: string }> = {

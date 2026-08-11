@@ -49,8 +49,16 @@ void retry_tick();
  */
 void on_network_up();
 
-/** Append one sample row to this month's CSV. Drops the mount on failure. */
-void log_sample(time_t now, float t, float h, float p, float out_f, int speed);
+/**
+ * Append one sample row to this month's CSV. Drops the mount on failure.
+ *
+ * Row format: epoch,temp_c,rh,hpa,out_f,speed,batt_v,chg
+ * batt_v and chg were appended 1.14.23. Rows written before that carry six
+ * fields; read_range parses both widths and reports the missing columns as
+ * absent rather than as zero.
+ */
+void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
+                int chg);
 
 /**
  * Append one flight-recorder line (newline added) to /events.log, rotating
@@ -63,10 +71,75 @@ bool append_event_line(const char* line);
 uint32_t tail_events(char* buf, uint32_t cap);
 
 /**
- * Read [cutoff, now] from the month files, decimated by stride into the
- * caller's arrays. Returns rows kept.
+ * Destination for read_range. Every pointer must have room for max_pts.
+ *
+ * `ts` is the reason this struct exists. read_range used to return only
+ * temp/rh/hpa and no timestamps at all, so /api/history's 7- and 30-day
+ * responses carried neither an anchor nor the other four series. The console
+ * then fell back to index-proportional spacing and drew whatever rows existed
+ * evenly across the whole requested window -- two days of data stretched over
+ * a 30-day axis, with gap detection permanently disabled because every step
+ * measured exactly "one interval". Real per-row epochs make the axis true and
+ * outages visible.
  */
-uint16_t read_range(time_t cutoff, float* t, float* h, float* p, uint16_t max_pts);
+struct Samples {
+  time_t* ts;
+  float* temp_c;
+  float* rh;
+  float* hpa;
+  float* out_f;   // NAN when the row recorded no yard reading
+  float* batt_v;  // NAN on pre-1.14.23 rows
+  int8_t* spd;
+  int8_t* chg;  // 1 charging, 0 not, -1 unknown
+};
+
+/**
+ * Read [cutoff, now] from the month files, decimated by stride into `out`.
+ * Returns rows kept.
+ */
+uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts);
+
+/** Free space in MB, 0 while unmounted. */
+uint32_t free_mb();
+
+/** Result of purge(). */
+struct PurgeResult {
+  uint32_t files = 0;  // entries unlinked
+  uint32_t dirs = 0;   // directories removed
+  uint32_t freed_mb = 0;
+  bool complete = false;  // false if the walk hit its bound and stopped early
+};
+
+/**
+ * Delete everything on the card WITHOUT reformatting it.
+ *
+ * The deployed card reported 28677 MB used of 28887 -- 99.3% full, 210 MB free
+ * -- while this firmware's own logs came to 308 bytes. The bulk is data from
+ * whatever the card did before, and format() never removed it: SD.begin's
+ * format_if_empty only formats a card that fails to MOUNT, so a full,
+ * healthy card was remounted in 166 ms and reported "ok" with every byte
+ * still on it.
+ *
+ * This unlinks the contents instead, leaving the existing filesystem in place.
+ * Destructive and irreversible: token-guarded, and the console confirms.
+ */
+PurgeResult purge();
+
+/** Receives one CSV row (no newline). Return false to stop the stream. */
+using LineSink = bool (*)(const char* line, void* ctx);
+
+/**
+ * Stream every stored row in [cutoff, now] to `sink`, undecimated.
+ *
+ * This is what /download.csv needs and could not get: that endpoint used to
+ * serialise the in-RAM ring, so "download my logged data" handed back the
+ * ~7 rows since the last reboot (308 bytes measured on the live device) while
+ * a month of samples sat on the card with no way to reach them short of
+ * pulling it. read_range cannot serve this -- it decimates to fit a chart.
+ *
+ * Returns rows emitted.
+ */
+uint32_t stream_range(time_t cutoff, LineSink sink, void* ctx);
 
 /**
  * Token-verified caller only: full teardown, then mount with

@@ -21,9 +21,13 @@ cable into a computer: the fan drives 5 V out on VBUS.
 - **Update check** — the console asks GitHub Releases whether a newer tag
   exists and links the `.bin`; the controller itself never talks to the
   internet, so there is no TLS stack on the device
-- **HTTP API** — `GET /api/state`, `GET /api/set?speed=0..12`,
-  `GET /api/device` (duty table, identity, broker), `GET /api/history?days=`,
-  `GET /api/stats`
+- **HTTP API** — reads are `GET`: `/api/state`, `/api/device` (duty table,
+  identity, broker), `/api/history?days=1|7|30`, `/api/stats`. Writes are
+  **`POST` only** — `/api/set?speed=0..12`, `/api/config`, `/api/raw`,
+  `/api/restart`, `/api/sdformat`, `/api/sdpurge` — and they additionally
+  refuse a request carrying a foreign `Origin`, since a cross-origin HTML form
+  can `POST` without a preflight. Requests with no `Origin` at all (curl, the
+  deploy script) are allowed, so add `-X POST` and nothing else
 - **MQTT** — `garage/fan/set` / `garage/fan/state` / `garage/fan/availability`,
   retained commands resume after power loss
 - **OTA updates** — `POST /update?token=...`, written to the inactive A/B
@@ -56,6 +60,13 @@ make web            # typecheck + test + rebuild the console bundle (needs node)
 The version in `VERSION` is the single source of truth: `gen_device_header.py`
 turns it into `FW_VERSION`, the firmware reports it on `/api/state`, and the
 release workflow refuses to publish a tag that disagrees with it.
+
+**Bumping `VERSION` on `main` publishes a release.** `tag-release.yml` creates
+the matching `vX.Y.Z` tag, which triggers `release.yml` to build and attach the
+images. This is automatic because it previously was not: the repo tagged
+v1.14.0 and then went 22 versions without another tag, so every device's update
+check spent that time comparing itself against a feed that had stopped moving.
+Bump `VERSION` in the commit you actually want released, not before.
 
 The web console lives in `web/` as TypeScript and is bundled into one
 self-contained HTML file at `web/dist/console.html`, which **is committed** —

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fan-console-mock",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["scripts/mock_device.py"],
+      "port": 8099
+    }
+  ]
+}
