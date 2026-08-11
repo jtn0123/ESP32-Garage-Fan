@@ -280,70 +280,67 @@ namespace {
 // early and can run it again.
 constexpr uint32_t kPurgeMaxEntries = 20000;
 
-// Depth-first delete of `path`'s contents. Recursion is bounded by kMaxDepth
-// because the loop thread's stack is not large and a crafted tree should not
-// be able to reach it.
-void purge_dir(const char* path, PurgeResult& r, uint32_t& budget, int depth) {
-  constexpr int kMaxDepth = 8;
-  if (depth > kMaxDepth || budget == 0)
-    return;
-  // Collect a batch, CLOSE the directory, then delete -- genuinely, not just
-  // in the comment. Deleting through an open handle while calling
-  // openNextFile() on it is not something FATFS promises to keep consistent,
-  // and the failure is silent in the worst way: entries get skipped, the walk
-  // returns with the card still populated, budget is untouched, and purge()
-  // therefore reports complete=true and the endpoint tells the operator the
-  // card was emptied. Re-opening per batch costs a directory rewind and buys
-  // a result that can be trusted.
-  constexpr size_t kBatch = 24;
-  for (;;) {
-    char names[kBatch][128];
-    bool is_dir[kBatch];
-    size_t n = 0;
+// Iterative directory walk. NOT recursive, and the buffers are static.
+//
+// The first version recursed with a 24 x 128-byte batch buffer as a LOCAL --
+// ~3 KB of stack per level against an 8 KB loop-task stack, so a few levels
+// deep it smashed the stack and panicked the board. It did exactly that on the
+// deployed unit (boot 42, cause=panic, 2026-08-11) and reclaimed nothing.
+//
+// So: one shared batch buffer, one bounded queue of directories still to
+// visit, no recursion, and therefore a stack cost that does not depend on how
+// deep the card's tree happens to be.
+//
+// Deleting is still collect-then-delete against a CLOSED handle: FATFS does
+// not promise consistent iteration while entries are being removed from the
+// directory being iterated.
+constexpr size_t kBatch = 16;
+constexpr size_t kMaxDirs = 64;
+constexpr size_t kPathMax = 96;
 
-    File dir = SD.open(path);
-    if (!dir || !dir.isDirectory()) {
-      if (dir)
-        dir.close();
-      return;
-    }
-    while (n < kBatch) {
-      File e = dir.openNextFile();
-      if (!e)
-        break;
-      snprintf(names[n], sizeof(names[n]), "%s", e.path());
-      is_dir[n] = e.isDirectory();
-      e.close();
-      n++;
-    }
-    dir.close();
-    if (n == 0)
-      return;  // directory is empty
+char g_batch[kBatch][kPathMax];
+bool g_batch_dir[kBatch];
+char g_dirq[kMaxDirs][kPathMax];
 
-    size_t removed = 0;
-    for (size_t i = 0; i < n; i++) {
-      if (budget == 0)
-        return;
-      budget--;
-      esp_task_wdt_reset();
-      if (is_dir[i]) {
-        purge_dir(names[i], r, budget, depth + 1);
-        if (SD.rmdir(names[i])) {
-          r.dirs++;
-          removed++;
-        }
-      } else if (SD.remove(names[i])) {
-        r.files++;
-        removed++;
+// Fill the batch from `path`. Returns entries read; 0 means the directory is
+// empty (or gone).
+size_t scan_dir(const char* path, size_t* skipped_dirs, size_t* qlen) {
+  File dir = SD.open(path);
+  if (!dir || !dir.isDirectory()) {
+    if (dir)
+      dir.close();
+    return 0;
+  }
+  size_t n = 0;
+  while (n < kBatch) {
+    File e = dir.openNextFile();
+    if (!e)
+      break;
+    snprintf(g_batch[n], kPathMax, "%s", e.path());
+    g_batch_dir[n] = e.isDirectory();
+    e.close();
+    if (g_batch_dir[n]) {
+      // Queue subdirectories for their own pass rather than descending here.
+      //
+      // Dedupe: a directory is only removed in the final rmdir sweep, so it is
+      // still present every time its parent is re-scanned for more files.
+      // Without this check the queue filled with duplicates of the same few
+      // directories, hit its bound, and reported work it had not done.
+      bool known = false;
+      for (size_t q = 0; q < *qlen && !known; q++) known = strcmp(g_dirq[q], g_batch[n]) == 0;
+      if (!known) {
+        if (*qlen < kMaxDirs)
+          snprintf(g_dirq[(*qlen)++], kPathMax, "%s", g_batch[n]);
+        else
+          (*skipped_dirs)++;
       }
     }
-    // Nothing in a full batch could be deleted: retrying would spin on the
-    // same entries forever. Leave the budget alone and let the caller see an
-    // incomplete result rather than looping.
-    if (removed == 0)
-      return;
+    n++;
   }
+  dir.close();
+  return n;
 }
+
 }  // namespace
 
 PurgeResult purge() {
@@ -356,22 +353,87 @@ PurgeResult purge() {
   CRUMB("sd_purge");
   const uint32_t before = free_mb();
   uint32_t budget = kPurgeMaxEntries;
-  purge_dir("/", r, budget, 0);
+  size_t skipped_dirs = 0;
+
+  // Breadth-first over a bounded queue. Files go immediately; directories are
+  // queued and emptied in their own pass, then removed deepest-first at the
+  // end (a later queue entry is always at least as deep as an earlier one, so
+  // reverse order suffices).
+  size_t qlen = 1;
+  snprintf(g_dirq[0], kPathMax, "%s", "/");
+  for (size_t qi = 0; qi < qlen && budget > 0; qi++) {
+    for (;;) {
+      const size_t n = scan_dir(g_dirq[qi], &skipped_dirs, &qlen);
+      if (n == 0)
+        break;
+      size_t removed = 0;
+      for (size_t i = 0; i < n && budget > 0; i++) {
+        budget--;
+        esp_task_wdt_reset();
+        if (g_batch_dir[i])
+          continue;  // emptied later from the queue
+        if (SD.remove(g_batch[i])) {
+          r.files++;
+          removed++;
+        }
+      }
+      // Nothing deletable in a full batch: every entry is a queued directory,
+      // or the card refused. Either way, re-scanning returns the same names
+      // forever, so stop rather than spin.
+      if (removed == 0)
+        break;
+    }
+  }
+  // Deepest-first so a parent is only removed once its children are gone.
+  for (size_t i = qlen; i-- > 1;) {
+    esp_task_wdt_reset();
+    if (SD.rmdir(g_dirq[i]))
+      r.dirs++;
+  }
+  if (skipped_dirs)
+    eventlog::log("sd", "purge: %u dirs beyond the queue bound; run again", (unsigned)skipped_dirs);
   // Verify by looking, not by inferring from the budget. "We did not run out
   // of allowance" is not the same claim as "the card is empty" -- a directory
   // that refused every delete also leaves budget to spare, and the endpoint
   // would have told the operator their card was cleared.
-  {
-    File root = SD.open("/");
-    if (root && root.isDirectory()) {
-      File first = root.openNextFile();
-      r.complete = !first;
-      if (first)
-        first.close();
+  //
+  // But the firmware writes to its OWN log while purging, so /events.log is
+  // back before this check runs. Counting that as "not finished" is how the
+  // first real purge reported (partial) and told the operator to run it again
+  // after it had already reclaimed all 28 GB. Ours do not count against it.
+  r.remaining = 0;
+  File root = SD.open("/");
+  if (root && root.isDirectory()) {
+    for (;;) {
+      File e = root.openNextFile();
+      if (!e)
+        break;
+      // Match on the BASENAME, case-insensitively. FAT is case-insensitive and
+      // the driver can hand back 8.3 short names in upper case, so comparing
+      // full paths with strcmp missed our own files and reported them as
+      // foreign leftovers.
+      const char* p = e.path();
+      const char* base = strrchr(p, '/');
+      base = base ? base + 1 : p;
+      const bool ours = strcasecmp(base, "events.log") == 0 ||
+                        strcasecmp(base, "events.old") == 0 ||
+                        strncasecmp(base, "climate-", 8) == 0;
+      if (!ours) {
+        if (r.remaining == 0)
+          snprintf(r.leftover, sizeof(r.leftover), "%s", base);
+        r.remaining++;
+      }
+      e.close();
     }
-    if (root)
-      root.close();
   }
+  if (root)
+    root.close();
+  r.complete = budget > 0 && skipped_dirs == 0 && r.remaining == 0;
+  // Name the first survivor. "Some entries could not be deleted" with no
+  // indication of WHICH is the kind of report that cannot be acted on.
+  if (r.remaining)
+    eventlog::log("sd", "purge left %lu entr%s, first: %s", (unsigned long)r.remaining,
+                  r.remaining == 1 ? "y" : "ies", r.leftover);
   const uint32_t after = free_mb();
   r.freed_mb = after > before ? after - before : 0;
   crashlog::rtc_sd_sentinel = 0;

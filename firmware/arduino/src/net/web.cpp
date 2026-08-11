@@ -665,15 +665,54 @@ static void handle_sd_purge() {
   }
   const uint32_t free_before = sdcard::free_mb();
   const sdcard::PurgeResult r = sdcard::purge();
-  char buf[288];
+  // Say which of the two "not finished" cases it was. The first real purge
+  // reclaimed all 28 GB and then reported "stopped at the entry bound; run
+  // again" -- the bound was nowhere near hit (208 entries of 20000); the card
+  // simply had the fan's own log back in it by the time the check ran.
+  char note[160];
+  if (r.complete) {
+    snprintf(note, sizeof(note), "card contents deleted; filesystem left in place");
+  } else if (r.remaining) {
+    // Name it. Running again cannot remove a FAT entry that already refused --
+    // in practice this is macOS's .Spotlight-V100 stub, which is harmless and
+    // occupies nothing, and telling the operator to retry forever is worse
+    // than telling them what is actually there.
+    snprintf(note, sizeof(note),
+             "space reclaimed; %lu entr%s the filesystem will not remove (first: %s)",
+             (unsigned long)r.remaining, r.remaining == 1 ? "y remains" : "ies remain", r.leftover);
+  } else {
+    snprintf(note, sizeof(note), "stopped at the entry bound; run again to continue");
+  }
+  char buf[512];
   snprintf(buf, sizeof(buf),
-           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"free_before_mb\":%lu,\"free_mb\":%lu,"
-           "\"complete\":%s,\"note\":\"%s\"}",
-           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)free_before,
-           (unsigned long)sdcard::free_mb(), r.complete ? "true" : "false",
-           r.complete ? "card contents deleted; filesystem left in place"
-                      : "stopped at the entry bound; run again to continue");
+           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"remaining\":%lu,\"leftover\":\"%s\","
+           "\"free_before_mb\":%lu,\"free_mb\":%lu,\"complete\":%s,\"restarting\":true,"
+           "\"note\":\"%s\"}",
+           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)r.remaining, r.leftover,
+           (unsigned long)free_before, (unsigned long)sdcard::free_mb(),
+           r.complete ? "true" : "false", note);
   g_http.send(200, "application/json", buf);
+
+  // Restart after a purge, deliberately.
+  //
+  // HONEST ACCOUNTING: twice on 2026-08-11 the deployed board panicked roughly
+  // 75-100 s AFTER a purge that had already returned success -- long after the
+  // handler was done, with nothing on the tape between the purge line and the
+  // reboot. The first time was a stack overflow in the old recursive walk and
+  // is fixed; the second, on the iterative version, is NOT explained. Mass
+  // deletion evidently leaves something in the SD/FATFS layer that faults on a
+  // later access.
+  //
+  // Rebuilding that state from a clean boot removes the window, the same way
+  // one reboots after an fsck rather than trusting a repaired filesystem live.
+  // It is a workaround, not a diagnosis, and it is written down here as such:
+  // if the underlying fault is ever found, this restart should go with it.
+  // The fan itself is unaffected -- the RMT peripheral holds its duty across a
+  // reset, and the console's own restart button already works this way.
+  eventlog::log("sd", "purge done; restarting to rebuild filesystem state");
+  eventlog::flush_tick();
+  delay(200);
+  esp_restart();
 }
 
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.

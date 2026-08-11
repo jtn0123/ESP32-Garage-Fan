@@ -107,7 +107,18 @@ struct PurgeResult {
   uint32_t files = 0;  // entries unlinked
   uint32_t dirs = 0;   // directories removed
   uint32_t freed_mb = 0;
-  bool complete = false;  // false if the walk hit its bound and stopped early
+  uint32_t remaining = 0;  // foreign entries still in root (excludes our logs)
+  bool complete = false;   // nothing left to delete and no bound was hit
+  /**
+   * Name of the first entry that survived, "" if none.
+   *
+   * Reported because "some entries could not be deleted" is not actionable on
+   * its own. In practice this is `.Spotlight-V100`, the metadata stub macOS
+   * leaves on a card it has mounted; FAT will not let it be removed and
+   * repeating the purge cannot change that, so the caller needs to see WHAT
+   * is left before deciding whether to care.
+   */
+  char leftover[48] = {0};
 };
 
 /**
