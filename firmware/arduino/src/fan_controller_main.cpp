@@ -38,7 +38,9 @@
 #include "sensors/climate.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
+#include "system/coredump.h"
 #include "system/crashlog.h"
+#include "system/crumb_ring.h"
 #include "system/eventlog.h"
 #include "system/odometer.h"
 #include "system/ota_rollback.h"
@@ -125,6 +127,17 @@ void setup() {
   // the line that turns "it randomly rebooted overnight" into a diagnosis.
   eventlog::log("boot", "fw=%s cause=%s prev=%s boots=%lu", kFwVersion, crashlog::last_death(),
                 crashlog::prev_death(), (unsigned long)crashlog::boots());
+  // The last steps of the run that just ended. Pure RTC reads -- no driver, no
+  // flash, nothing that can wedge a boot. This is what the single crumb could
+  // not give: the approach to a fault, not just an operation caught in flight.
+  {
+    char trail[220];
+    crumb_ring::render(trail, sizeof(trail));
+    if (trail[0] != '\0')
+      eventlog::log("trail", "%s", trail);
+  }
+  crumb_ring::reset();
+  TRAIL("setup");
   if (sdcard::quarantined())
     eventlog::log("sd", "previous boot died in an SD op -- card quarantined");
   // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
@@ -158,6 +171,11 @@ void loop() {
     // why this exact moment -- after the radio (1.14.3's lesson), before web
     // traffic fragments the heap past the filesystem's contiguous need.
     sdcard::on_network_up();
+    // Crash forensics AFTER the radio, never before it. Run in setup() this
+    // cost the network on 1.14.31, and the network is the only thing that can
+    // deliver a fix. Nothing here is load-bearing enough to justify sitting in
+    // front of it.
+    coredump::log_at_boot();
     MDNS.begin(FAN_HOSTNAME);
     MDNS.addService("http", "tcp", 80);
     web::start();
@@ -174,15 +192,19 @@ void loop() {
   // accumulation was dangerous, so a reset after each stage removes it.
   esp_task_wdt_reset();
   wifi_link::tick();
+  TRAIL("mqtt");
   mqtt_link::tick();
   esp_task_wdt_reset();
+  TRAIL("web");
   web::handle();
   odometer::tick(fan::speed(), fan::watts(fan::speed()));
   esp_task_wdt_reset();
+  TRAIL("epd");
   display::maybe_render();
   esp_task_wdt_reset();
   if (g_last_sample_ms == 0 || millis() - g_last_sample_ms >= kSampleMs) {
     g_last_sample_ms = millis();
+    TRAIL("sample");
     sample_climate();
     web::push_state();
     // The heartbeat the disconnect forensics read backwards from: the last
@@ -190,10 +212,17 @@ void loop() {
     // (signal, heap) that usually explain it.
     // largest = biggest contiguous free block. Free heap alone lies on this
     // board: 20 KB "free" could not fit the SD filesystem's 13 KB (2026-08-09).
-    eventlog::log("health", "rssi=%d heap=%lu largest=%lu min_heap=%lu drops=%lu",
+    // stack= is the loop task's remaining headroom, in bytes, at its worst so
+    // far. It is here because the first SD-purge panic was a stack overflow
+    // (3 KB of batch buffer per recursion level against an 8 KB stack) and
+    // nothing on the tape hinted at it -- the fault was found by reading the
+    // source afterwards. A number that walks toward zero says so in advance.
+    eventlog::log("health", "rssi=%d heap=%lu largest=%lu min_heap=%lu stack=%lu drops=%lu",
                   wifi_link::rssi(), (unsigned long)ESP.getFreeHeap(),
                   (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-                  (unsigned long)ESP.getMinFreeHeap(), (unsigned long)wifi_link::drops());
+                  (unsigned long)ESP.getMinFreeHeap(),
+                  (unsigned long)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+                  (unsigned long)wifi_link::drops());
   }
   if (millis() - g_last_auto_ms >= kAutoTickMs) {
     g_last_auto_ms = millis();

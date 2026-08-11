@@ -17,7 +17,10 @@
 #include <Preferences.h>
 #include <stdint.h>
 
+#include <cstdio>
+
 #include "esp_system.h"
+#include "system/crumb_ring.h"
 
 namespace crashlog {
 
@@ -52,5 +55,16 @@ uint32_t boots();
 
 }  // namespace crashlog
 
-#define CRUMB(x) snprintf(crashlog::rtc_crumb, sizeof(crashlog::rtc_crumb), "%s", x)
+// CRUMB keeps the single "in flight" slot (the SD quarantine decision reads
+// it) AND appends to the ring, so the call sites that already exist gain a
+// history for free. CRUMB_CLEAR only clears the in-flight slot: the ring is
+// the record of what happened, and erasing it on success is what left the
+// 2026-08-11 post-purge panic with nothing to show.
+#define CRUMB(x)                                                         \
+  do {                                                                   \
+    snprintf(crashlog::rtc_crumb, sizeof(crashlog::rtc_crumb), "%s", x); \
+    crumb_ring::drop(x, millis());                                       \
+  } while (0)
 #define CRUMB_CLEAR() (crashlog::rtc_crumb[0] = 0)
+/** A step worth recording that is not an in-flight risky operation. */
+#define TRAIL(x) crumb_ring::drop(x, millis())

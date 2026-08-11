@@ -30,6 +30,7 @@
 #include "sensors/climate.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
+#include "system/coredump.h"
 #include "system/crashlog.h"
 #include "system/eventlog.h"
 #include "system/odometer.h"
@@ -172,6 +173,56 @@ static void json_str(char* dst, size_t cap, const char* src) {
     dst[j++] = src[i];
   }
   dst[j] = 0;
+}
+
+// The last panic, decoded on-device.
+//
+// Answers the question the flight recorder could not: a panic used to reach us
+// as the bare word "panic" because IDF prints the backtrace over a UART this
+// board's CDC drops. The dump was always in flash; see system/coredump.h.
+static void handle_crash() {
+  char buf[768];
+  const size_t n = coredump::to_json(buf, sizeof(buf));
+  if (n == 0) {
+    g_http.send(500, "application/json", "{\"error\":\"could not read the core dump\"}");
+    return;
+  }
+  g_http.send(200, "application/json", buf);
+}
+
+// The raw ELF core dump, for scripts/decode_crash.py to turn the backtrace PCs
+// into file:line against the matching build.
+static void handle_crash_raw() {
+  size_t addr = 0, size = 0;
+  if (!coredump::image_range(&addr, &size) || size == 0) {
+    g_http.send(404, "application/json", "{\"error\":\"no core dump stored\"}");
+    return;
+  }
+  http_tx::Chunked tx(g_http.client(), "application/octet-stream",
+                      "Content-Disposition: attachment; filename=coredump.elf\r\n");
+  uint8_t chunk[512];
+  for (size_t off = 0; off < size && tx.ok(); off += sizeof(chunk)) {
+    const size_t want = (size - off) < sizeof(chunk) ? (size - off) : sizeof(chunk);
+    if (!coredump::read_image(off, chunk, want))
+      break;
+    esp_task_wdt_reset();
+    tx.write(reinterpret_cast<const char*>(chunk), want);
+  }
+  tx.end();
+}
+
+// Token-guarded: drop the stored dump so the next panic is unambiguous.
+static void handle_crash_erase() {
+  if (!guard_origin())
+    return;
+  if (!token_ok(g_http.arg("token"))) {
+    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+    return;
+  }
+  const bool ok = coredump::erase();
+  eventlog::log("crash", "core dump erased by request (%s)", ok ? "ok" : "failed");
+  g_http.send(ok ? 200 : 500, "application/json",
+              ok ? "{\"ok\":true}" : "{\"error\":\"erase failed\"}");
 }
 
 static void handle_stats() {
@@ -828,6 +879,9 @@ void begin(Preferences* prefs) {
   g_http.on("/api/sdformat", HTTP_POST, handle_sd_format);
   g_http.on("/api/sdpurge", HTTP_POST, handle_sd_purge);
   g_http.on("/api/events", handle_events);
+  g_http.on("/api/crash", handle_crash);
+  g_http.on("/api/crash.bin", handle_crash_raw);
+  g_http.on("/api/crash/erase", HTTP_POST, handle_crash_erase);
   web_debug::register_routes(g_http, g_token);
   web_ota::register_routes(g_http, g_token);
   g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
