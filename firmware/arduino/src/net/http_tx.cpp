@@ -65,80 +65,33 @@ void send_big(WiFiClient c, const char* mime, const char* body, size_t len, cons
 }
 
 // ------------------------------------------------------------------ Chunked
+//
+// Transport only. The framing -- chunk lengths, boundaries, the terminator,
+// the sticky failure state -- lives in net::ChunkedWriter, where the host
+// tests assert the exact bytes (native_chunked_writer).
 
-Chunked::Chunked(WiFiClient c, const char* mime, const char* extra_hdr) : c_(c) {
-  fd_ = c_.fd();
-  if (fd_ < 0)
-    return;
-  char hdr[288];
-  const int hn = snprintf(hdr, sizeof(hdr),
-                          "HTTP/1.1 200 OK\r\nContent-Type: %s\r\n"
-                          "Transfer-Encoding: chunked\r\n%sConnection: close\r\n\r\n",
-                          mime, extra_hdr);
-  if (hn < 0 || hn >= static_cast<int>(sizeof(hdr)))
-    return;
-  ok_ = send_bounded(fd_, hdr, hn);
+bool Chunked::ClientSink::send(const char* p, size_t n) {
+  return fd >= 0 && send_bounded(fd, p, n);
 }
 
-bool Chunked::flush() {
-  if (!ok_ || len_ == 0)
-    return ok_;
-  // Chunk framing: hex length CRLF, payload, CRLF.
-  char head[16];
-  const int hn = snprintf(head, sizeof(head), "%x\r\n", static_cast<unsigned>(len_));
-  if (hn < 0 || hn >= static_cast<int>(sizeof(head))) {
-    ok_ = false;
-    return false;
-  }
-  if (!send_bounded(fd_, head, hn) || !send_bounded(fd_, buf_, len_) ||
-      !send_bounded(fd_, "\r\n", 2)) {
-    ok_ = false;
-    return false;
-  }
-  len_ = 0;
-  return true;
+Chunked::Chunked(WiFiClient c, const char* mime, const char* extra_hdr) : c_(c), w_(sink_) {
+  sink_.fd = c_.fd();
+  w_.begin(mime, extra_hdr);
 }
-
-bool Chunked::write(const char* p, size_t n) {
-  while (ok_ && n > 0) {
-    const size_t room = kBuf - len_;
-    const size_t take = n < room ? n : room;
-    memcpy(buf_ + len_, p, take);
-    len_ += take;
-    p += take;
-    n -= take;
-    if (len_ == kBuf && !flush())
-      return false;
-  }
-  return ok_;
-}
-
-bool Chunked::print(const char* s) { return write(s, strlen(s)); }
 
 bool Chunked::printf(const char* fmt, ...) {
-  if (!ok_)
-    return false;
-  char tmp[160];
   va_list ap;
   va_start(ap, fmt);
-  const int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+  const bool r = w_.vprintf(fmt, ap);
   va_end(ap);
-  if (n < 0 || n >= static_cast<int>(sizeof(tmp))) {
-    // Silent truncation here would emit malformed JSON under a 200 -- exactly
-    // the failure this class exists to remove. Fail the stream instead.
-    ok_ = false;
-    return false;
-  }
-  return write(tmp, static_cast<size_t>(n));
+  return r;
 }
 
 void Chunked::end() {
-  if (ended_)
-    return;
-  ended_ = true;
-  if (ok_ && flush())
-    send_bounded(fd_, "0\r\n\r\n", 5);
-  c_.stop();
+  const bool was_ended = w_.ended();
+  w_.end();
+  if (!was_ended)
+    c_.stop();  // Connection: close either way; a stalled peer is already gone
 }
 
 }  // namespace http_tx

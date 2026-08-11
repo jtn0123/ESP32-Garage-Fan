@@ -21,6 +21,7 @@
 #include "generated_page.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
+#include "net/origin_check.h"
 #include "net/sse.h"
 #include "net/web_debug.h"
 #include "net/web_ota.h"
@@ -86,18 +87,11 @@ bool token_ok(const String& presented) { return g_token[0] != '\0' && presented 
 bool origin_ok() {
   if (!g_http.hasHeader("Origin"))
     return true;  // non-browser caller
-  const String origin = g_http.header("Origin");
-  if (origin.length() == 0 || origin == "null")
-    return false;
-  char self[64];
-  snprintf(self, sizeof(self), "http://%s", WiFi.localIP().toString().c_str());
-  if (origin.equalsIgnoreCase(self))
-    return true;
-  snprintf(self, sizeof(self), "http://%s", FAN_HOSTNAME);
-  if (origin.equalsIgnoreCase(self))
-    return true;
-  snprintf(self, sizeof(self), "http://%s.local", FAN_HOSTNAME);
-  return origin.equalsIgnoreCase(self);
+  // The comparison itself is net::origin_is_self, which the host tests cover
+  // (native_origin_check) -- including the lookalike hosts a prefix match
+  // would have let through.
+  return net::origin_is_self(g_http.header("Origin").c_str(), WiFi.localIP().toString().c_str(),
+                             FAN_HOSTNAME);
 }
 
 /** origin_ok() with the 403 already sent. True means "keep going". */

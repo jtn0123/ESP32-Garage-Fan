@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "net/origin_check.h"
 #include "esp_task_wdt.h"
 #include "lwip/sockets.h"
 
@@ -101,26 +102,19 @@ const char* header_value(const char* req, const char* name, size_t* len_out) {
   return nullptr;
 }
 
-/**
- * Is `origin` this device serving its own console?
- *
- * Accepts the IP and the mDNS/host names on the default port, which are the
- * only ways the page is reachable. A request with NO Origin at all (curl,
- * `mosquitto_sub`-style debugging, any non-browser client) is allowed through:
- * CORS is a browser-enforced policy and withholding the header from a
- * non-browser protects nobody while breaking bench debugging.
- */
-bool origin_is_self(const char* origin, size_t len) {
-  char self[3][64];
-  const String ip = WiFi.localIP().toString();
-  snprintf(self[0], sizeof(self[0]), "http://%s", ip.c_str());
-  snprintf(self[1], sizeof(self[1]), "http://%s", FAN_HOSTNAME);
-  snprintf(self[2], sizeof(self[2]), "http://%s.local", FAN_HOSTNAME);
-  for (const auto& s : self) {
-    if (strlen(s) == len && strncasecmp(origin, s, len) == 0)
-      return true;
-  }
-  return false;
+// Origin comparison lives in net::origin_check, shared with web.cpp's guard
+// on the mutating routes and covered by native_origin_check.
+inline bool origin_is_self(const char* origin, size_t len) {
+  char buf[96];
+  if (len >= sizeof(buf))
+    return false;
+  memcpy(buf, origin, len);
+  buf[len] = '\0';
+  // An absent Origin is allowed by net::origin_is_self (non-browser callers);
+  // here the caller has already established that the header was present, so an
+  // empty value must not be waved through.
+  return buf[0] != '\0' &&
+         net::origin_is_self(buf, WiFi.localIP().toString().c_str(), FAN_HOSTNAME);
 }
 
 }  // namespace

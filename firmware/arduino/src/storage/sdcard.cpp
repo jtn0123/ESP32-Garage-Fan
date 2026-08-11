@@ -13,7 +13,9 @@
 #include "config.h"
 #include "esp_task_wdt.h"
 #include "system/crashlog.h"
+#include "storage/csv_row.h"
 #include "storage/line_reader.h"
+#include "storage/purge_logic.h"
 #include "system/eventlog.h"
 
 namespace sdcard {
@@ -231,24 +233,19 @@ uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
           continue;
         if (kept >= max_pts)
           break;
-        float tv, hv, pv, ov, bv;
-        int sp;
-        int cg;
-        // Eight fields since 1.14.23, six before it. Parse the wide form
-        // first and fall back, so a card that spans the change reads whole
-        // instead of dropping every older row.
-        const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d", &tv, &hv, &pv, &ov, &sp, &bv, &cg);
-        if (got < 3)
+        // Both widths and both sentinels live in storage::parse_csv_row, which
+        // the host tests exercise directly (native_csv_row).
+        const storage::CsvRow row = storage::parse_csv_row(line);
+        if (!row.valid)
           continue;
-        out.ts[kept] = static_cast<time_t>(epoch);
-        out.temp_c[kept] = tv;
-        out.rh[kept] = hv;
-        out.hpa[kept] = pv;
-        // -999 is the sentinel log_sample writes when no yard reading existed.
-        out.out_f[kept] = (got >= 4 && ov > -100.0f) ? ov : NAN;
-        out.spd[kept] = got >= 5 ? static_cast<int8_t>(sp) : 0;
-        out.batt_v[kept] = (got >= 6 && bv > 0.0f) ? bv : NAN;
-        out.chg[kept] = got >= 7 ? static_cast<int8_t>(cg) : -1;
+        out.ts[kept] = static_cast<time_t>(row.epoch);
+        out.temp_c[kept] = row.temp_c;
+        out.rh[kept] = row.rh;
+        out.hpa[kept] = row.hpa;
+        out.out_f[kept] = row.out_f;
+        out.spd[kept] = row.spd;
+        out.batt_v[kept] = row.batt_v;
+        out.chg[kept] = row.chg;
         kept++;
       }
       f.close();
@@ -295,16 +292,15 @@ constexpr uint32_t kPurgeMaxEntries = 20000;
 // not promise consistent iteration while entries are being removed from the
 // directory being iterated.
 constexpr size_t kBatch = 16;
-constexpr size_t kMaxDirs = 64;
-constexpr size_t kPathMax = 96;
+constexpr size_t kPathMax = purge_logic::kMaxPathLen;
 
 char g_batch[kBatch][kPathMax];
 bool g_batch_dir[kBatch];
-char g_dirq[kMaxDirs][kPathMax];
+purge_logic::Queue g_dirq;
 
 // Fill the batch from `path`. Returns entries read; 0 means the directory is
 // empty (or gone).
-size_t scan_dir(const char* path, size_t* skipped_dirs, size_t* qlen) {
+size_t scan_dir(const char* path) {
   File dir = SD.open(path);
   if (!dir || !dir.isDirectory()) {
     if (dir)
@@ -319,22 +315,12 @@ size_t scan_dir(const char* path, size_t* skipped_dirs, size_t* qlen) {
     snprintf(g_batch[n], kPathMax, "%s", e.path());
     g_batch_dir[n] = e.isDirectory();
     e.close();
-    if (g_batch_dir[n]) {
-      // Queue subdirectories for their own pass rather than descending here.
-      //
-      // Dedupe: a directory is only removed in the final rmdir sweep, so it is
-      // still present every time its parent is re-scanned for more files.
-      // Without this check the queue filled with duplicates of the same few
-      // directories, hit its bound, and reported work it had not done.
-      bool known = false;
-      for (size_t q = 0; q < *qlen && !known; q++) known = strcmp(g_dirq[q], g_batch[n]) == 0;
-      if (!known) {
-        if (*qlen < kMaxDirs)
-          snprintf(g_dirq[(*qlen)++], kPathMax, "%s", g_batch[n]);
-        else
-          (*skipped_dirs)++;
-      }
-    }
+    // Queue subdirectories for their own pass rather than descending here.
+    // Queue::push owns the dedupe and the bound -- see purge_logic.h for why
+    // both matter (a parent rescanned for more files sees its children every
+    // time).
+    if (g_batch_dir[n])
+      g_dirq.push(g_batch[n]);
     n++;
   }
   dir.close();
@@ -353,19 +339,16 @@ PurgeResult purge() {
   CRUMB("sd_purge");
   const uint32_t before = free_mb();
   uint32_t budget = kPurgeMaxEntries;
-  size_t skipped_dirs = 0;
 
   // Breadth-first over a bounded queue. Files go immediately; directories are
   // queued and emptied in their own pass, then removed deepest-first at the
   // end (a later queue entry is always at least as deep as an earlier one, so
   // reverse order suffices).
-  size_t qlen = 1;
-  snprintf(g_dirq[0], kPathMax, "%s", "/");
-  for (size_t qi = 0; qi < qlen && budget > 0; qi++) {
+  g_dirq.reset();
+  g_dirq.push("/");
+  for (size_t qi = 0; qi < g_dirq.size() && budget > 0; qi++) {
     for (;;) {
-      const size_t n = scan_dir(g_dirq[qi], &skipped_dirs, &qlen);
-      if (n == 0)
-        break;
+      const size_t n = scan_dir(g_dirq.at(qi));
       size_t removed = 0;
       for (size_t i = 0; i < n && budget > 0; i++) {
         budget--;
@@ -377,19 +360,19 @@ PurgeResult purge() {
           removed++;
         }
       }
-      // Nothing deletable in a full batch: every entry is a queued directory,
-      // or the card refused. Either way, re-scanning returns the same names
-      // forever, so stop rather than spin.
-      if (removed == 0)
+      // Nothing removed means every remaining entry is a queued directory (or
+      // the card refused): rescanning returns the same names forever.
+      if (purge_logic::scan_exhausted(n, removed))
         break;
     }
   }
   // Deepest-first so a parent is only removed once its children are gone.
-  for (size_t i = qlen; i-- > 1;) {
+  for (size_t i = g_dirq.size(); i-- > 1;) {
     esp_task_wdt_reset();
-    if (SD.rmdir(g_dirq[i]))
+    if (SD.rmdir(g_dirq.at(i)))
       r.dirs++;
   }
+  const size_t skipped_dirs = g_dirq.skipped();
   if (skipped_dirs)
     eventlog::log("sd", "purge: %u dirs beyond the queue bound; run again", (unsigned)skipped_dirs);
   // Verify by looking, not by inferring from the budget. "We did not run out
@@ -412,15 +395,10 @@ PurgeResult purge() {
       // the driver can hand back 8.3 short names in upper case, so comparing
       // full paths with strcmp missed our own files and reported them as
       // foreign leftovers.
-      const char* p = e.path();
-      const char* base = strrchr(p, '/');
-      base = base ? base + 1 : p;
-      const bool ours = strcasecmp(base, "events.log") == 0 ||
-                        strcasecmp(base, "events.old") == 0 ||
-                        strncasecmp(base, "climate-", 8) == 0;
+      const bool ours = purge_logic::is_our_file(e.path());
       if (!ours) {
         if (r.remaining == 0)
-          snprintf(r.leftover, sizeof(r.leftover), "%s", base);
+          snprintf(r.leftover, sizeof(r.leftover), "%s", e.path());
         r.remaining++;
       }
       e.close();
