@@ -62,6 +62,7 @@ function paintSettings(): void {
       toggleAuto: () => void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`)),
       restart: () => void maintenance('restart'),
       formatCard: () => void maintenance('format'),
+      purgeCard: () => void maintenance('purge'),
       recheckUpdate: () => void runUpdateCheck(true),
     }),
   );
@@ -89,21 +90,34 @@ function tokenFromFieldOrPrompt(question: string): string | null {
   return window.prompt(question);
 }
 
-async function maintenance(kind: 'restart' | 'format'): Promise<void> {
-  const token = tokenFromFieldOrPrompt(
-    kind === 'restart'
-      ? 'Update token to restart the controller:'
-      : 'Update token to format the card:',
-  );
+const MAINTENANCE = {
+  restart: {
+    prompt: 'Update token to restart the controller:',
+    confirm: 'Reboot the controller? The fan keeps its current speed through the reset.',
+    run: api.restart,
+  },
+  format: {
+    prompt: 'Update token to format the card:',
+    confirm: 'Formatting erases every sample stored on the card. Continue?',
+    run: api.formatCard,
+  },
+  purge: {
+    prompt: 'Update token to delete the card contents:',
+    // Names what is actually at stake: this deletes EVERYTHING on the card,
+    // including whatever was on it before the fan ever used it.
+    confirm:
+      'Delete every file on the SD card? This unlinks all contents — the fan’s logs AND anything else stored on the card — leaving the filesystem in place. It cannot be undone.',
+    run: api.purgeCard,
+  },
+} as const;
+
+async function maintenance(kind: keyof typeof MAINTENANCE): Promise<void> {
+  const op = MAINTENANCE[kind];
+  const token = tokenFromFieldOrPrompt(op.prompt);
   if (!token) return;
-  const confirmed = window.confirm(
-    kind === 'restart'
-      ? 'Reboot the controller? The fan keeps its current speed through the reset.'
-      : 'Formatting erases every sample stored on the card. Continue?',
-  );
-  if (!confirmed) return;
+  if (!window.confirm(op.confirm)) return;
   try {
-    window.alert(await (kind === 'restart' ? api.restart(token) : api.formatCard(token)));
+    window.alert(await op.run(token));
   } catch (err) {
     window.alert(`request failed: ${err instanceof Error ? err.message : String(err)}`);
   }

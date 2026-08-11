@@ -46,6 +46,15 @@ async function guarded(path: string, token: string): Promise<string> {
 export const restart = (token: string): Promise<string> => guarded('/api/restart', token);
 export const formatCard = (token: string): Promise<string> => guarded('/api/sdformat', token);
 
+/**
+ * Delete the card's contents without reformatting it.
+ *
+ * Distinct from formatCard because format cannot reclaim space on a healthy
+ * card: SD.begin's format_if_empty only rewrites a card that fails to MOUNT,
+ * so a 99%-full 28 GB card is simply remounted intact.
+ */
+export const purgeCard = (token: string): Promise<string> => guarded('/api/sdpurge', token);
+
 export async function uploadFirmware(file: File, token: string): Promise<string> {
   const body = new FormData();
   body.append('firmware', file);

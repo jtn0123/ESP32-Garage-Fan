@@ -41,6 +41,7 @@ export interface SettingsDeps {
   toggleAuto: () => void;
   restart: () => void;
   formatCard: () => void;
+  purgeCard: () => void;
   recheckUpdate: () => void;
 }
 
@@ -210,10 +211,12 @@ export function buildGroups(d: SettingsDeps): Group[] {
         {
           kind: 'actions',
           label: 'Maintenance',
-          hint: 'Restart reboots into the same slot. Formatting the card erases every stored sample and needs the update token.',
+          hint: 'Restart reboots into the same slot. "Delete card contents" unlinks every file but leaves the filesystem alone — use it to reclaim space, since Format only rewrites a card that will not mount. Both need the update token.',
           actions: [
-            { text: 'Download 24 h CSV', href: '/download.csv' },
+            // 30 days off the card, not the 24 h RAM ring this used to serve.
+            { text: 'Download CSV (30 d)', href: '/download.csv?days=30' },
             { text: 'Restart', run: d.restart },
+            { text: 'Delete card contents', run: d.purgeCard, danger: true },
             { text: 'Format SD card', run: d.formatCard, danger: true },
           ],
         },

@@ -99,6 +99,32 @@ struct Samples {
  */
 uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts);
 
+/** Free space in MB, 0 while unmounted. */
+uint32_t free_mb();
+
+/** Result of purge(). */
+struct PurgeResult {
+  uint32_t files = 0;  // entries unlinked
+  uint32_t dirs = 0;   // directories removed
+  uint32_t freed_mb = 0;
+  bool complete = false;  // false if the walk hit its bound and stopped early
+};
+
+/**
+ * Delete everything on the card WITHOUT reformatting it.
+ *
+ * The deployed card reported 28677 MB used of 28887 -- 99.3% full, 210 MB free
+ * -- while this firmware's own logs came to 308 bytes. The bulk is data from
+ * whatever the card did before, and format() never removed it: SD.begin's
+ * format_if_empty only formats a card that fails to MOUNT, so a full,
+ * healthy card was remounted in 166 ms and reported "ok" with every byte
+ * still on it.
+ *
+ * This unlinks the contents instead, leaving the existing filesystem in place.
+ * Destructive and irreversible: token-guarded, and the console confirms.
+ */
+PurgeResult purge();
+
 /** Receives one CSV row (no newline). Return false to stop the stream. */
 using LineSink = bool (*)(const char* line, void* ctx);
 

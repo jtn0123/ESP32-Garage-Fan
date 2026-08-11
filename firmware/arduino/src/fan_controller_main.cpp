@@ -163,12 +163,24 @@ void loop() {
     web::start();
     Serial.printf("web ui: http://%s.local/\n", FAN_HOSTNAME);
   }
+  // Feed BETWEEN the blocking stages, not just once at the top.
+  //
+  // One iteration can contain a synchronous MQTT connect (up to PubSubClient's
+  // 15 s socket timeout), a ~17 s e-ink refresh, and -- in the 30 s branch
+  // below -- a weather fetch whose DNS resolution can burn ~14 s when the
+  // resolver blackholes. A router reboot produces all three at once: ~45-55 s
+  // against a 60 s trigger_panic watchdog, with nothing between them to feed
+  // it. Each of these is individually bounded well under the limit; only the
+  // accumulation was dangerous, so a reset after each stage removes it.
   esp_task_wdt_reset();
   wifi_link::tick();
   mqtt_link::tick();
+  esp_task_wdt_reset();
   web::handle();
   odometer::tick(fan::speed(), fan::watts(fan::speed()));
+  esp_task_wdt_reset();
   display::maybe_render();
+  esp_task_wdt_reset();
   if (g_last_sample_ms == 0 || millis() - g_last_sample_ms >= kSampleMs) {
     g_last_sample_ms = millis();
     sample_climate();
@@ -197,7 +209,8 @@ void loop() {
     battery::read();
     sdcard::retry_tick();
     eventlog::flush_tick();
-    weather::tick();  // internally rate-limited to one fetch per 10 min
+    weather::tick();       // internally rate-limited to one fetch per 10 min
+    esp_task_wdt_reset();  // a blackholed resolver makes that fetch a long one
   }
   if (!mqtt_link::ever_connected() && !ota_rollback_image_confirmed() &&
       millis() > kUnconfirmedDeadlineMs) {

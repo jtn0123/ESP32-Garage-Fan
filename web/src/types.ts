@@ -35,6 +35,12 @@ export interface DeviceState {
   sd_q: boolean; // card quarantined after a mount crashed a boot
   sd_total_mb: number; // 0 when no card is mounted
   sd_used_mb: number;
+  /**
+   * Free space, MB. Surfaced because the deployed card sat at 210 MB free of
+   * 28887 -- 99.3% full with data this firmware never wrote -- and nothing
+   * reported it, so nothing could notice.
+   */
+  sd_free_mb: number;
   batt: BatteryState | null;
   rssi: number;
   drops: number; // WiFi disconnects since boot -- the flight recorder's counter

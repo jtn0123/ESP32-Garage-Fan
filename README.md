@@ -59,6 +59,13 @@ The version in `VERSION` is the single source of truth: `gen_device_header.py`
 turns it into `FW_VERSION`, the firmware reports it on `/api/state`, and the
 release workflow refuses to publish a tag that disagrees with it.
 
+**Bumping `VERSION` on `main` publishes a release.** `tag-release.yml` creates
+the matching `vX.Y.Z` tag, which triggers `release.yml` to build and attach the
+images. This is automatic because it previously was not: the repo tagged
+v1.14.0 and then went 22 versions without another tag, so every device's update
+check spent that time comparing itself against a feed that had stopped moving.
+Bump `VERSION` in the commit you actually want released, not before.
+
 The web console lives in `web/` as TypeScript and is bundled into one
 self-contained HTML file at `web/dist/console.html`, which **is committed** —
 the firmware build runs with only Python and PlatformIO, so `pio run` never

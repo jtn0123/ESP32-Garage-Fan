@@ -84,11 +84,9 @@ const char* header_value(const char* req, const char* name, size_t* len_out) {
     if (p != req && *(p - 1) != '\n')
       continue;  // must start a line, so "X-Origin:" cannot match "Origin:"
     const char* v = p + strlen(name);
-    while (*v == ' ' || *v == '\t')
-      v++;
+    while (*v == ' ' || *v == '\t') v++;
     const char* e = v;
-    while (*e && *e != '\r' && *e != '\n')
-      e++;
+    while (*e && *e != '\r' && *e != '\n') e++;
     *len_out = static_cast<size_t>(e - v);
     return v;
   }

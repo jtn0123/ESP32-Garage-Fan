@@ -9,6 +9,7 @@
 #include <WiFiClient.h>
 
 #include <cstddef>
+#include <cstdio>
 
 namespace http_tx {
 

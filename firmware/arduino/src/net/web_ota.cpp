@@ -26,6 +26,8 @@
 #include <Arduino.h>
 #include <Update.h>
 
+#include <cstdio>
+
 #include "esp_task_wdt.h"
 #include "system/eventlog.h"
 

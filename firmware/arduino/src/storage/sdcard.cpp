@@ -266,6 +266,81 @@ uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
   return 0;
 }
 
+uint32_t free_mb() {
+  if (!g_ok)
+    return 0;
+  const uint64_t total = SD.totalBytes();
+  const uint64_t used = SD.usedBytes();
+  return used >= total ? 0 : static_cast<uint32_t>((total - used) / 1048576);
+}
+
+namespace {
+// Bound on entries touched in one purge. A card with a pathological directory
+// count must not hold the loop indefinitely; the caller is told it stopped
+// early and can run it again.
+constexpr uint32_t kPurgeMaxEntries = 20000;
+
+// Depth-first delete of `path`'s contents. Recursion is bounded by kMaxDepth
+// because the loop thread's stack is not large and a crafted tree should not
+// be able to reach it.
+void purge_dir(const char* path, PurgeResult& r, uint32_t& budget, int depth) {
+  constexpr int kMaxDepth = 8;
+  if (depth > kMaxDepth || budget == 0)
+    return;
+  File dir = SD.open(path);
+  if (!dir || !dir.isDirectory()) {
+    if (dir)
+      dir.close();
+    return;
+  }
+  // Collect-then-delete: removing entries while iterating the same handle is
+  // not something FATFS promises to keep consistent.
+  for (;;) {
+    File e = dir.openNextFile();
+    if (!e)
+      break;
+    char child[128];
+    snprintf(child, sizeof(child), "%s", e.path());
+    const bool is_dir = e.isDirectory();
+    e.close();
+    if (budget == 0)
+      break;
+    budget--;
+    esp_task_wdt_reset();
+    if (is_dir) {
+      purge_dir(child, r, budget, depth + 1);
+      if (SD.rmdir(child))
+        r.dirs++;
+    } else if (SD.remove(child)) {
+      r.files++;
+    }
+  }
+  dir.close();
+}
+}  // namespace
+
+PurgeResult purge() {
+  PurgeResult r;
+  if (!g_ok)
+    return r;
+  Serial.println("[SD] purge requested");
+  esp_task_wdt_delete(NULL);  // deleting tens of thousands of entries takes time
+  crashlog::rtc_sd_sentinel = crashlog::kSdSentinelMagic;
+  CRUMB("sd_purge");
+  const uint32_t before = free_mb();
+  uint32_t budget = kPurgeMaxEntries;
+  purge_dir("/", r, budget, 0);
+  r.complete = budget > 0;
+  const uint32_t after = free_mb();
+  r.freed_mb = after > before ? after - before : 0;
+  crashlog::rtc_sd_sentinel = 0;
+  CRUMB_CLEAR();
+  esp_task_wdt_add(NULL);
+  eventlog::log("sd", "purge: %lu files %lu dirs, +%lu MB free%s", (unsigned long)r.files,
+                (unsigned long)r.dirs, (unsigned long)r.freed_mb, r.complete ? "" : " (partial)");
+  return r;
+}
+
 bool format() {
   Serial.println("[SD] format requested");
   esp_task_wdt_delete(NULL);  // a big-card format legitimately takes minutes

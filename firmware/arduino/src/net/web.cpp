@@ -106,7 +106,8 @@ void state_json(char* out, size_t cap) {
            "\"boots\":%lu,\"prev_death\":\"%s\","
            "\"sd_q\":%s,"
            "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
+           "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
+           "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\"}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
@@ -115,9 +116,9 @@ void state_json(char* out, size_t cap) {
            (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
            crashlog::last_death(), (unsigned long)crashlog::boots(), crashlog::prev_death(),
            sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),
-           (unsigned long)sdcard::used_mb(), batt, WiFi.RSSI(), (unsigned long)wifi_link::drops(),
-           mqtt_link::connected() ? "true" : "false", millis() / 1000UL,
-           WiFi.localIP().toString().c_str());
+           (unsigned long)sdcard::used_mb(), (unsigned long)sdcard::free_mb(), batt, WiFi.RSSI(),
+           (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
+           millis() / 1000UL, WiFi.localIP().toString().c_str());
 }
 
 void push_state() { sse::push(); }
@@ -166,8 +167,8 @@ static void handle_csv() {
 
   if (sdcard::ok() && time_synced()) {
     char disp[96];
-    snprintf(disp, sizeof(disp),
-             "Content-Disposition: attachment; filename=garage-fan-%dd.csv\r\n", days);
+    snprintf(disp, sizeof(disp), "Content-Disposition: attachment; filename=garage-fan-%dd.csv\r\n",
+             days);
     http_tx::Chunked tx(g_http.client(), "text/csv", disp);
     // Header names the 1.14.23 column set; older rows in the same file carry
     // six fields and are streamed exactly as stored rather than back-filled.
@@ -560,6 +561,37 @@ static void handle_sd_format() {
   g_http.send(mounted ? 200 : 500, "application/json", buf);
 }
 
+// Token-guarded: delete the card's CONTENTS, leaving its filesystem alone.
+//
+// This is the endpoint that actually reclaims space. /api/sdformat cannot:
+// SD.begin's format_if_empty only formats a card that fails to mount, so a
+// 99%-full but perfectly healthy 28 GB card is simply remounted with every
+// byte intact -- which is exactly what the deployed card did, sitting at
+// 210 MB free while this firmware's own logs came to 308 bytes.
+//
+// Destructive and irreversible; the console confirms before calling.
+static void handle_sd_purge() {
+  if (!token_ok(g_http.arg("token"))) {
+    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+    return;
+  }
+  if (!sdcard::ok()) {
+    g_http.send(503, "application/json", "{\"error\":\"sd card not mounted\"}");
+    return;
+  }
+  const uint32_t free_before = sdcard::free_mb();
+  const sdcard::PurgeResult r = sdcard::purge();
+  char buf[288];
+  snprintf(buf, sizeof(buf),
+           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"free_before_mb\":%lu,\"free_mb\":%lu,"
+           "\"complete\":%s,\"note\":\"%s\"}",
+           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)free_before,
+           (unsigned long)sdcard::free_mb(), r.complete ? "true" : "false",
+           r.complete ? "card contents deleted; filesystem left in place"
+                      : "stopped at the entry bound; run again to continue");
+  g_http.send(200, "application/json", buf);
+}
+
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.
 static void handle_raw() {
   if (!g_http.hasArg("high_pct")) {
@@ -656,6 +688,7 @@ void begin(Preferences* prefs) {
     http_tx::send_big(g_http.client(), "image/svg+xml", kIcon, sizeof(kIcon) - 1);
   });
   g_http.on("/api/sdformat", HTTP_POST, handle_sd_format);
+  g_http.on("/api/sdpurge", HTTP_POST, handle_sd_purge);
   g_http.on("/api/events", handle_events);
   web_debug::register_routes(g_http, g_token);
   web_ota::register_routes(g_http, g_token);
