@@ -33,6 +33,11 @@ from urllib.parse import parse_qs, urlparse
 # exercises the bundle that would actually ship.
 CONSOLE = Path(__file__).resolve().parents[1] / "web" / "dist" / "console.html"
 PORT = 8099
+# NOSONAR: plain HTTP is the point. This mocks an ESP32 that has no TLS stack
+# (see net/weather.h for the measured reason), it binds to loopback only, and
+# the console's own Origin check is one of the behaviours under test -- these
+# strings ARE the allowed origins. Same decision already recorded in
+# scripts/deploy.sh for the same rule.
 SELF_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
 
 STEP = 300
@@ -106,10 +111,8 @@ SCEN = {
 
 
 # Type and bounds for every scenario knob. /_scen coerces through this rather
-# than storing whatever arrived: the response echoes SCEN back, so without a
-# strict whitelist the endpoint reflects caller-controlled data (Sonar
-# pythonsecurity:S5131, and correct in principle even though this binds to
-# loopback and answers application/json).
+# than storing whatever arrived, so nothing a caller sends survives as a string
+# anywhere in this process.
 SCEN_SPEC = {
     "card": bool,
     "synced": bool,
@@ -134,25 +137,6 @@ def coerce_scen(key: str, raw: str):
     if not raw.isdigit() or not (lo <= int(raw) <= hi):
         raise ValueError(f"{key} takes {lo}..{hi} or none")
     return int(raw)
-
-
-def scen_snapshot():
-    """Rebuild the knob state from primitives for the response.
-
-    coerce_scen already guarantees every stored value is a bool, an int in
-    range, or None -- no caller string can reach SCEN. This rebuilds the dict
-    from those primitives anyway rather than handing back the live state
-    object, so the response is constructed from known types at the point it is
-    serialised instead of relying on an invariant established elsewhere.
-    """
-    out = {}
-    for key, spec in SCEN_SPEC.items():
-        value = SCEN[key]
-        if spec is bool:
-            out[key] = bool(value)
-        else:
-            out[key] = None if value is None else int(value)
-    return out
 
 
 def history():
@@ -259,9 +243,8 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         if path != "/_scen":
             return self._json(404, {"error": "404"})
-        # Strictly whitelisted: only known keys, only known value shapes. The
-        # response echoes SCEN, so storing raw input here would reflect
-        # caller-controlled data straight back out.
+        # Strictly whitelisted: only known keys, only known value shapes.
+        applied = 0
         for key, values in query.items():
             if key not in SCEN_SPEC:
                 return self._json(400, {"error": "unknown knob"})
@@ -269,7 +252,17 @@ class H(BaseHTTPRequestHandler):
                 SCEN[key] = coerce_scen(key, values[0])
             except ValueError as exc:
                 return self._json(400, {"error": str(exc)})
-        return self._json(200, scen_snapshot())
+            applied += 1
+        # Deliberately does NOT echo the knob state back.
+        #
+        # It used to, which made this endpoint reflect caller-controlled data
+        # into its own response. The whitelist above meant no caller string
+        # could actually survive the round trip -- every path lands in int(),
+        # float() or a true/false comparison -- but the echo bought nothing:
+        # the harness sets knobs and then observes the CONSOLE, not this
+        # response. Removing it deletes the whole question instead of arguing
+        # about whether the sanitising was thorough enough.
+        return self._json(200, {"ok": True, "applied": applied})
 
     # --- reads ------------------------------------------------------------
     def _page(self, _query):
@@ -369,4 +362,7 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    # Loopback only, and plain HTTP by design: the device this stands in for
+    # serves plain HTTP and cannot do otherwise. NOSONAR (S5332), matching the
+    # decision already documented in scripts/deploy.sh.
+    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()  # NOSONAR
