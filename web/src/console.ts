@@ -363,8 +363,11 @@ export function paint(next?: DeviceState): void {
   if (next) {
     view.lastOk = Date.now();
     view.offline = false;
-    if (!isNewer(next, view.state)) return; // a straggler; do not un-paint
-    view.state = next;
+    // A straggler still proves the device is reachable, so it clears `offline`
+    // -- but it must not be allowed to skip the repaint, or the page keeps
+    // showing "● NO CONTACT" and stays dimmed while the state says otherwise,
+    // for up to a full poll cycle. Drop only the stale VALUES, not the render.
+    if (isNewer(next, view.state)) view.state = next;
   }
   const s = view.state;
   if (!s) return;

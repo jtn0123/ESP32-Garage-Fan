@@ -20,8 +20,15 @@ button{font-family:inherit}
    the whole page is dimmed rather than only the broker chip -- a lone red
    word next to fully-saturated live-looking readings reads as one bad
    subsystem, not as "none of this is current". */
-#hmq.stale{color:var(--bad);font-weight:600}
-body.offline #console,body.offline #settings{opacity:.55;filter:saturate(.4)}
+/* --bad did not exist, so this rule inherited its colour and the chip was not
+   actually red. Declared here beside its only user. */
+#hmq.stale{color:#e5534b;font-weight:600}
+/* Desaturate rather than fade. The first attempt dropped opacity to .55, which
+   took --mut and --dim text to roughly 2.7:1 and 1.8:1 against the background
+   -- unreadable, and "offline" must not mean "cannot read the last known
+   values". Colour drains out; text contrast stays. The "● NO CONTACT" chip
+   carries the state in words, not by colour alone. */
+body.offline #console,body.offline #settings{filter:saturate(.25)}
 #nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0}
 #nav.on{color:var(--tx)}
 

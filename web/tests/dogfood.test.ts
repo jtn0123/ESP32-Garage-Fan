@@ -87,10 +87,27 @@ describe('24h history', () => {
     expect(s.ts(0)).toBe(END - 6 * STEP);
   });
 
-  it('is served from the card, so a reboot no longer blanks it', () => {
+  it('spans a reboot without losing the samples before it', () => {
     // days=1 used to be hardwired to the RAM ring, which empties on every
-    // reboot; the browser's localStorage cache was the only thing hiding it.
-    expect(RING_1D.source).toBe('sd');
+    // reboot; the browser's localStorage cache was the only thing hiding it,
+    // and only in the one browser that had been left open. Card-backed, the
+    // rows from before an outage are still there and the hole is visible --
+    // which is behaviour, unlike asserting the fixture's own `source` field.
+    const across: History = {
+      ...RING_1D,
+      ts: [END - 7200, END - 6900, END - 600, END - 300, END],
+      temp_c: [24, 24.2, 25, 25.1, 25.2],
+      rh: [40, 40, 41, 41, 41],
+      hpa: [1000, 1000, 999, 999, 999],
+      out_f: [70, 70, 71, 71, 71],
+      batt_v: [4.1, 4.1, 4.2, 4.2, 4.2],
+      spd: [3, 3, 9, 9, 9],
+      chg: [1, 1, 1, 1, 1],
+    };
+    const s = build(across);
+    expect(s.n).toBe(5);
+    expect(s.ts(0)).toBe(END - 7200); // pre-reboot rows survived
+    expect(s.gap).toEqual([false, false, true, false, false]); // the dark stretch shows
   });
 });
 

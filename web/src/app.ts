@@ -154,11 +154,24 @@ async function uploadFirmware(): Promise<void> {
   // may not allow the cross-origin read) we still show the computed digest so
   // it can be compared by eye rather than silently skipping the check.
   msg.textContent = 'checking image…';
-  const digest = await sha256Hex(file).catch(() => null);
+  let digest: string | null = null;
+  try {
+    digest = await sha256Hex(file);
+  } catch (err) {
+    // Fail closed. Hashing is the only integrity check between GitHub and the
+    // flash, and "we could not hash it" is not a reason to write it anyway.
+    msg.textContent = `ABORTED: could not hash the image (${err instanceof Error ? err.message : String(err)}).`;
+    return;
+  }
   const upd = view.update;
   const asset = upd?.kind === 'available' ? upd.asset : null;
   const latest = upd && 'latest' in upd ? upd.latest : 'the release';
-  if (digest && asset) {
+  const short = `${digest.slice(0, 16)}…`;
+  // Say plainly whether anything was COMPARED. Printing a digest on its own
+  // reads like a passed check, and in the common cases -- a locally built
+  // image, or a check that came back ahead/no-binary/up-to-date -- there is no
+  // published sum to compare it against and nothing was verified at all.
+  if (asset) {
     const expected = await fetch(`${asset.browser_download_url}.sha256`)
       .then((r) => (r.ok ? r.text() : null))
       .then((t) => (t ? parseChecksum(t) : null))
@@ -167,9 +180,11 @@ async function uploadFirmware(): Promise<void> {
       msg.textContent = `ABORTED: this file's SHA-256 does not match ${latest}. Do not flash it.`;
       return;
     }
-    if (!expected) msg.textContent = `sha256 ${digest.slice(0, 16)}… (could not fetch published sum)`;
-  } else if (digest) {
-    msg.textContent = `sha256 ${digest.slice(0, 16)}…`;
+    msg.textContent = expected
+      ? `verified against ${latest} (sha256 ${short})`
+      : `NOT VERIFIED — could not fetch ${latest}'s published sum; sha256 ${short}`;
+  } else {
+    msg.textContent = `NOT VERIFIED — no published checksum to compare; sha256 ${short}`;
   }
 
   const size = `${(file.size / 1024).toFixed(0)} KB`;
