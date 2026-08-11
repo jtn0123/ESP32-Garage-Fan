@@ -304,7 +304,23 @@ static void append_series(String& out, const char* name, const float* v, uint16_
 }
 
 static void handle_history() {
-  const int days = g_http.hasArg("days") ? g_http.arg("days").toInt() : 1;
+  // Reject anything but the documented ?days=1|7|30 instead of quietly
+  // serving the RAM ring. A caller who typos the parameter (?range=7d) used
+  // to receive a syntactically valid ring response wearing the wrong data --
+  // which is how this repo's own SD-read verification fooled itself on
+  // 2026-08-10: the LineReader refactor was "confirmed" against a response
+  // that never touched the card. Malformed questions get errors, not
+  // plausible answers; that rule has now paid for itself three times here
+  // (sdformat "ok", /api/sensors "live", and this).
+  // The parameter is REQUIRED, not defaulted: a defaulted absent parameter is
+  // exactly how ?range=7d (a typo for ?days=7) sailed through and served ring
+  // data as if it were the card's. The console always sends days= explicitly.
+  const String days_arg = g_http.hasArg("days") ? g_http.arg("days") : "";
+  const int days = days_arg.toInt();
+  if (days_arg != "1" && days_arg != "7" && days_arg != "30") {
+    g_http.send(400, "application/json", "{\"error\":\"days must be 1, 7 or 30\"}");
+    return;
+  }
   String out;
   out.reserve(13000);
   if (days <= 1 || !sdcard::ok() || !time_synced()) {
