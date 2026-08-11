@@ -179,10 +179,6 @@ jobs:
   tests-python:
     name: Python tests
     runs-on: ubuntu-latest
-    # Job-level so the step-level `if` below can see it: the `secrets` context
-    # is not allowed in step conditions, but `env` is.
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -216,19 +212,13 @@ jobs:
       # Scanning from inside this job means coverage.xml is already in the
       # workspace: no artifact round-trip, and no second pytest run. always() so a
       # failing test still gets measured instead of leaving the gate at 0%.
-      # Dependabot PRs cannot read SONAR_TOKEN, so the scan is skipped for them
-      # rather than reporting a misleading red check.
-      # Skipped entirely while SONAR_TOKEN is unset: an empty token fails the
-      # scanner with "Not authorized", which turned every run of this job red
-      # even though pytest itself passed. When the secret is configured the
-      # scan resumes on its own; until then pytest's result IS the job result.
-      # Every action in this repo is pinned to a commit SHA, not a tag:
-      # githubactions:S7637 flags movable refs, since a tag can be repointed at
-      # new code. Dependabot still updates them by reading the version comment.
-      - name: SonarCloud Scan
-        if: ${{ always() && github.event.pull_request.user.login != 'dependabot[bot]' && env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
-
+      # The CI-driven SonarCloud scan step was removed 2026-08-10: its token
+      # gate had it silently skipping since 2026-08-06, its bound project
+      # (jtn0123_ESP32-Garage-Fan, sonar-project.properties) froze at that
+      # date, and every Sonar check and PR comment since has come from
+      # SonarCloud AUTOMATIC analysis (jtn0123_ESP32-Garage-Fan2, configured
+      # by .sonarcloud.properties). One analysis pipeline, not a live one and
+      # a dead one wearing the same name.
       - name: Upload test artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
