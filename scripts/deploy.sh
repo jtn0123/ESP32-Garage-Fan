@@ -110,7 +110,7 @@ while [ $SECONDS -lt $deadline ]; do
       # and an empty $cause would then sail past the panic check while
       # ${sd_mb:-0} invented a false "card not mounted". Missing evidence is
       # a failed check, not a passed one.
-      if [ -z "$cause" ] || [ -z "$sd_mb" ] || [ -z "$drops" ]; then
+      if [[ -z "$cause" || -z "$sd_mb" || -z "$drops" ]]; then
         echo "SMOKE FAIL: /api/state response is missing health fields (truncated?)"
         exit 1
       fi
@@ -122,8 +122,11 @@ while [ $SECONDS -lt $deadline ]; do
           echo "already. Read $HOST/api/events before trusting it."
           exit 1
           ;;
+        *)
+          # every non-panic cause (sw_reset, poweron, ...) is a healthy boot
+          ;;
       esac
-      if [ "$sd_mb" -eq 0 ]; then
+      if [[ "$sd_mb" -eq 0 ]]; then
         echo "SMOKE WARN: SD card not mounted - the flight recorder has no"
         echo "persistence; check $HOST/api/events for the mount failure line."
       fi

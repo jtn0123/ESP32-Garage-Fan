@@ -272,7 +272,9 @@ static void handle_sensors() {
   // further to chase a number that could not respond until the next sample
   // (2026-08-09). The console polls this once a minute and calls the result
   // `live`; it should be live. Costs one forced BME280 conversion.
-  float t, h, p;
+  float t;
+  float h;
+  float p;
   if (!climate::sample(&t, &h, &p)) {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
@@ -400,18 +402,23 @@ static void handle_sd_format() {
   eventlog::log("sd", "format: mounted=%d baseline=%d erased=%d used %lu->%lu MB", mounted ? 1 : 0,
                 baseline_known ? 1 : 0, erased ? 1 : 0, (unsigned long)used_before,
                 (unsigned long)used_after);
-  const char* note = !baseline_known
-                         ? "card was not mounted before the call; whether the filesystem was "
-                           "rewritten cannot be measured from here"
-                     : erased ? "erased"
-                              : "nothing erased: the card already held a mountable filesystem";
+  const char* note = "nothing erased: the card already held a mountable filesystem";
+  const char* erased_json = "false";
+  if (!baseline_known) {
+    note =
+        "card was not mounted before the call; whether the filesystem was "
+        "rewritten cannot be measured from here";
+    erased_json = "null";
+  } else if (erased) {
+    note = "erased";
+    erased_json = "true";
+  }
   char buf[352];
   snprintf(buf, sizeof(buf),
            "{\"ok\":%s,\"erased\":%s,\"total_mb\":%lu,\"used_before_mb\":%lu,\"used_mb\":%lu,"
            "\"note\":\"%s\"}",
-           mounted ? "true" : "false", !baseline_known ? "null" : (erased ? "true" : "false"),
-           (unsigned long)sdcard::total_mb(), (unsigned long)used_before, (unsigned long)used_after,
-           note);
+           mounted ? "true" : "false", erased_json, (unsigned long)sdcard::total_mb(),
+           (unsigned long)used_before, (unsigned long)used_after, note);
   g_http.send(mounted ? 200 : 500, "application/json", buf);
 }
 

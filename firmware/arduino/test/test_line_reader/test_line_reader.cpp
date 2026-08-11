@@ -35,6 +35,8 @@ class StringSource {
 
 }  // namespace
 
+// Unity requires both lifecycle hooks; these tests keep no fixture state,
+// so there is nothing to set up or release between cases.
 void setUp() {}
 void tearDown() {}
 

@@ -46,14 +46,14 @@ class LineReader {
     bool consumed = false;
     for (;;) {
       if (pos_ >= len_) {
-        const int got = static_cast<int>(src_.read(buf_, kBlock));
+        const auto got = static_cast<int>(src_.read(buf_, kBlock));
         if (got <= 0)
           break;
         len_ = static_cast<size_t>(got) > kBlock ? kBlock : static_cast<size_t>(got);
         pos_ = 0;
       }
       consumed = true;
-      const char c = static_cast<char>(buf_[pos_++]);
+      const auto c = static_cast<char>(buf_[pos_++]);
       if (c == '\n') {
         out[n] = '\0';
         return true;
