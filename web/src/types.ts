@@ -159,6 +159,8 @@ export interface PurgeResult {
   dirs: number;
   remaining: number;
   skipped_dirs: number;
+  /** Entries whose path exceeded the walk's buffer; skipped rather than risked. */
+  too_long: number;
   leftover: string;
   free_before_mb: number;
   free_mb: number;

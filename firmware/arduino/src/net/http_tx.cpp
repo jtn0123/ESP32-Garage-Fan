@@ -87,6 +87,11 @@ bool Chunked::printf(const char* fmt, ...) {
   return r;
 }
 
+void Chunked::abort() {
+  w_.abort();
+  c_.stop();
+}
+
 void Chunked::end() {
   const bool was_ended = w_.ended();
   w_.end();

@@ -212,8 +212,39 @@ static void many_small_writes_reassemble_exactly() {
   TEST_ASSERT_EQUAL_STRING(expect.c_str(), body.c_str());
 }
 
+// A chunked body is only complete when the zero-length chunk arrives. A
+// producer that hits a read error must NOT send it, or the client accepts a
+// short file as whole -- for the core dump, a corrupt ELF that decodes to
+// nonsense.
+static void abort_withholds_the_terminating_chunk() {
+  FakeSink s;
+  Writer w(s);
+  w.begin("application/octet-stream");
+  // Long enough to force a flush, so some body really is on the wire -- the
+  // realistic case, since the core-dump reader sends 512-byte blocks. Anything
+  // still sitting in the buffer is deliberately dropped by abort().
+  w.print("ABCDEFGHIJKLMNOP");
+  w.abort();
+  TEST_ASSERT_NOT_NULL(strstr(s.out.c_str(), "ABCDEFGH"));
+  TEST_ASSERT_NULL(strstr(s.out.c_str(), "0\r\n\r\n"));
+  TEST_ASSERT_FALSE(w.ok());
+}
+
+static void end_after_abort_still_sends_nothing() {
+  FakeSink s;
+  Writer w(s);
+  w.begin("application/octet-stream");
+  w.print("partial");
+  w.abort();
+  const size_t after = s.out.size();
+  w.end();  // the destructor will do this too
+  TEST_ASSERT_EQUAL_size_t(after, s.out.size());
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(abort_withholds_the_terminating_chunk);
+  RUN_TEST(end_after_abort_still_sends_nothing);
   RUN_TEST(head_then_one_chunk_then_terminator);
   RUN_TEST(an_empty_body_still_terminates);
   RUN_TEST(content_longer_than_the_buffer_splits_correctly);

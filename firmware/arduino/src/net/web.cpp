@@ -205,14 +205,24 @@ static void handle_crash_raw() {
   http_tx::Chunked tx(g_http.client(), "application/octet-stream",
                       "Content-Disposition: attachment; filename=coredump.elf\r\n");
   uint8_t chunk[512];
+  bool whole = true;
   for (size_t off = 0; off < size && tx.ok(); off += sizeof(chunk)) {
     const size_t want = (size - off) < sizeof(chunk) ? (size - off) : sizeof(chunk);
-    if (!coredump::read_image(off, chunk, want))
+    if (!coredump::read_image(off, chunk, want)) {
+      whole = false;
       break;
+    }
     esp_task_wdt_reset();
     tx.write(reinterpret_cast<const char*>(chunk), want);
   }
-  tx.end();
+  // A failed READ used to break out and still call end(), which sends the
+  // terminating chunk -- so a short ELF arrived looking complete and decoded
+  // to nonsense. Only a body we actually read in full gets finalized. (A failed
+  // WRITE already suppresses the terminator through the writer's sticky state.)
+  if (whole)
+    tx.end();
+  else
+    tx.abort();
 }
 
 // Token-guarded: drop the stored dump so the next panic is unambiguous.
@@ -732,6 +742,10 @@ static void handle_sd_purge() {
     snprintf(note, sizeof(note),
              "space reclaimed; %lu entr%s the filesystem will not remove (first: %s)",
              (unsigned long)r.remaining, r.remaining == 1 ? "y remains" : "ies remain", r.leftover);
+  } else if (r.too_long) {
+    snprintf(note, sizeof(note),
+             "%lu entr%s had paths too long to act on safely and were left alone",
+             (unsigned long)r.too_long, r.too_long == 1 ? "y" : "ies");
   } else if (r.skipped_dirs) {
     snprintf(note, sizeof(note),
              "%lu director%s did not fit the walk queue; run again to reach them",
@@ -742,11 +756,12 @@ static void handle_sd_purge() {
   char buf[576];
   snprintf(buf, sizeof(buf),
            "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"remaining\":%lu,\"skipped_dirs\":%lu,"
-           "\"leftover\":\"%s\",\"free_before_mb\":%lu,\"free_mb\":%lu,\"complete\":%s,"
-           "\"restarting\":true,\"note\":\"%s\"}",
+           "\"too_long\":%lu,\"leftover\":\"%s\",\"free_before_mb\":%lu,\"free_mb\":%lu,"
+           "\"complete\":%s,\"restarting\":true,\"note\":\"%s\"}",
            (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)r.remaining,
-           (unsigned long)r.skipped_dirs, r.leftover, (unsigned long)free_before,
-           (unsigned long)sdcard::free_mb(), r.complete ? "true" : "false", note);
+           (unsigned long)r.skipped_dirs, (unsigned long)r.too_long, r.leftover,
+           (unsigned long)free_before, (unsigned long)sdcard::free_mb(),
+           r.complete ? "true" : "false", note);
   g_http.send(200, "application/json", buf);
 
   // Restart after a purge, deliberately.

@@ -334,6 +334,7 @@ using PathSlot = char[kPathMax];
 
 struct PurgeScratch {
   size_t cap = 0;
+  uint32_t too_long = 0;  // entries whose path did not fit kPathMax
   PathSlot* batch = nullptr;
   bool* batch_dir = nullptr;
   purge_logic::Queue dirq;
@@ -361,6 +362,7 @@ bool scratch_alloc() {
     g_scratch.batch = static_cast<PathSlot*>(m);
     g_scratch.batch_dir = reinterpret_cast<bool*>(static_cast<char*>(m) + cap * kPathMax);
     g_scratch.dirq.reset();
+    g_scratch.too_long = 0;
     return true;
   }
   eventlog::log("sd", "purge: no memory for a scratch batch (largest=%lu)",
@@ -393,9 +395,19 @@ size_t scan_dir(const char* path) {
     File e = dir.openNextFile();
     if (!e)
       break;
-    snprintf(g_scratch.batch[n], kPathMax, "%s", e.path());
+    // A path that does not FIT must not be acted on. snprintf truncates
+    // silently, and a truncated path is a different, usually shorter, path --
+    // so the delete below would remove the wrong entry, or the traversal would
+    // descend somewhere else entirely. Skip it and count it; purge() then
+    // reports incomplete rather than claiming a card it never fully walked.
+    const int w = snprintf(g_scratch.batch[n], kPathMax, "%s", e.path());
+    const bool fits = w > 0 && static_cast<size_t>(w) < kPathMax;
     g_scratch.batch_dir[n] = e.isDirectory();
     e.close();
+    if (!fits) {
+      g_scratch.too_long++;
+      continue;  // n is not advanced: the slot is reused by the next entry
+    }
     // Queue subdirectories for their own pass rather than descending here.
     // Queue::push owns the dedupe and the bound -- see purge_logic.h for why
     // both matter (a parent rescanned for more files sees its children every
@@ -463,6 +475,10 @@ PurgeResult purge() {
       r.dirs++;
   }
   r.skipped_dirs = dirq.skipped();
+  r.too_long = g_scratch.too_long;
+  if (r.too_long)
+    eventlog::log("sd", "purge: %lu entries have paths longer than %u; not touched",
+                  (unsigned long)r.too_long, (unsigned)kPathMax);
   if (r.skipped_dirs)
     eventlog::log("sd", "purge: %u dirs beyond the queue bound; run again",
                   (unsigned)r.skipped_dirs);
@@ -503,7 +519,8 @@ PurgeResult purge() {
   // r.remaining stayed 0, which would have made this true and told the operator
   // "card contents deleted" on the strength of a check that did not happen --
   // the exact inference the comment above rejects.
-  r.complete = verified && purge_logic::complete(budget, r.skipped_dirs, r.remaining);
+  r.complete =
+      verified && r.too_long == 0 && purge_logic::complete(budget, r.skipped_dirs, r.remaining);
   // Name the first survivor. "Some entries could not be deleted" with no
   // indication of WHICH is the kind of report that cannot be acted on.
   if (r.remaining)

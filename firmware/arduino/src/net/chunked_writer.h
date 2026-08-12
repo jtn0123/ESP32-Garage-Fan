@@ -81,6 +81,19 @@ class ChunkedWriter {
     return write(tmp, static_cast<size_t>(n));
   }
 
+  /**
+   * Abandon the body: close WITHOUT the terminating chunk.
+   *
+   * A chunked response is only complete when the zero-length chunk arrives, so
+   * omitting it is how a producer says "this is truncated". Sending it after a
+   * failed read would hand the client a short file that looks whole -- for a
+   * core dump, a corrupt ELF that decodes to nonsense.
+   */
+  void abort() {
+    ended_ = true;
+    ok_ = false;
+  }
+
   /** Flush and send the terminating zero-length chunk. Idempotent. */
   void end() {
     if (ended_)

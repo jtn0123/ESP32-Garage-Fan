@@ -60,6 +60,9 @@ class Chunked {
   /** Flush, send the terminating chunk and close. Safe to call twice. */
   void end();
 
+  /** Close WITHOUT the terminating chunk, marking the body truncated. */
+  void abort();
+
   bool ok() const { return w_.ok(); }
 
  private:

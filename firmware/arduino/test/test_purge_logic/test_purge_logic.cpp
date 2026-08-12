@@ -138,6 +138,14 @@ static void foreign_entries_are_reported() {
   // as one of ours and purge() could report the card clear with it still on it.
   TEST_ASSERT_FALSE(is_our_file("/Climate-2019-holiday.jpg"));
   TEST_ASSERT_FALSE(is_our_file("/climate-notes.txt"));
+  // Only the exact shape log_sample() writes counts. A looser rule drops a
+  // foreign file from the leftover count, so purge() reports the card clear
+  // with it still on it.
+  TEST_ASSERT_FALSE(is_our_file("/climate-notes.csv"));    // right suffix, wrong stem
+  TEST_ASSERT_FALSE(is_our_file("/climate-2026.csv"));     // too few digits
+  TEST_ASSERT_FALSE(is_our_file("/climate-2026081.csv"));  // too many
+  TEST_ASSERT_FALSE(is_our_file("/climate-20260a.csv"));   // not all digits
+  TEST_ASSERT_TRUE(is_our_file("/climate-202608.csv"));    // and the real one still matches
 }
 
 static void completeness_needs_all_three_conditions() {

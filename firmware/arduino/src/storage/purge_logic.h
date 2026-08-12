@@ -103,12 +103,22 @@ inline bool is_our_file(const char* path) {
   const char* base = slash ? slash + 1 : path;
   if (strcasecmp(base, "events.log") == 0 || strcasecmp(base, "events.old") == 0)
     return true;
-  // "climate-" AND ".csv". The prefix alone claimed anything starting that way
-  // -- Climate-2019-holiday.jpg included -- so a foreign file was excluded from
-  // the leftover count and purge() could report the card clear with it still
-  // sitting there.
-  const size_t n = strlen(base);
-  return n > 12 && strncasecmp(base, "climate-", 8) == 0 && strcasecmp(base + n - 4, ".csv") == 0;
+  // EXACTLY the shape log_sample() writes: climate-YYYYMM.csv. Anything looser
+  // claims a foreign file as ours and drops it from the leftover count, so
+  // purge() can report the card clear with it still sitting there. This has now
+  // been wrong twice -- first a bare "climate-" prefix (Climate-2019-holiday.jpg
+  // matched), then "climate-*.csv" (climate-notes.csv matched).
+  constexpr size_t kStem = 8;                   // "climate-"
+  constexpr size_t kDigits = 6;                 // YYYYMM
+  constexpr size_t kLen = kStem + kDigits + 4;  // + ".csv"
+  if (strlen(base) != kLen || strncasecmp(base, "climate-", kStem) != 0 ||
+      strcasecmp(base + kStem + kDigits, ".csv") != 0)
+    return false;
+  for (size_t i = kStem; i < kStem + kDigits; i++) {
+    if (base[i] < '0' || base[i] > '9')
+      return false;
+  }
+  return true;
 }
 
 /** Did the sweep finish: nothing foreign left, no bound hit, budget to spare. */
