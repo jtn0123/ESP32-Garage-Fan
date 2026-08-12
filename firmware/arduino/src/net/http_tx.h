@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdio>
 
+#include "net/chunked_writer.h"
+
 namespace http_tx {
 
 /** Send exactly n bytes on fd s, or give up without ever stalling loop(). */
@@ -50,26 +52,29 @@ class Chunked {
   ~Chunked() { end(); }
 
   /** Append to the body. False once the peer has gone; further calls no-op. */
-  bool write(const char* p, size_t n);
-  bool print(const char* s);
+  bool write(const char* p, size_t n) { return w_.write(p, n); }
+  bool print(const char* s) { return w_.print(s); }
   /** printf into the buffer. Truncation is treated as a send failure. */
   bool printf(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
   /** Flush, send the terminating chunk and close. Safe to call twice. */
   void end();
 
-  bool ok() const { return ok_; }
+  /** Close WITHOUT the terminating chunk, marking the body truncated. */
+  void abort();
+
+  bool ok() const { return w_.ok(); }
 
  private:
-  bool flush();
+  /** The framing lives in net::ChunkedWriter; this is only the transport. */
+  struct ClientSink {
+    int fd = -1;
+    bool send(const char* p, size_t n);
+  };
 
-  static constexpr size_t kBuf = 1024;
   WiFiClient c_;
-  int fd_ = -1;
-  bool ok_ = false;
-  bool ended_ = false;
-  size_t len_ = 0;
-  char buf_[kBuf];
+  ClientSink sink_;  // declared before w_: w_ holds a reference
+  net::ChunkedWriter<ClientSink> w_;
 };
 
 }  // namespace http_tx

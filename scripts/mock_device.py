@@ -363,6 +363,10 @@ class H(BaseHTTPRequestHandler):
         "/api/events": _events,
         "/api/history": _history,
         "/download.csv": _csv,
+        # Reads, but token-guarded: a core dump is a RAM snapshot and RAM holds
+        # the token, the WiFi PSK and the MQTT password. See handle_crash().
+        "/api/crash": _needs_token,
+        "/api/crash.bin": _needs_token,
     }
     WRITES = {
         "/api/set": _set,

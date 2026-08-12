@@ -21,6 +21,7 @@
 #include "generated_page.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
+#include "net/origin_check.h"
 #include "net/sse.h"
 #include "net/web_debug.h"
 #include "net/web_ota.h"
@@ -29,6 +30,7 @@
 #include "sensors/climate.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
+#include "system/coredump.h"
 #include "system/crashlog.h"
 #include "system/eventlog.h"
 #include "system/odometer.h"
@@ -86,18 +88,15 @@ bool token_ok(const String& presented) { return g_token[0] != '\0' && presented 
 bool origin_ok() {
   if (!g_http.hasHeader("Origin"))
     return true;  // non-browser caller
+  // The comparison itself is net::origin_is_self, which the host tests cover
+  // (native_origin_check) -- including the lookalike hosts a prefix match
+  // would have let through.
+  // Present-but-empty is NOT absent. origin_is_self treats "" as "no browser
+  // sent one", which is right for a missing header and wrong here: the client
+  // did send it. sse.cpp already drew this distinction; both now agree.
   const String origin = g_http.header("Origin");
-  if (origin.length() == 0 || origin == "null")
-    return false;
-  char self[64];
-  snprintf(self, sizeof(self), "http://%s", WiFi.localIP().toString().c_str());
-  if (origin.equalsIgnoreCase(self))
-    return true;
-  snprintf(self, sizeof(self), "http://%s", FAN_HOSTNAME);
-  if (origin.equalsIgnoreCase(self))
-    return true;
-  snprintf(self, sizeof(self), "http://%s.local", FAN_HOSTNAME);
-  return origin.equalsIgnoreCase(self);
+  return origin.length() > 0 &&
+         net::origin_is_self(origin.c_str(), WiFi.localIP().toString().c_str(), FAN_HOSTNAME);
 }
 
 /** origin_ok() with the 403 already sent. True means "keep going". */
@@ -178,6 +177,84 @@ static void json_str(char* dst, size_t cap, const char* src) {
     dst[j++] = src[i];
   }
   dst[j] = 0;
+}
+
+// The last panic, decoded on-device.
+//
+// Answers the question the flight recorder could not: a panic used to reach us
+// as the bare word "panic" because IDF prints the backtrace over a UART this
+// board's CDC drops. The dump was always in flash; see system/coredump.h.
+// Both core-dump reads are token-gated, unlike the rest of the read-only API.
+// A core dump is a snapshot of RAM at the moment of the fault, and RAM at that
+// moment holds g_token itself, plus the WiFi and MQTT credentials. Serving it
+// to any LAN client hands over the exact secret that guards OTA -- a read that
+// escalates to full control of the board. Origin checks do not help here: they
+// stop a browser on another site from FORGING a request, not a client that
+// simply asks. /api/crash/erase was already gated; these two were not.
+static bool crash_auth_ok() {
+  if (token_ok(g_http.arg("token")))
+    return true;
+  g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+  return false;
+}
+
+static void handle_crash() {
+  if (!crash_auth_ok())
+    return;
+  char buf[768];
+  const size_t n = coredump::to_json(buf, sizeof(buf));
+  if (n == 0) {
+    g_http.send(500, "application/json", "{\"error\":\"could not read the core dump\"}");
+    return;
+  }
+  g_http.send(200, "application/json", buf);
+}
+
+// The raw ELF core dump, for scripts/decode_crash.py to turn the backtrace PCs
+// into file:line against the matching build.
+static void handle_crash_raw() {
+  if (!crash_auth_ok())
+    return;
+  size_t addr = 0, size = 0;
+  if (!coredump::image_range(&addr, &size) || size == 0) {
+    g_http.send(404, "application/json", "{\"error\":\"no core dump stored\"}");
+    return;
+  }
+  http_tx::Chunked tx(g_http.client(), "application/octet-stream",
+                      "Content-Disposition: attachment; filename=coredump.elf\r\n");
+  uint8_t chunk[512];
+  bool whole = true;
+  for (size_t off = 0; off < size && tx.ok(); off += sizeof(chunk)) {
+    const size_t want = (size - off) < sizeof(chunk) ? (size - off) : sizeof(chunk);
+    if (!coredump::read_image(off, chunk, want)) {
+      whole = false;
+      break;
+    }
+    esp_task_wdt_reset();
+    tx.write(reinterpret_cast<const char*>(chunk), want);
+  }
+  // A failed READ used to break out and still call end(), which sends the
+  // terminating chunk -- so a short ELF arrived looking complete and decoded
+  // to nonsense. Only a body we actually read in full gets finalized. (A failed
+  // WRITE already suppresses the terminator through the writer's sticky state.)
+  if (whole)
+    tx.end();
+  else
+    tx.abort();
+}
+
+// Token-guarded: drop the stored dump so the next panic is unambiguous.
+static void handle_crash_erase() {
+  if (!guard_origin())
+    return;
+  if (!token_ok(g_http.arg("token"))) {
+    g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+    return;
+  }
+  const bool ok = coredump::erase();
+  eventlog::log("crash", "core dump erased by request (%s)", ok ? "ok" : "failed");
+  g_http.send(ok ? 200 : 500, "application/json",
+              ok ? "{\"ok\":true}" : "{\"error\":\"erase failed\"}");
 }
 
 static void handle_stats() {
@@ -665,15 +742,66 @@ static void handle_sd_purge() {
   }
   const uint32_t free_before = sdcard::free_mb();
   const sdcard::PurgeResult r = sdcard::purge();
-  char buf[288];
+  // Three distinct "not finished" cases, and they need different advice. The
+  // first real purge reclaimed all 28 GB and then reported "stopped at the
+  // entry bound; run again" -- the bound was nowhere near hit (208 entries of
+  // 20000); the card simply had the fan's own log back in it by the time the
+  // check ran. A queue-bound stop is likewise NOT the entry bound, and saying
+  // so pointed the operator at a limit they could not reconcile with what the
+  // purge had actually touched.
+  char note[192];
+  if (r.complete) {
+    snprintf(note, sizeof(note), "card contents deleted; filesystem left in place");
+  } else if (r.remaining) {
+    // Name it. Running again cannot remove a FAT entry that already refused --
+    // in practice this is macOS's .Spotlight-V100 stub, which is harmless and
+    // occupies nothing, and telling the operator to retry forever is worse
+    // than telling them what is actually there.
+    snprintf(note, sizeof(note),
+             "space reclaimed; %lu entr%s the filesystem will not remove (first: %s)",
+             (unsigned long)r.remaining, r.remaining == 1 ? "y remains" : "ies remain", r.leftover);
+  } else if (r.too_long) {
+    snprintf(note, sizeof(note),
+             "%lu entr%s had paths too long to act on safely and were left alone",
+             (unsigned long)r.too_long, r.too_long == 1 ? "y" : "ies");
+  } else if (r.skipped_dirs) {
+    snprintf(note, sizeof(note),
+             "%lu director%s did not fit the walk queue; run again to reach them",
+             (unsigned long)r.skipped_dirs, r.skipped_dirs == 1 ? "y" : "ies");
+  } else {
+    snprintf(note, sizeof(note), "stopped at the entry bound; run again to continue");
+  }
+  char buf[576];
   snprintf(buf, sizeof(buf),
-           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"free_before_mb\":%lu,\"free_mb\":%lu,"
-           "\"complete\":%s,\"note\":\"%s\"}",
-           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)free_before,
-           (unsigned long)sdcard::free_mb(), r.complete ? "true" : "false",
-           r.complete ? "card contents deleted; filesystem left in place"
-                      : "stopped at the entry bound; run again to continue");
+           "{\"ok\":true,\"files\":%lu,\"dirs\":%lu,\"remaining\":%lu,\"skipped_dirs\":%lu,"
+           "\"too_long\":%lu,\"leftover\":\"%s\",\"free_before_mb\":%lu,\"free_mb\":%lu,"
+           "\"complete\":%s,\"restarting\":true,\"note\":\"%s\"}",
+           (unsigned long)r.files, (unsigned long)r.dirs, (unsigned long)r.remaining,
+           (unsigned long)r.skipped_dirs, (unsigned long)r.too_long, r.leftover,
+           (unsigned long)free_before, (unsigned long)sdcard::free_mb(),
+           r.complete ? "true" : "false", note);
   g_http.send(200, "application/json", buf);
+
+  // Restart after a purge, deliberately.
+  //
+  // HONEST ACCOUNTING: twice on 2026-08-11 the deployed board panicked roughly
+  // 75-100 s AFTER a purge that had already returned success -- long after the
+  // handler was done, with nothing on the tape between the purge line and the
+  // reboot. The first time was a stack overflow in the old recursive walk and
+  // is fixed; the second, on the iterative version, is NOT explained. Mass
+  // deletion evidently leaves something in the SD/FATFS layer that faults on a
+  // later access.
+  //
+  // Rebuilding that state from a clean boot removes the window, the same way
+  // one reboots after an fsck rather than trusting a repaired filesystem live.
+  // It is a workaround, not a diagnosis, and it is written down here as such:
+  // if the underlying fault is ever found, this restart should go with it.
+  // The fan itself is unaffected -- the RMT peripheral holds its duty across a
+  // reset, and the console's own restart button already works this way.
+  eventlog::log("sd", "purge done; restarting to rebuild filesystem state");
+  eventlog::flush_tick();
+  delay(200);
+  esp_restart();
 }
 
 // Calibration instrument: drive an arbitrary duty, no reflash per data point.
@@ -788,6 +916,9 @@ void begin(Preferences* prefs) {
   g_http.on("/api/sdformat", HTTP_POST, handle_sd_format);
   g_http.on("/api/sdpurge", HTTP_POST, handle_sd_purge);
   g_http.on("/api/events", handle_events);
+  g_http.on("/api/crash", handle_crash);
+  g_http.on("/api/crash.bin", handle_crash_raw);
+  g_http.on("/api/crash/erase", HTTP_POST, handle_crash_erase);
   web_debug::register_routes(g_http, g_token);
   web_ota::register_routes(g_http, g_token);
   g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });

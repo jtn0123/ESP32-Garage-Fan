@@ -91,7 +91,15 @@ while [[ $SECONDS -lt $deadline ]]; do
   state=$(curl -s -m 5 "http://$HOST/api/state" 2>/dev/null || true)  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
   if [[ -n "$state" ]]; then
     fw=$(echo "$state" | sed -n 's/.*"fw":"\([^"]*\)".*/\1/p')  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
-    confirmed=$(echo "$state" | sed -n 's/.*"confirmed":\(true\|false\).*/\1/p')  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+    # [a-z]*, not \(true\|false\): BRE alternation with \| is a GNU extension
+    # that BSD/macOS sed does not support, so on the machine this script is
+    # actually run from it matched nothing, `confirmed` stayed empty, and the
+    # verify looped to its timeout. It then printed DEPLOY UNCONFIRMED --
+    # telling the operator the image never reached the broker and to consider
+    # power-cycling -- for a board that had confirmed in 3 seconds. The `fw`
+    # line above uses plain BRE, which is why the version was read fine and
+    # only the confirmation went missing. (Seen for real deploying 1.14.23.)
+    confirmed=$(echo "$state" | sed -n 's/.*"confirmed":\([a-z]*\).*/\1/p')  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
     if [[ "$fw" = "$EXPECTED_FW" && "$confirmed" = "true" ]]; then
       # --- post-deploy smoke ---------------------------------------------------
       # The version match proves the bytes arrived; these prove the boot is
