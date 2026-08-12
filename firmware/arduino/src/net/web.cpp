@@ -31,8 +31,10 @@
 #include "storage/history.h"
 #include "storage/sdcard.h"
 #include "system/coredump.h"
+#include "net/base64_stream.h"
 #include "system/crashlog.h"
 #include "system/eventlog.h"
+#include "ui/display.h"
 #include "system/odometer.h"
 #include "system/ota_rollback.h"
 #include "system/timeutil.h"
@@ -212,6 +214,57 @@ static void handle_crash() {
 
 // The raw ELF core dump, for scripts/decode_crash.py to turn the backtrace PCs
 // into file:line against the matching build.
+/**
+ * GET /api/display -- the panel's last frame, so the console can mirror it.
+ *
+ * Two 1-bit planes, base64'd, in OUR row-major format rather than the driver's
+ * column-major rotated one (see ui/display.h). These are the same bytes that
+ * were clocked to the glass, so the browser cannot drift from the device: a
+ * re-implementation of the layout in JS would look right and be wrong the first
+ * time either side changed, which is exactly what the deleted UI-codegen
+ * pipeline existed to manage.
+ *
+ * Streamed: the two planes are 3904 bytes each and base64 inflates them to
+ * ~10.4 KB, well past the largest contiguous block this board can promise.
+ */
+static void handle_display() {
+  const uint8_t* black = display::plane_black();
+  const uint8_t* red = display::plane_red();
+  if (!black || !red) {
+    // Not an error: the panel simply has not painted yet. The console shows
+    // "waiting for the first refresh" rather than an empty frame that looks
+    // like a broken display.
+    g_http.send(200, "application/json",
+                "{\"ready\":false,\"w\":0,\"h\":0,\"stride\":0,\"tricolor\":false,"
+                "\"age_s\":-1,\"black\":\"\",\"red\":\"\"}");
+    return;
+  }
+  http_tx::Chunked tx(g_http.client(), "application/json");
+  tx.printf("{\"ready\":true,\"w\":%u,\"h\":%u,\"stride\":%u,\"tricolor\":%s,\"age_s\":%ld,",
+            (unsigned)display::width(), (unsigned)display::height(), (unsigned)display::stride(),
+            display::tricolor() ? "true" : "false", (long)display::age_s());
+  const size_t n = display::plane_bytes();
+  auto sink = [&tx](const char* p, size_t len) { return tx.write(p, len); };
+  tx.print("\"black\":\"");
+  base64_stream::encode(black, n, sink);
+  tx.print("\",\"red\":\"");
+  base64_stream::encode(red, n, sink);
+  tx.print("\"}");
+  // A read failure mid-body must NOT be terminated as a complete document --
+  // the console would parse a truncated frame as a real one. Same rule as
+  // /api/crash.bin.
+  if (!tx.ok())
+    tx.abort();
+}
+
+/** POST /api/display/refresh -- repaint now instead of waiting for the cadence. */
+static void handle_display_refresh() {
+  if (!guard_origin())
+    return;
+  display::request_refresh();
+  g_http.send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handle_crash_raw() {
   if (!crash_auth_ok())
     return;
@@ -916,6 +969,8 @@ void begin(Preferences* prefs) {
   g_http.on("/api/sdformat", HTTP_POST, handle_sd_format);
   g_http.on("/api/sdpurge", HTTP_POST, handle_sd_purge);
   g_http.on("/api/events", handle_events);
+  g_http.on("/api/display", handle_display);
+  g_http.on("/api/display/refresh", HTTP_POST, handle_display_refresh);
   g_http.on("/api/crash", handle_crash);
   g_http.on("/api/crash.bin", handle_crash_raw);
   g_http.on("/api/crash/erase", HTTP_POST, handle_crash_erase);

@@ -22,6 +22,7 @@ Scenario knobs are flipped at runtime:
     curl "http://127.0.0.1:8099/_die"                 # controller goes away
 """
 
+import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
@@ -218,6 +219,103 @@ def _history_uncached():
     }
 
 
+# ------------------------------------------------------- the e-ink mirror
+#
+# A SYNTHETIC frame, not a reimplementation of ui/display.cpp. The console's
+# mirror is a framebuffer blitter with no layout logic of its own (see
+# web/src/panel.ts), so what it needs exercising is the wire shape and the
+# decode: two 1-bit planes, row-major, MSB first, correct stride, red over
+# black. Copying the firmware's layout here would be a second copy to keep in
+# step, which is the exact trap the framebuffer design avoids.
+#
+# It does track STATE["speed"], so the bar and the digits move when the console
+# drives the fan -- otherwise a test could not tell a live mirror from a
+# hardcoded picture.
+DISP_W = 250
+DISP_H = 122
+DISP_STRIDE = (DISP_W + 7) // 8
+
+# 3x5 digits, one string per glyph, row-major. Enough to read a speed off the
+# mock's panel; the real panel uses the Adafruit GFX font.
+_FONT3X5 = {
+    "0": ("111", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "111"),
+    "2": ("111", "001", "111", "100", "111"),
+    "3": ("111", "001", "111", "001", "111"),
+    "4": ("101", "101", "111", "001", "001"),
+    "5": ("111", "100", "111", "001", "111"),
+    "6": ("111", "100", "111", "101", "111"),
+    "7": ("111", "001", "001", "001", "001"),
+    "8": ("111", "101", "111", "101", "111"),
+    "9": ("111", "101", "111", "001", "111"),
+    "-": ("000", "000", "111", "000", "000"),
+    ".": ("000", "000", "000", "000", "100"),
+}
+
+
+class _Plane:
+    """A 1-bit, row-major, MSB-first plane -- the firmware's format."""
+
+    def __init__(self):
+        self.buf = bytearray(DISP_STRIDE * DISP_H)
+
+    def px(self, x, y):
+        if 0 <= x < DISP_W and 0 <= y < DISP_H:
+            self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
+
+    def rect(self, x, y, w, h):
+        for yy in range(y, y + h):
+            for xx in range(x, x + w):
+                self.px(xx, yy)
+
+    def frame(self, x, y, w, h):
+        for xx in range(x, x + w):
+            self.px(xx, y)
+            self.px(xx, y + h - 1)
+        for yy in range(y, y + h):
+            self.px(x, yy)
+            self.px(x + w - 1, yy)
+
+    def text(self, x, y, s, scale=1):
+        for ch in s:
+            glyph = _FONT3X5.get(ch)
+            if glyph:
+                for gy, row in enumerate(glyph):
+                    for gx, bit in enumerate(row):
+                        if bit == "1":
+                            self.rect(x + gx * scale, y + gy * scale, scale, scale)
+            x += 4 * scale
+
+
+def display_frame():
+    """Compose the mock's panel image and return it base64'd, plane by plane."""
+    black, red = _Plane(), _Plane()
+    speed = max(0, int(STATE["speed"]))
+
+    black.frame(0, 0, DISP_W, DISP_H)
+    red.rect(0, 14, DISP_W, 2)  # the header rule, red like the firmware's
+    black.rect(0, 15, DISP_W, 1)
+
+    # Left: the two temperatures.
+    black.text(6, 26, f"{STATE['outside_f']:.0f}", scale=4)
+    out_f = STATE["outside_f"]
+    black.text(6, 76, f"{out_f:.0f}", scale=3)
+
+    # Right: the fan, with a red bar whose fill follows the speed.
+    black.rect(126, 20, 1, 82)
+    black.text(136, 30, str(speed), scale=6)
+    bar_w = DISP_W - 132 - 6
+    black.frame(132, 72, bar_w, 10)
+    fill = int(round(speed / 12 * (bar_w - 2)))
+    if fill > 0:
+        red.rect(133, 73, fill, 8)
+        for x in range(133, 133 + fill, 3):
+            black.rect(x, 73, 1, 8)
+
+    black.rect(0, 104, DISP_W, 1)
+    return black, red
+
+
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -402,6 +500,28 @@ class H(BaseHTTPRequestHandler):
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
 
+    def _display(self, _query):
+        black, red = display_frame()
+        return self._json(
+            200,
+            {
+                "ready": True,
+                "w": DISP_W,
+                "h": DISP_H,
+                "stride": DISP_STRIDE,
+                # The mock stands in for the MONO part recorded in
+                # docs/HARDWARE.md, so the console renders accents grey and the
+                # "mono panel" note is what a test sees by default.
+                "tricolor": False,
+                "age_s": 42,
+                "black": base64.b64encode(bytes(black.buf)).decode(),
+                "red": base64.b64encode(bytes(red.buf)).decode(),
+            },
+        )
+
+    def _display_refresh(self, _query):
+        return self._json(200, {"ok": True})
+
     def _needs_token(self, _query):
         # Token-guarded on the real device; the mock always refuses, which is
         # what the console's error path should be exercised against.
@@ -416,6 +536,7 @@ class H(BaseHTTPRequestHandler):
         "/api/sensors": _sensors,
         "/api/events": _events,
         "/api/history": _history,
+        "/api/display": _display,
         "/download.csv": _csv,
         # Reads, but token-guarded: a core dump is a RAM snapshot and RAM holds
         # the token, the WiFi PSK and the MQTT password. See handle_crash().
@@ -425,6 +546,7 @@ class H(BaseHTTPRequestHandler):
     WRITES = {
         "/api/set": _set,
         "/api/config": _config,
+        "/api/display/refresh": _display_refresh,
         "/api/raw": _needs_token,
         "/api/restart": _needs_token,
         "/api/sdformat": _needs_token,

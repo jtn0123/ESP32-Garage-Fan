@@ -215,3 +215,19 @@ body{padding:0 16px 32px}
 .updlink:hover{color:var(--tx)}
 .updbtn{padding:6px 12px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-family:var(--sans);font-size:12.5px;background:transparent;color:var(--tx)}
 @media(max-width:900px){.upd,.updline{text-align:left;justify-content:flex-start}}
+
+/* The e-ink mirror in the settings drawer. The canvas is nearest-neighbour
+   scaled (see panel.ts) so it reads as a panel with hard pixels, not a photo
+   of one; the border and paper tone are there to make it look like glass on a
+   wall rather than another card in the page. */
+.pnl { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+#pnlcv {
+  width: 100%;
+  max-width: 500px;
+  height: auto;
+  image-rendering: pixelated;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #e8e4dc;
+}
+.pnlmsg { font-size: 11px; color: var(--dim); }
