@@ -58,6 +58,21 @@ def test_watchdog_is_armed_in_setup():
     assert "esp_task_wdt_add(NULL)" in body, "the loop task must be watched"
 
 
+def test_the_watchdog_is_configured_before_the_task_registers():
+    """init must precede add, or the prologue check measures nothing.
+
+    Every other test here slices the body at ``esp_task_wdt_add``. If add moved
+    above init, that slice would still look tidy while the watchdog was never
+    actually configured -- the checks would pass and the board would be exactly
+    as brickable as before.
+    """
+    body = strip_comments(setup_body())
+    assert body.index("esp_task_wdt_init") < body.index("esp_task_wdt_add"), (
+        "esp_task_wdt_add runs before esp_task_wdt_init, so the task registers "
+        "against an unconfigured watchdog and nothing enforces a timeout."
+    )
+
+
 # The specific calls that hung. Each one reaches flash or a driver, and each one
 # sat *above* the watchdog on the build that bricked.
 @pytest.mark.parametrize(

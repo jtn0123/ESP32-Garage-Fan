@@ -119,7 +119,12 @@ inline bool is_our_file(const char* path) {
     if (base[i] < '0' || base[i] > '9')
       return false;
   }
-  return true;
+  // ...and a month log_sample() could actually have written. All-digits is not
+  // enough: climate-202699.csv passed, so a foreign file with that name was
+  // dropped from the leftover count and purge() could report complete=true with
+  // it still on the card. Third time this predicate has been too generous.
+  const int month = (base[kStem + 4] - '0') * 10 + (base[kStem + 5] - '0');
+  return month >= 1 && month <= 12;
 }
 
 /** Did the sweep finish: nothing foreign left, no bound hit, budget to spare. */

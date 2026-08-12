@@ -145,7 +145,16 @@ static void foreign_entries_are_reported() {
   TEST_ASSERT_FALSE(is_our_file("/climate-2026.csv"));     // too few digits
   TEST_ASSERT_FALSE(is_our_file("/climate-2026081.csv"));  // too many
   TEST_ASSERT_FALSE(is_our_file("/climate-20260a.csv"));   // not all digits
-  TEST_ASSERT_TRUE(is_our_file("/climate-202608.csv"));    // and the real one still matches
+  // All-digits is still not enough: log_sample() writes %02d of tm_mon+1, so
+  // months outside 01..12 are shapes it cannot produce. Letting them through
+  // drops a foreign file from the leftover count, which is the same "purge()
+  // reports the card clear with something still on it" failure as above.
+  TEST_ASSERT_FALSE(is_our_file("/climate-202699.csv"));  // month 99
+  TEST_ASSERT_FALSE(is_our_file("/climate-202600.csv"));  // month 00
+  TEST_ASSERT_FALSE(is_our_file("/climate-202613.csv"));  // one past December
+  TEST_ASSERT_TRUE(is_our_file("/climate-202601.csv"));   // January, the boundary
+  TEST_ASSERT_TRUE(is_our_file("/climate-202612.csv"));   // December, the other one
+  TEST_ASSERT_TRUE(is_our_file("/climate-202608.csv"));   // and the real one still matches
 }
 
 static void completeness_needs_all_three_conditions() {

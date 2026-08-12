@@ -156,8 +156,81 @@ static void a_realistic_trail_reads_as_a_sequence() {
   TEST_ASSERT_EQUAL_STRING("setup@0 mqtt@3000 sd_purge@24000 epd@76000 web@91000", rendered());
 }
 
+// RTC memory can come back with the magic intact and the indexes garbage --
+// a partially-retained region after a brownout, say. valid() used to check the
+// magic alone, so drop() would take that garbage `next` straight into
+// entries[next] and write outside the array. The module that exists to explain
+// crashes must not be the one causing them.
+static void a_retained_magic_with_an_out_of_range_next_is_not_valid() {
+  crumb_ring::Ring r;
+  r.reset();
+  TEST_ASSERT_TRUE(r.valid());
+  r.next = crumb_ring::kSlots;  // one past the end
+  TEST_ASSERT_FALSE(r.valid());
+  r.next = 200;
+  TEST_ASSERT_FALSE(r.valid());
+}
+
+static void a_retained_magic_with_an_out_of_range_count_is_not_valid() {
+  crumb_ring::Ring r;
+  r.reset();
+  r.count = crumb_ring::kSlots + 1;
+  TEST_ASSERT_FALSE(r.valid());
+  // Exactly full is the legitimate maximum, not corruption.
+  r.count = crumb_ring::kSlots;
+  TEST_ASSERT_TRUE(r.valid());
+}
+
+// The payoff: a corrupt ring must heal on the next drop rather than scribble.
+static void dropping_into_a_corrupt_ring_resets_it_instead_of_overflowing() {
+  crumb_ring::Ring r;
+  r.reset();
+  r.next = 99;
+  r.count = 77;
+  r.drop("boot", 5);
+  TEST_ASSERT_TRUE(r.valid());
+  TEST_ASSERT_EQUAL_UINT8(1, r.count);
+  TEST_ASSERT_EQUAL_UINT8(1, r.next);
+  char out[64];
+  r.render(out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("boot@5", out);
+}
+
+static void a_corrupt_ring_renders_nothing_rather_than_garbage() {
+  crumb_ring::Ring r;
+  r.reset();
+  r.drop("a", 1);
+  r.next = 250;
+  char out[64];
+  r.render(out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+// A buffer that fits one entry and part of the next must end after the whole
+// one. snprintf writes the truncated prefix before we detect it, and half a
+// "tag@ms" pair reads as a step that never happened -- on a line whose entire
+// job is crash evidence.
+static void truncation_never_leaves_half_an_entry() {
+  crumb_ring::Ring r;
+  r.reset();
+  r.drop("sd_mount", 111);
+  r.drop("sd_write", 222);
+  char full[64];
+  r.render(full, sizeof(full));
+  TEST_ASSERT_EQUAL_STRING("sd_mount@111 sd_write@222", full);
+  // Room for "sd_mount@111" plus a few bytes of the second pair, but not all.
+  char out[20];
+  r.render(out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("sd_mount@111", out);
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(a_retained_magic_with_an_out_of_range_next_is_not_valid);
+  RUN_TEST(a_retained_magic_with_an_out_of_range_count_is_not_valid);
+  RUN_TEST(dropping_into_a_corrupt_ring_resets_it_instead_of_overflowing);
+  RUN_TEST(a_corrupt_ring_renders_nothing_rather_than_garbage);
+  RUN_TEST(truncation_never_leaves_half_an_entry);
   RUN_TEST(a_zeroed_ring_is_not_valid_and_renders_nothing);
   RUN_TEST(drops_render_oldest_first_with_timestamps);
   RUN_TEST(the_first_drop_makes_the_ring_valid);

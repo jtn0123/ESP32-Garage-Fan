@@ -58,12 +58,20 @@ struct Ring {
   /**
    * Was this written by a previous run rather than power-on noise?
    *
-   * Magic ONLY. An earlier version also required next <= 0xFFFF; the loop
-   * drops several crumbs per iteration, so that limit was passed in well under
-   * a minute and the ring reported itself invalid for the rest of the run --
-   * rendering nothing on precisely the boot after a long-running fault.
+   * Magic plus the two INDEX bounds. An earlier version also required
+   * next <= 0xFFFF; the loop drops several crumbs per iteration, so that limit
+   * was passed in well under a minute and the ring reported itself invalid for
+   * the rest of the run -- rendering nothing on precisely the boot after a
+   * long-running fault. That was a bound on a COUNTER and it was wrong.
+   *
+   * These two are bounds on INDEXES, which is a different thing: next is kept
+   * modulo kSlots and count saturates at kSlots, so no amount of running can
+   * push either out of range. Only corruption can -- and RTC memory that comes
+   * up with the magic intact but a garbage next is exactly what would make
+   * drop() write past `entries`. The module that exists to explain crashes must
+   * not be the one causing them.
    */
-  bool valid() const { return magic == kMagic; }
+  bool valid() const { return magic == kMagic && next < kSlots && count <= kSlots; }
 
   void reset() {
     magic = kMagic;
@@ -79,7 +87,7 @@ struct Ring {
   void drop(const char* tag, uint32_t now_ms) {
     if (!tag || !*tag)
       return;
-    if (magic != kMagic)
+    if (!valid())
       reset();  // first use, or RTC came up as noise after a power-on
     Entry& e = entries[next];
     e.ms = now_ms;
@@ -112,8 +120,13 @@ struct Ring {
         continue;
       const int w =
           snprintf(out + n, cap - n, n ? " %s@%lu" : "%s@%lu", e.tag, (unsigned long)e.ms);
-      if (w < 0 || static_cast<size_t>(w) >= cap - n)
+      if (w < 0 || static_cast<size_t>(w) >= cap - n) {
+        // snprintf already wrote a truncated prefix. Cut it back off: half a
+        // "tag@ms" pair reads as a real step that never happened, and this line
+        // is evidence at a crash site.
+        out[n] = '\0';
         break;
+      }
       n += static_cast<size_t>(w);
     }
   }
