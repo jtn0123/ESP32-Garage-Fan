@@ -6,6 +6,8 @@
 #include <SD.h>
 #include <SPI.h>
 
+#include <new>
+
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -310,37 +312,64 @@ constexpr uint32_t kPurgeMaxEntries = 20000;
 //    for the duration -- the board would sit unresponsive rather than reset.
 //    A batch this size collapses a realistic directory into a handful of
 //    passes.
-constexpr size_t kBatch = 2048;
+// The batch is sized at RUNTIME, because the two memory situations differ by
+// three orders of magnitude.
+//
+// kBatchPsram entries is ~200 KB, which PSRAM serves without noticing. Asking
+// the INTERNAL heap for that is hopeless -- this board's largest contiguous
+// block measures ~17 KB once WiFi is up, and the mount guard un-mounts the
+// card below 10 KB -- so a fixed-size struct with an internal-heap fallback
+// was a fallback that could never fire: on a board without PSRAM the
+// allocation simply failed and purge() deleted nothing while reporting
+// complete=false. A small batch just costs more passes, and scan_dir already
+// handles a partial one.
+constexpr size_t kBatchPsram = 2048;
+constexpr size_t kBatchDram = 48;  // ~4.6 KB, leaves the mount guard its room
 constexpr size_t kPathMax = purge_logic::kMaxPathLen;
 
 struct PurgeScratch {
-  char batch[kBatch][kPathMax];
-  bool batch_dir[kBatch];
+  size_t cap = 0;
+  char (*batch)[kPathMax] = nullptr;
+  bool* batch_dir = nullptr;
   purge_logic::Queue dirq;
 };
 
-PurgeScratch* g_scratch = nullptr;
+PurgeScratch g_scratch;
 
+// One block for both arrays: fewer allocations to fail, and nothing to leak
+// halfway through.
 bool scratch_alloc() {
-  if (g_scratch)
+  if (g_scratch.batch)
     return true;
-  void* m = heap_caps_calloc(1, sizeof(PurgeScratch), MALLOC_CAP_SPIRAM);
-  if (!m)  // no PSRAM on this board variant; the internal heap is the fallback
-    m = heap_caps_calloc(1, sizeof(PurgeScratch), MALLOC_CAP_8BIT);
-  if (!m) {
-    eventlog::log("sd", "purge: no memory for %u-entry scratch", (unsigned)kBatch);
-    return false;
+  struct Attempt {
+    size_t cap;
+    uint32_t caps;
+  };
+  static const Attempt kTries[] = {{kBatchPsram, MALLOC_CAP_SPIRAM}, {kBatchDram, MALLOC_CAP_8BIT}};
+  for (const Attempt& a : kTries) {
+    const size_t cap = a.cap;
+    const size_t bytes = cap * kPathMax + cap;
+    void* m = heap_caps_calloc(1, bytes, a.caps);
+    if (!m)
+      continue;
+    g_scratch.cap = cap;
+    g_scratch.batch = static_cast<char (*)[kPathMax]>(m);
+    g_scratch.batch_dir = reinterpret_cast<bool*>(static_cast<char*>(m) + cap * kPathMax);
+    g_scratch.dirq.reset();
+    return true;
   }
-  g_scratch = new (m) PurgeScratch();
-  return true;
+  eventlog::log("sd", "purge: no memory for a scratch batch (largest=%lu)",
+                (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  return false;
 }
 
 void scratch_free() {
-  if (!g_scratch)
+  if (!g_scratch.batch)
     return;
-  g_scratch->~PurgeScratch();
-  heap_caps_free(g_scratch);
-  g_scratch = nullptr;
+  heap_caps_free(g_scratch.batch);
+  g_scratch.batch = nullptr;
+  g_scratch.batch_dir = nullptr;
+  g_scratch.cap = 0;
 }
 
 // Fill the batch from `path`. Returns entries read; 0 means the directory is
@@ -355,19 +384,19 @@ size_t scan_dir(const char* path) {
     return 0;
   }
   size_t n = 0;
-  while (n < kBatch) {
+  while (n < g_scratch.cap) {
     File e = dir.openNextFile();
     if (!e)
       break;
-    snprintf(g_scratch->batch[n], kPathMax, "%s", e.path());
-    g_scratch->batch_dir[n] = e.isDirectory();
+    snprintf(g_scratch.batch[n], kPathMax, "%s", e.path());
+    g_scratch.batch_dir[n] = e.isDirectory();
     e.close();
     // Queue subdirectories for their own pass rather than descending here.
     // Queue::push owns the dedupe and the bound -- see purge_logic.h for why
     // both matter (a parent rescanned for more files sees its children every
     // time).
-    if (g_scratch->batch_dir[n])
-      g_scratch->dirq.push(g_scratch->batch[n]);
+    if (g_scratch.batch_dir[n])
+      g_scratch.dirq.push(g_scratch.batch[n]);
     n++;
     if ((n & 0x3F) == 0)
       esp_task_wdt_reset();
@@ -399,7 +428,7 @@ PurgeResult purge() {
   // queued and emptied in their own pass, then removed deepest-first at the
   // end (a later queue entry is always at least as deep as an earlier one, so
   // reverse order suffices).
-  purge_logic::Queue& dirq = g_scratch->dirq;
+  purge_logic::Queue& dirq = g_scratch.dirq;
   dirq.reset();
   dirq.push("/");
   for (size_t qi = 0; qi < dirq.size() && budget > 0; qi++) {
@@ -409,9 +438,9 @@ PurgeResult purge() {
       for (size_t i = 0; i < n && budget > 0; i++) {
         budget--;
         esp_task_wdt_reset();
-        if (g_scratch->batch_dir[i])
+        if (g_scratch.batch_dir[i])
           continue;  // emptied later from the queue
-        if (SD.remove(g_scratch->batch[i])) {
+        if (SD.remove(g_scratch.batch[i])) {
           r.files++;
           removed++;
         }

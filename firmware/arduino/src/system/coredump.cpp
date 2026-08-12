@@ -82,7 +82,7 @@ const char* exc_cause_name(uint32_t cause) {
  * as "ota_0" rather than "app0".
  *
  * Calling the esp_core_dump API without that partition is what took the board
- * off the network on 1.14.31: the check ran in setup() before WiFi, so a fault
+ * off the network on a since-fixed release: the check ran in setup() before WiFi, so a fault
  * there cost the radio and with it every means of recovery except the
  * boot-health rollback. Everything in this file now refuses to touch the API
  * unless the partition is really there, and the caller runs it only after the

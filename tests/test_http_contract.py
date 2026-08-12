@@ -50,10 +50,18 @@ def mock():
         pytest.fail("mock device did not start")
     yield proc
     proc.terminate()
-    proc.wait(timeout=5)
+    # communicate(), not wait() then read(): nothing drains the stderr pipe
+    # while the tests run, so a chatty mock could fill the OS buffer, block on
+    # write and hang the suite. kill() on timeout keeps a stubborn mock from
+    # holding the port for every later run.
+    try:
+        _, raw = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        _, raw = proc.communicate()
+    err = (raw or b"").decode(errors="replace")
     # A traceback here means a request crashed a handler, which is a defect
     # even when the response looked fine.
-    err = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
     assert "Traceback" not in err, f"mock raised during the suite:\n{err[-2000:]}"
 
 
@@ -149,6 +157,10 @@ def test_history_returns_one_shape_for_every_range(mock, days):
 def test_history_timestamps_are_real_and_ascending(mock):
     h = get_json("/api/history?days=1")
     ts = h["ts"]
+    # Before indexing: all() over an empty list is true, so an empty series
+    # would slip past the ordering check and fail with an IndexError below,
+    # hiding which part of the contract actually broke.
+    assert ts, "the 24 h range must return at least one row"
     assert all(b > a for a, b in zip(ts, ts[1:])), "timestamps must increase"
     assert ts[0] > 1_600_000_000, "timestamps must be real epochs, not indices"
 

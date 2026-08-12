@@ -91,8 +91,12 @@ bool origin_ok() {
   // The comparison itself is net::origin_is_self, which the host tests cover
   // (native_origin_check) -- including the lookalike hosts a prefix match
   // would have let through.
-  return net::origin_is_self(g_http.header("Origin").c_str(), WiFi.localIP().toString().c_str(),
-                             FAN_HOSTNAME);
+  // Present-but-empty is NOT absent. origin_is_self treats "" as "no browser
+  // sent one", which is right for a missing header and wrong here: the client
+  // did send it. sse.cpp already drew this distinction; both now agree.
+  const String origin = g_http.header("Origin");
+  return origin.length() > 0 &&
+         net::origin_is_self(origin.c_str(), WiFi.localIP().toString().c_str(), FAN_HOSTNAME);
 }
 
 /** origin_ok() with the 403 already sent. True means "keep going". */

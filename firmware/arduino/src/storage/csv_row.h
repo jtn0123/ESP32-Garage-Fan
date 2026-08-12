@@ -50,7 +50,10 @@ inline CsvRow parse_csv_row(const char* line) {
   if (*line < '0' || *line > '9')
     return r;
 
-  float tv, hv, pv, ov, bv;
+  // Initialised: sscanf only assigns the fields that exist, and the compiler
+  // cannot correlate that with `got`, so -Wmaybe-uninitialized can fire -- and
+  // CI builds with -Werror.
+  float tv = NAN, hv = NAN, pv = NAN, ov = NAN, bv = NAN;
   int sp = 0, cg = -1;
   const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d", &tv, &hv, &pv, &ov, &sp, &bv, &cg);
   if (got < 3)

@@ -12,7 +12,12 @@ RTC_DATA_ATTR Entry rtc_entries[kSlots];
 RTC_DATA_ATTR uint32_t rtc_next = 0;
 RTC_DATA_ATTR uint32_t rtc_magic = 0;
 
-bool valid() { return rtc_magic == kMagic && rtc_next <= 0xFFFF; }
+// Magic only. An earlier version also required rtc_next <= 0xFFFF, which was
+// simply wrong: the loop drops five crumbs per iteration, so the counter passes
+// 65536 in well under a minute of uptime and the ring went permanently
+// "invalid" -- rendering nothing on exactly the boot after a long-running
+// fault. The cursor is uint32_t and the modulo arithmetic wraps correctly.
+bool valid() { return rtc_magic == kMagic; }
 
 void reset() {
   rtc_magic = kMagic;

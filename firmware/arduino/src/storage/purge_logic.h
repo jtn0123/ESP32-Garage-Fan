@@ -29,8 +29,11 @@ constexpr size_t kMaxDirs = 64;
 /**
  * Bounded, de-duplicating FIFO of directories still to visit.
  *
- * Deliberately a plain fixed array: it lives in BSS, never on the stack, and
- * has no allocation to fail partway through a delete sweep.
+ * Deliberately a plain fixed array: its size is a compile-time constant that
+ * does not grow with the depth of the tree being walked, and it has no
+ * internal allocation to fail partway through a delete sweep. The CALLER
+ * owns where it lives -- sdcard.cpp keeps it in a scratch block that exists
+ * only for the duration of one purge.
  */
 class Queue {
  public:
@@ -98,8 +101,14 @@ inline bool is_our_file(const char* path) {
     return false;
   const char* slash = strrchr(path, '/');
   const char* base = slash ? slash + 1 : path;
-  return strcasecmp(base, "events.log") == 0 || strcasecmp(base, "events.old") == 0 ||
-         strncasecmp(base, "climate-", 8) == 0;
+  if (strcasecmp(base, "events.log") == 0 || strcasecmp(base, "events.old") == 0)
+    return true;
+  // "climate-" AND ".csv". The prefix alone claimed anything starting that way
+  // -- Climate-2019-holiday.jpg included -- so a foreign file was excluded from
+  // the leftover count and purge() could report the card clear with it still
+  // sitting there.
+  const size_t n = strlen(base);
+  return n > 12 && strncasecmp(base, "climate-", 8) == 0 && strcasecmp(base + n - 4, ".csv") == 0;
 }
 
 /** Did the sweep finish: nothing foreign left, no bound hit, budget to spare. */

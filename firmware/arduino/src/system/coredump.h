@@ -27,7 +27,7 @@
 // dump has ever been stored here. supported() reports that instead of
 // pretending, and every entry point refuses to call the IDF API without the
 // partition -- doing so in setup() before WiFi is what took the board off the
-// network on 1.14.31 and left the boot-health rollback as the only way home.
+// network on a since-fixed release and left the boot-health rollback as the only way home.
 //
 // Getting real core dumps on this unit means adding the partition, which
 // rewrites the partition table and therefore needs a USB flash; OTA cannot do

@@ -85,11 +85,16 @@ static void out_of_range_read_is_safe() {
   TEST_ASSERT_EQUAL_STRING("", q.at(5));
 }
 
-// THE OTHER BUG: 3 KB of batch buffer per recursion level smashed an 8 KB
-// stack. The queue must stay a fixed, BSS-sized structure -- if someone grows
-// kMaxDirs or kMaxPathLen carelessly this is the tripwire.
-static void queue_is_small_enough_to_never_live_on_the_stack() {
-  TEST_ASSERT_LESS_OR_EQUAL_UINT32(8192, (uint32_t)sizeof(Queue));
+// THE OTHER BUG: 3 KB of batch buffer per RECURSION LEVEL smashed an 8 KB
+// stack. The queue replaced that recursion, so what has to stay true is that
+// its footprint is a compile-time constant -- it must not grow with the depth
+// or breadth of the tree being walked. (Where it LIVES is now the caller's
+// choice: sdcard.cpp puts it in a scratch block for the duration of a purge.)
+static void queue_footprint_is_fixed_and_independent_of_tree_depth() {
+  constexpr size_t kExpected = sizeof(char[purge_logic::kMaxDirs][purge_logic::kMaxPathLen]);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT32((uint32_t)kExpected, (uint32_t)sizeof(Queue));
+  // Bookkeeping on top of the paths, not a second copy of them.
+  TEST_ASSERT_LESS_OR_EQUAL_UINT32((uint32_t)(kExpected + 64), (uint32_t)sizeof(Queue));
 }
 
 // ------------------------------------------------------------ loop control
@@ -129,6 +134,10 @@ static void foreign_entries_are_reported() {
   // Near-misses must not be waved through.
   TEST_ASSERT_FALSE(is_our_file("/events.log.bak"));
   TEST_ASSERT_FALSE(is_our_file("/myevents.log"));
+  // A bare "climate-" prefix used to claim these, so a holiday photo counted
+  // as one of ours and purge() could report the card clear with it still on it.
+  TEST_ASSERT_FALSE(is_our_file("/Climate-2019-holiday.jpg"));
+  TEST_ASSERT_FALSE(is_our_file("/climate-notes.txt"));
 }
 
 static void completeness_needs_all_three_conditions() {
@@ -154,7 +163,7 @@ int main() {
   RUN_TEST(empty_and_null_paths_are_refused);
   RUN_TEST(long_paths_are_truncated_not_overflowed);
   RUN_TEST(out_of_range_read_is_safe);
-  RUN_TEST(queue_is_small_enough_to_never_live_on_the_stack);
+  RUN_TEST(queue_footprint_is_fixed_and_independent_of_tree_depth);
   RUN_TEST(a_pass_that_removed_nothing_stops_the_rescan);
   RUN_TEST(our_own_files_are_not_foreign_leftovers);
   RUN_TEST(matching_is_case_insensitive_and_basename_based);

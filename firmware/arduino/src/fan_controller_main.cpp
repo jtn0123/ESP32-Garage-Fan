@@ -172,7 +172,7 @@ void loop() {
     // traffic fragments the heap past the filesystem's contiguous need.
     sdcard::on_network_up();
     // Crash forensics AFTER the radio, never before it. Run in setup() this
-    // cost the network on 1.14.31, and the network is the only thing that can
+    // cost the network on a since-fixed release, and the network is the only thing that can
     // deliver a fix. Nothing here is load-bearing enough to justify sitting in
     // front of it.
     coredump::log_at_boot();
