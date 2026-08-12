@@ -156,7 +156,7 @@ size_t to_json(char* out, size_t cap) {
 }
 
 bool image_range(size_t* addr, size_t* size) {
-  if (!addr || !size)
+  if (!addr || !size || !partition_exists())
     return false;
   return esp_core_dump_image_get(addr, size) == ESP_OK;
 }
@@ -169,7 +169,11 @@ bool read_image(size_t off, uint8_t* buf, size_t len) {
   return esp_partition_read(p, off, buf, len) == ESP_OK;
 }
 
-bool erase() { return esp_core_dump_image_erase() == ESP_OK; }
+// Every entry point checks the partition first. These two were the stragglers:
+// ESP-IDF only returns an error without one, so this is not the hang that
+// bricked the board -- but "some paths guard, some do not" is how that hang got
+// written in the first place, so the rule is all of them, no exceptions.
+bool erase() { return partition_exists() && esp_core_dump_image_erase() == ESP_OK; }
 
 void log_at_boot() {
   static bool done = false;

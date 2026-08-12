@@ -6,8 +6,6 @@
 #include <SD.h>
 #include <SPI.h>
 
-#include <new>
-
 #include <cmath>
 #include <cstdio>
 #include <cstring>
