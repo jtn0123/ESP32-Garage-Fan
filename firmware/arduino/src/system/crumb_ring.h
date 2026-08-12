@@ -1,6 +1,6 @@
 #pragma once
-// A ring of breadcrumbs in RTC memory: the last N things the firmware was
-// doing, with timestamps, readable on the next boot.
+// A ring of breadcrumbs: the last N things the firmware was doing, with
+// timestamps, readable on the next boot.
 //
 // This is the crash evidence that actually works on THIS board. Core dumps do
 // not: the deployed Feather runs tinyuf2-partitions-4MB.csv, which has no
@@ -11,55 +11,123 @@
 //
 // Why a ring rather than the single crumb crashlog already had: the single
 // slot answers "what was in flight" only if the crash happens INSIDE a marked
-// operation. The unexplained panic on 2026-08-11 happened 75-100 s AFTER a
-// purge returned, with the crumb already cleared -- so it recorded nothing at
-// all. A ring keeps the approach as well as the arrival: the last N steps
-// before the fall, which is what "it died somewhere after the purge" needs.
+// operation. The unexplained panic happened long AFTER a purge returned, with
+// the crumb already cleared -- so it recorded nothing at all. A ring keeps the
+// approach as well as the arrival.
 //
-// RTC caveat, unchanged from crashlog: this survives resets, NOT power loss.
-// A power-cycled board starts with an empty ring, which is also why the
-// rollback counter cannot be relied on after someone pulls the plug.
+// The state and all its logic live in `Ring`, a plain struct with no Arduino
+// or RTC dependency, so the host tests can drive it directly
+// (native_crumb_ring). The firmware keeps one instance of it in RTC memory.
+// That split exists because the first version of this file shipped a bug --
+// validity was gated on a 16-bit cursor limit that the loop blew past in under
+// a minute, silently disabling the ring on exactly the boot it was built for --
+// and nothing could have caught it, because nothing could run it.
+//
+// RTC caveat: this survives resets, NOT power loss. A power-cycled board starts
+// with an empty ring, which is also why the rollback counter cannot be relied
+// on after someone pulls the plug.
 
+#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace crumb_ring {
 
 constexpr uint8_t kSlots = 16;
 constexpr uint8_t kTagLen = 14;
+constexpr uint32_t kMagic = 0xC0FFEE11;
 
 struct Entry {
   uint32_t ms;        // millis() when it was dropped
   char tag[kTagLen];  // short, fixed: RTC memory is scarce
 };
 
-/**
- * The ring itself. Defined in the .cpp with RTC_DATA_ATTR; declared here
- * without it, because repeating the attribute makes gcc emit a second
- * .rtc.data section and warn that it is ignoring one (the same trap
- * crashlog.h documents).
- */
-extern Entry rtc_entries[kSlots];
-extern uint32_t rtc_next;   // write cursor
-extern uint32_t rtc_magic;  // validity marker; RTC is garbage after power-on
+/** The ring's state and behaviour, free of any platform dependency. */
+struct Ring {
+  Entry entries[kSlots];
+  // Slot index and live count, NOT a running total. A total overflows: the
+  // loop drops several crumbs per iteration, so a uint32_t counter wraps after
+  // roughly three weeks of uptime -- and at the wrap `count` computed from it
+  // fell to zero and the trail rendered empty, on a device meant to run for
+  // months. These two never overflow because neither exceeds kSlots.
+  uint8_t next;    // where the next drop goes
+  uint8_t count;   // live entries, saturating at kSlots
+  uint32_t magic;  // validity marker; RTC is garbage after power-on
 
-constexpr uint32_t kMagic = 0xC0FFEE11;
+  /**
+   * Was this written by a previous run rather than power-on noise?
+   *
+   * Magic ONLY. An earlier version also required next <= 0xFFFF; the loop
+   * drops several crumbs per iteration, so that limit was passed in well under
+   * a minute and the ring reported itself invalid for the rest of the run --
+   * rendering nothing on precisely the boot after a long-running fault.
+   */
+  bool valid() const { return magic == kMagic; }
 
-/** Drop a breadcrumb. Cheap enough to call on every meaningful step. */
+  void reset() {
+    magic = kMagic;
+    next = 0;
+    count = 0;
+    for (auto& e : entries) {
+      e.ms = 0;
+      e.tag[0] = '\0';
+    }
+  }
+
+  /** Drop a breadcrumb. Cheap enough to call on every meaningful step. */
+  void drop(const char* tag, uint32_t now_ms) {
+    if (!tag || !*tag)
+      return;
+    if (magic != kMagic)
+      reset();  // first use, or RTC came up as noise after a power-on
+    Entry& e = entries[next];
+    e.ms = now_ms;
+    snprintf(e.tag, kTagLen, "%s", tag);
+    next = static_cast<uint8_t>((next + 1) % kSlots);
+    if (count < kSlots)
+      count++;
+  }
+
+  /**
+   * Oldest-to-newest into `out` as "tag@ms tag@ms ...".
+   *
+   * One line, because it goes on the flight recorder next to the boot verdict
+   * and the point is to read the approach to the crash at a glance. Truncates
+   * rather than overflowing; a clipped trail still names the earliest steps,
+   * which are the ones that locate a fault.
+   */
+  void render(char* out, size_t cap) const {
+    if (!out || cap == 0)
+      return;
+    out[0] = '\0';
+    if (!valid())
+      return;
+    // Once full, the oldest live entry is the slot about to be overwritten.
+    const uint8_t start = count < kSlots ? 0 : next;
+    size_t n = 0;
+    for (uint8_t i = 0; i < count && n + 1 < cap; i++) {
+      const Entry& e = entries[(start + i) % kSlots];
+      if (e.tag[0] == '\0')
+        continue;
+      const int w =
+          snprintf(out + n, cap - n, n ? " %s@%lu" : "%s@%lu", e.tag, (unsigned long)e.ms);
+      if (w < 0 || static_cast<size_t>(w) >= cap - n)
+        break;
+      n += static_cast<size_t>(w);
+    }
+  }
+};
+
+// The firmware's single instance, in RTC memory. Declared without
+// RTC_DATA_ATTR here on purpose: repeating the attribute makes gcc emit a
+// second .rtc.data section and warn that it is ignoring one (the same trap
+// crashlog.h documents).
+extern Ring rtc_ring;
+
 void drop(const char* tag, uint32_t now_ms);
-
-/** Start a fresh trail (called once at boot, after the previous one is read). */
 void reset();
-
-/** Was the stored trail written by a previous run rather than power-on noise? */
 bool valid();
-
-/**
- * Oldest-to-newest into `out` as "tag@ms tag@ms ...".
- *
- * One line, because it goes on the flight recorder next to the boot verdict
- * and the point is to read the approach to the crash at a glance.
- */
 void render(char* out, size_t cap);
 
 }  // namespace crumb_ring
