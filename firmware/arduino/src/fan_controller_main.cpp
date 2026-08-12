@@ -106,6 +106,26 @@ void setup() {
   pinMode(FAN_SPARE_PIN, OUTPUT);
   digitalWrite(FAN_SPARE_PIN, HIGH);
   Serial.begin(115200);
+  // Task watchdog, armed BEFORE anything that can wedge. A frozen loop (hung
+  // bus op, wedged driver) force-reboots in 60 s instead of hanging dark
+  // forever. The fan rides through on RMT. 60 s tolerates worst-case framework
+  // writes to one stalled peer (10 s per NetworkClient::write call) on the
+  // small JSON endpoints while still catching genuine hangs. Large payloads
+  // use http_tx and never stall.
+  //
+  // It is FIRST for a reason. It used to sit ~35 lines down, after the NVS
+  // reads below and after a core-dump probe -- and on 2026-08-11 that probe
+  // hung on a board whose partition table has no coredump slot. Boot never
+  // reached this line, so the watchdog never armed, so the board never
+  // rebooted, so ota_rollback never got its unhealthy boot. It bricked, and
+  // recovery took a USB cable. The rollback guard only fires on a REBOOT: a
+  // hang before the watchdog is running is invisible to it, and everything
+  // above this line is unrecoverable over the air. Keep this block first, and
+  // keep the code above it to pin safe-states only.
+  esp_task_wdt_config_t wdt_cfg = {.timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true};
+  if (esp_task_wdt_init(&wdt_cfg) != ESP_OK)
+    esp_task_wdt_reconfigure(&wdt_cfg);
+  esp_task_wdt_add(NULL);
   eventlog::capture_esp_logs();
   ota_rollback_check_at_boot();
   g_prefs.begin("fanctl", false);
@@ -140,15 +160,6 @@ void setup() {
   TRAIL("setup");
   if (sdcard::quarantined())
     eventlog::log("sd", "previous boot died in an SD op -- card quarantined");
-  // Task watchdog: a frozen loop (hung bus op, wedged driver) force-reboots
-  // in 60 s instead of hanging dark forever. The fan rides through on RMT.
-  // 60 s tolerates worst-case framework writes to one stalled peer (10 s per
-  // NetworkClient::write call) on the small JSON endpoints while still
-  // catching genuine hangs. Large payloads use http_tx and never stall.
-  esp_task_wdt_config_t wdt_cfg = {.timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true};
-  if (esp_task_wdt_init(&wdt_cfg) != ESP_OK)
-    esp_task_wdt_reconfigure(&wdt_cfg);
-  esp_task_wdt_add(NULL);
   Wire.begin();
   SPI.begin();
   display::begin();
