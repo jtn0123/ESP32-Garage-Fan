@@ -48,8 +48,13 @@ test('clicking a rail step commands that speed', async ({ page }) => {
   // silently start sending the wrong speed.
   await page.locator('#stack button[title="set speed 7"]').click();
   await expect(page.locator('#railnum')).toHaveText('7');
-  expect(posts.length).toBeGreaterThan(0);
-  expect(posts.some((r) => /speed=7/.test(r.url()))).toBeTruthy();
+  // Polled, not read once: the DOM can settle before the browser has emitted
+  // the request, so an immediate read is a race that fails on a loaded machine.
+  await expect
+    .poll(() => posts.some((r) => /speed=7/.test(r.url())), {
+      message: 'the rail updated the display without commanding the fan',
+    })
+    .toBeTruthy();
 });
 
 test('both ends of the rail work', async ({ page }) => {
@@ -80,7 +85,10 @@ test('the auto pill toggles auto mode', async ({ page }) => {
   await expect
     .poll(() => page.locator('#bauto').getAttribute('class'))
     .not.toBe(before);
-  expect(posts.length).toBeGreaterThan(0);
+  // Same race as the rail: the pill can repaint before the request is emitted.
+  await expect
+    .poll(() => posts.length, { message: 'the pill changed but nothing was sent' })
+    .toBeGreaterThan(0);
 });
 
 // ------------------------------------------------------------------ the scope
@@ -127,14 +135,32 @@ test('SETTINGS opens the drawer and back returns to the console', async ({ page 
  * page must still track the fan off the 15 s poll -- api.ts swallows the
  * EventSource error precisely so this keeps working, and nothing tested that.
  */
-test('state still updates when the SSE stream is unavailable', async ({ page }) => {
-  // Attached BEFORE navigation: the state fetch that proves the fallback works
-  // happens during load, so a recorder installed afterwards sees nothing until
-  // the 15 s poll comes round and the test would be asserting on its own timing.
-  const polls = recordRequests(page, /\/api\/state/);
+/**
+ * The device pushes state over SSE on port 8081; the mock does not serve it, so
+ * EventSource fails here exactly as it does when that listener is down. The
+ * page must keep tracking the fan off the 15 s poll -- api.ts swallows the
+ * EventSource error precisely so this keeps working.
+ *
+ * The assertion has to be about a poll AFTER bootstrap. Counting requests from
+ * page load proves only that the page loaded: a build where the SSE failure
+ * killed the polling loop outright would still make that request once and pass.
+ * So: take the count once the page is up, then require it to grow. The wait is
+ * longer than the 15 s interval, which is why this is the slowest test here.
+ */
+test('state keeps polling when the SSE stream is unavailable', async ({ page }) => {
   await openConsole(page);
-  expect(polls.length, 'the console never fetched state over plain HTTP').toBeGreaterThan(0);
-  // And the page is live, not merely painted once.
+  const polls = recordRequests(page, /\/api\/state/);
+  const atBootstrap = polls.length;
+  await expect
+    .poll(() => polls.length, {
+      message: 'no /api/state poll after bootstrap: the fallback is not running',
+      timeout: 25_000,
+    })
+    .toBeGreaterThan(atBootstrap);
+});
+
+test('the page stays interactive without SSE', async ({ page }) => {
+  await openConsole(page);
   await page.locator('#stack button[title="set speed 3"]').click();
   await expect(page.locator('#railnum')).toHaveText('3');
 });

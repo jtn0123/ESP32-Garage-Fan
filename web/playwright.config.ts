@@ -2,20 +2,17 @@ import { defineConfig, devices } from '@playwright/test';
 
 // A port of its own, so this can run beside tests/test_http_contract.py (8099)
 // without the two fighting over one socket.
-const PORT = Number(process.env['MOCK_PORT'] ?? 8100);
-
 /**
- * A SECOND mock, used only by scenarios.spec.ts.
+ * No `webServer` here on purpose.
  *
- * Those tests flip global knobs -- `down=true` hangs up on every /api request
- * the process serves. The knobs live in module state shared by every connection,
- * so pointing them at the same server as everything else made unrelated specs
- * fail intermittently while a scenario happened to be mid-flight.
- * `describe.configure({ mode: 'serial' })` does not help: it orders tests inside
- * one file, it does not stop other FILES running at the same time. Separate
- * process, separate state.
+ * mock_device.py keeps STATE and SCEN in module globals, and the console writes
+ * to STATE constantly -- /api/set from the rail, /api/config from the drawer.
+ * One shared server lets a write from one test land between another test's
+ * action and its assertion, and `down=true` took the entire suite down with it.
+ * e2e/harness.ts therefore starts a mock PER WORKER as a worker-scoped fixture
+ * and sets baseURL from it: a worker runs one test at a time, so that is total
+ * isolation and it needs no special cases.
  */
-export const SCENARIO_PORT = PORT + 1;
 
 /**
  * End-to-end cover for the console, driven against scripts/mock_device.py.
@@ -35,19 +32,21 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] ? 2 : 0,
-  // Capped deliberately. Every worker drives a browser against ONE
-  // single-process mock that rebuilds the whole history array per request, so
-  // the default (half the cores, doubled across both projects) makes the mock
-  // the bottleneck and the first assertion after load starts timing out. That
-  // is a harness limit, not a bug in the console, and the honest fix is to stop
-  // over-driving it rather than to paper over the timeouts with retries.
+  // Each worker now owns a mock process, so workers no longer contend for one
+  // server -- but each one is still a browser plus a Python process, so this
+  // stays modest rather than defaulting to half the cores.
   workers: process.env['CI'] ? 2 : 4,
-  reporter: process.env['CI'] ? [['github'], ['list']] : [['list']],
+  // CI also writes the HTML report: `github` annotates the failing line in the
+  // diff and `list` scrolls past in the log, but neither survives as something
+  // you can open afterwards. The workflow uploads playwright-report/ next to
+  // the traces, and without this that path would be empty.
+  reporter: process.env['CI']
+    ? [['github'], ['list'], ['html', { open: 'never' }]]
+    : [['list']],
   timeout: 30_000,
   expect: { timeout: 10_000 },
 
   use: {
-    baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -60,24 +59,4 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
 
-  webServer: [
-    {
-      command: 'python3 ../scripts/mock_device.py',
-      env: { MOCK_PORT: String(PORT) },
-      url: `http://127.0.0.1:${PORT}/api/state`,
-      reuseExistingServer: !process.env['CI'],
-      stdout: 'pipe',
-      stderr: 'pipe',
-      timeout: 30_000,
-    },
-    {
-      command: 'python3 ../scripts/mock_device.py',
-      env: { MOCK_PORT: String(SCENARIO_PORT) },
-      url: `http://127.0.0.1:${SCENARIO_PORT}/api/state`,
-      reuseExistingServer: !process.env['CI'],
-      stdout: 'pipe',
-      stderr: 'pipe',
-      timeout: 30_000,
-    },
-  ],
 });

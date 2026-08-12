@@ -2,22 +2,22 @@
  * The states the fan reaches rarely and the console has to survive anyway.
  *
  * SERIAL, and every test restores the knobs afterwards: mock_device.py holds
- * SCEN in module state shared by the whole run, so a leaked knob would break
- * whatever ran next rather than failing here.
+ * SCEN in module state, so a leaked knob would break the next test on this
+ * worker rather than failing here. (It can no longer reach any OTHER worker --
+ * harness.ts gives each one its own mock process.)
  *
  * These are the cases dogfooding found the hard way -- an unmounted card, an
  * outage mid-history, a nearly-empty card, a controller that stops answering.
  * A console that throws on any of them is a console you cannot use at the exact
  * moment you need it.
  */
-import { SCENARIO_PORT } from '../playwright.config';
-import { expect, openConsole, resetScen, scen, test } from './harness';
+import { expect, inkedColumns, openConsole, resetScen, scen, test } from './harness';
 
-// Its OWN mock process. `down=true` hangs up on every /api request the server
-// handles, so sharing one with the rest of the suite made unrelated specs fail
-// whenever a scenario was mid-flight. Serial mode alone does not fix that: it
-// orders tests within this file, not against the files running beside it.
-test.use({ baseURL: `http://127.0.0.1:${SCENARIO_PORT}` });
+// Serial within the file: these tests hand the knobs back and forth, and one
+// starting before the previous one has reset them would read the wrong state.
+// Isolation FROM OTHER FILES is no longer this file's problem -- harness.ts
+// gives every worker its own mock process, so `down=true` can only ever affect
+// the worker that set it.
 test.describe.configure({ mode: 'serial' });
 
 test.afterEach(async ({ page }) => {
@@ -48,7 +48,17 @@ test('a nearly-empty card renders what little there is', async ({ page }) => {
   await expect(page.locator('#plots')).toBeVisible();
 });
 
-test('an outage mid-history is drawn as a gap, not bridged', async ({ page }) => {
+/**
+ * NOT fully covered, and worth saying so rather than implying otherwise.
+ *
+ * The title is the intent; what is asserted is weaker. Column-ink cannot tell a
+ * bridged line from a real break, because the shaded band between garage and
+ * yard inks the gap's columns either way -- measured at 1100 inked columns with
+ * a gap against 1097 without. Proving the line itself breaks needs the series
+ * state exposed to the page, or a visual-regression pass. What IS asserted:
+ * the page survives the gap and scrubbing across it lands on a real sample.
+ */
+test('an outage mid-history does not break the page', async ({ page }) => {
   await scen(page, { gap_at: '100' });
   await openConsole(page);
   await expect(page.locator('#plots')).toBeVisible();
@@ -121,8 +131,15 @@ test('a controller that goes away is reported in the history area', async ({ pag
   await expect(page.locator('#tcap')).toContainText(/could not load history/i, {
     timeout: 20_000,
   });
-  // Blanked, not left showing the previous range's data under a new label.
-  await expect(page.locator('#brand')).toBeVisible();
+  // And the plot is genuinely BLANK, not the previous range's data sitting
+  // under a new label. The caption alone cannot tell those apart, and stale
+  // data wearing a fresh label is the failure worth catching here.
+  await expect
+    .poll(() => inkedColumns(page, 'cv_t'), {
+      message: 'the chart still has data drawn on it after a failed load',
+      timeout: 15_000,
+    })
+    .toBe(0);
 });
 
 test('recovering from an outage repaints the charts', async ({ page }) => {
@@ -138,4 +155,12 @@ test('recovering from an outage repaints the charts', async ({ page }) => {
   await expect(page.locator('#tcap')).not.toContainText(/could not load history/i, {
     timeout: 20_000,
   });
+  // Recovery has to REDRAW, not merely stop apologising: a cleared caption over
+  // an empty plot is still a broken page.
+  await expect
+    .poll(() => inkedColumns(page, 'cv_t'), {
+      message: 'the error cleared but nothing was plotted',
+      timeout: 15_000,
+    })
+    .toBeGreaterThan(0);
 });

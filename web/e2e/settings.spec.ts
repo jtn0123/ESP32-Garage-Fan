@@ -217,8 +217,17 @@ test('the token field is used instead of prompting', async ({ page }) => {
   // the FIRST dialog must be the confirmation, because the token step was
   // answered without asking. Waiting a fixed moment and checking a flag proves
   // nothing about what would have happened a millisecond later.
-  const seen = dialogLog(page, () => 'dismiss');
+  const posts = recordRequests(page, /\/api\/restart/);
+  const seen = dialogLog(page, () => 'accept');
   await page.locator('#groups button', { hasText: /^Restart$/ }).first().click();
   await expect.poll(() => seen.length).toBeGreaterThan(0);
   expect(seen[0], 'it prompted even though the token field was filled').toBe('confirm');
+
+  // Then follow through: not prompting is only half the claim. The value in the
+  // field has to be the value that reaches the device, or the field is
+  // decorative and the operator's token silently never arrives.
+  await expect.poll(() => posts.length).toBeGreaterThan(0);
+  const req = posts[0];
+  expect(req?.method()).toBe('POST');
+  expect(req?.url()).toContain('token=token-from-the-field');
 });

@@ -238,6 +238,16 @@ def test_mock_accepts_every_config_arg_the_firmware_does():
     # rather than filtered loosely, so a genuinely new arg still fails.
     NOT_A_SETTING = {"newtoken"}
 
+    # The reverse direction matters just as much. A key the MOCK accepts but the
+    # firmware does not lets a control pass its end-to-end test against a server
+    # that happily applied it, while the real device drops the argument on the
+    # floor -- the same silent no-op as `onf`, only discovered on hardware.
+    extra = mock_args - firmware_args
+    assert not extra, (
+        f"mock_device.py accepts config args the firmware does not: {sorted(extra)}. "
+        f"An E2E test can pass against the mock while the device ignores the setting."
+    )
+
     missing = firmware_args - mock_args - NOT_A_SETTING
     assert not missing, (
         f"mock_device.py ignores config args the firmware accepts: {sorted(missing)}. "
