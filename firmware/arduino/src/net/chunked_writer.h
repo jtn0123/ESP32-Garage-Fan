@@ -99,8 +99,12 @@ class ChunkedWriter {
     if (ended_)
       return;
     ended_ = true;
-    if (ok_ && flush())
-      sink_.send("0\r\n\r\n", 5);
+    // A failed terminator must fail the stream. Reporting ok() after the peer
+    // never received "0\r\n\r\n" is the same lie abort() exists to prevent: the
+    // body is incomplete either way, and a caller that trusts ok() would log a
+    // clean send for a response no client will accept.
+    if (ok_ && flush() && !sink_.send("0\r\n\r\n", 5))
+      ok_ = false;
   }
 
   bool ok() const { return ok_; }

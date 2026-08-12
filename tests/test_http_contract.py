@@ -252,6 +252,20 @@ def test_token_guarded_routes_refuse_without_one(mock):
         assert status == 403, f"{path} must not act without a token"
 
 
+def test_core_dump_reads_require_a_token(mock):
+    """A read that hands over the credential guarding every write.
+
+    A core dump is a snapshot of RAM at the fault, and RAM holds g_token, the
+    WiFi PSK and the MQTT password. Serving it unauthenticated turns a read into
+    full control of the board, so these are the one pair of GETs that are gated.
+    Origin checks are no help: they stop a browser on another site from FORGING
+    a request, not a client that simply asks.
+    """
+    for path in ("/api/crash", "/api/crash.bin"):
+        status, _ = req(path)
+        assert status == 403, f"{path} must not serve a RAM image without a token"
+
+
 def test_unknown_routes_are_404_json(mock):
     status, body = req("/api/nope")
     assert status == 404

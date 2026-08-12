@@ -184,7 +184,23 @@ static void json_str(char* dst, size_t cap, const char* src) {
 // Answers the question the flight recorder could not: a panic used to reach us
 // as the bare word "panic" because IDF prints the backtrace over a UART this
 // board's CDC drops. The dump was always in flash; see system/coredump.h.
+// Both core-dump reads are token-gated, unlike the rest of the read-only API.
+// A core dump is a snapshot of RAM at the moment of the fault, and RAM at that
+// moment holds g_token itself, plus the WiFi and MQTT credentials. Serving it
+// to any LAN client hands over the exact secret that guards OTA -- a read that
+// escalates to full control of the board. Origin checks do not help here: they
+// stop a browser on another site from FORGING a request, not a client that
+// simply asks. /api/crash/erase was already gated; these two were not.
+static bool crash_auth_ok() {
+  if (token_ok(g_http.arg("token")))
+    return true;
+  g_http.send(403, "application/json", "{\"error\":\"bad token\"}");
+  return false;
+}
+
 static void handle_crash() {
+  if (!crash_auth_ok())
+    return;
   char buf[768];
   const size_t n = coredump::to_json(buf, sizeof(buf));
   if (n == 0) {
@@ -197,6 +213,8 @@ static void handle_crash() {
 // The raw ELF core dump, for scripts/decode_crash.py to turn the backtrace PCs
 // into file:line against the matching build.
 static void handle_crash_raw() {
+  if (!crash_auth_ok())
+    return;
   size_t addr = 0, size = 0;
   if (!coredump::image_range(&addr, &size) || size == 0) {
     g_http.send(404, "application/json", "{\"error\":\"no core dump stored\"}");

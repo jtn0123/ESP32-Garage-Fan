@@ -325,6 +325,12 @@ constexpr size_t kBatchPsram = 2048;
 constexpr size_t kBatchDram = 48;  // ~4.6 KB, leaves the mount guard its room
 constexpr size_t kPathMax = purge_logic::kMaxPathLen;
 
+// Hard ceiling on entries ENUMERATED by one scan_dir call, accepted or not.
+// The batch cap alone does not bound the loop, because a rejected path does not
+// fill a slot. This guarantees the call returns; anything past it is left for
+// the next pass, and too_long already records that the walk was not exhaustive.
+constexpr uint32_t kMaxScanPerCall = 20000;
+
 // One fixed-width path slot. Named rather than spelled inline: the cast
 // `static_cast<char (*)[kPathMax]>` is formatted differently by clang-format 18
 // (CI) and 22 (dev machines), so the build failed on whitespace nobody wrote.
@@ -389,10 +395,21 @@ size_t scan_dir(const char* path) {
     return 0;
   }
   size_t n = 0;
-  while (n < g_scratch.cap) {
+  // Every ENUMERATED entry counts against the walk, not just the accepted ones.
+  // A rejected path used to `continue` without touching n, so a directory full
+  // of over-long names scanned without any bound and never reached the watchdog
+  // reset below -- and purge() removes this task from the watchdog for its
+  // duration, so nothing else would have caught it either. That is the same
+  // shape as the hang that bricked the board: an unbounded loop with no timer
+  // behind it.
+  uint32_t seen = 0;
+  while (n < g_scratch.cap && seen < kMaxScanPerCall) {
     File e = dir.openNextFile();
     if (!e)
       break;
+    seen++;
+    if ((seen & 0x3F) == 0)
+      esp_task_wdt_reset();
     // A path that does not FIT must not be acted on. snprintf truncates
     // silently, and a truncated path is a different, usually shorter, path --
     // so the delete below would remove the wrong entry, or the traversal would
@@ -413,8 +430,6 @@ size_t scan_dir(const char* path) {
     if (g_scratch.batch_dir[n])
       g_scratch.dirq.push(g_scratch.batch[n]);
     n++;
-    if ((n & 0x3F) == 0)
-      esp_task_wdt_reset();
   }
   dir.close();
   return n;

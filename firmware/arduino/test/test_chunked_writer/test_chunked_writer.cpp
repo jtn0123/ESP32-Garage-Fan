@@ -241,8 +241,37 @@ static void end_after_abort_still_sends_nothing() {
   TEST_ASSERT_EQUAL_size_t(after, s.out.size());
 }
 
+// The terminator is the only thing that marks a chunked body complete. If it
+// does not reach the peer the response is unusable, so ok() must not keep
+// claiming success -- the same lie abort() exists to prevent.
+static void a_failed_terminator_fails_the_stream() {
+  FakeSink s;
+  // Empty body on purpose, so the ONLY send end() makes is the terminator.
+  // With a buffered payload, end() flushes first and a failure there would set
+  // ok_ = false on its own -- the test would pass whether or not the terminator
+  // result is checked, which is exactly what it must not do.
+  s.fail_after = 1;  // send 0 is the header; send 1 is the terminator
+  Writer w(s);
+  TEST_ASSERT_TRUE(w.begin("application/json"));
+  TEST_ASSERT_TRUE(w.ok());
+  w.end();
+  TEST_ASSERT_FALSE(w.ok());
+  TEST_ASSERT_TRUE(w.ended());
+}
+
+static void a_successful_terminator_leaves_the_stream_ok() {
+  FakeSink s;
+  Writer w(s);
+  w.begin("application/json");
+  w.print("hi");
+  w.end();
+  TEST_ASSERT_TRUE(w.ok());
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(a_failed_terminator_fails_the_stream);
+  RUN_TEST(a_successful_terminator_leaves_the_stream_ok);
   RUN_TEST(abort_withholds_the_terminating_chunk);
   RUN_TEST(end_after_abort_still_sends_nothing);
   RUN_TEST(head_then_one_chunk_then_terminator);

@@ -181,3 +181,28 @@ def test_handle_sd_purge_matches_purgeresult():
     them (remaining, leftover, skipped_dirs) while being debugged live.
     """
     check("handle_sd_purge", "PurgeResult", "ApiError")
+
+
+# --------------------------------------------------------- authenticated reads
+#
+# Almost every GET on this device is open on the LAN by design. The core-dump
+# pair is the exception, and the reason is specific: a core dump is a snapshot
+# of RAM at the moment of the fault, and RAM at that moment holds g_token, the
+# WiFi PSK and the MQTT password. An unauthenticated read of it hands over the
+# credential that guards every write, so the read escalates to full control of
+# the board. Origin checks do not cover this -- they stop a browser on another
+# site from FORGING a request, not a client that simply asks.
+#
+# tests/test_http_contract.py pins the behaviour against the mock; this pins the
+# firmware itself, which is the thing that actually serves the bytes.
+def test_core_dump_handlers_check_the_token():
+    web = (SRC / "net" / "web.cpp").read_text()
+    for handler in ("handle_crash", "handle_crash_raw", "handle_crash_erase"):
+        m = re.search(r"static void " + handler + r"\(\)\s*\{(.*?)\n\}", web, re.S)
+        assert m, f"{handler} not found -- did it move or get renamed?"
+        body = m.group(1)
+        assert "crash_auth_ok()" in body or "token_ok(" in body, (
+            f"{handler} serves core-dump data without checking the token. That "
+            f"image contains g_token itself, so an open read escalates to full "
+            f"control of the board."
+        )
