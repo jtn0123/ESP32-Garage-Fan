@@ -8,12 +8,34 @@
  * contract tests never open a browser, so the wiring from button to request was
  * covered at neither end.
  */
-import { expect, openConsole, recordRequests, test } from './harness';
+import { expect, flushPageRequests, openConsole, recordRequests, test } from './harness';
 
 async function openSettings(page: import('@playwright/test').Page): Promise<void> {
   await openConsole(page);
   await page.locator('#nav').click();
   await expect(page.locator('#settings')).not.toHaveClass(/hide/);
+}
+
+/**
+ * Record dialog types as they arrive, answering each one as `reply` decides.
+ *
+ * The handler MUST be registered before the click. `window.prompt` blocks the
+ * page, so an unhandled dialog leaves `click()` unresolved until the test times
+ * out -- awaiting `waitForEvent('dialog')` after awaiting the click deadlocks
+ * on exactly that. The returned array is the observable to synchronise on:
+ * `expect.poll(() => seen.length)` waits for a real event instead of guessing
+ * at a duration.
+ */
+function dialogLog(
+  page: import('@playwright/test').Page,
+  reply: (type: string) => 'accept' | 'dismiss',
+): string[] {
+  const seen: string[] = [];
+  page.on('dialog', (d) => {
+    seen.push(d.type());
+    void (reply(d.type()) === 'accept' ? d.accept('any-token') : d.dismiss());
+  });
+  return seen;
 }
 
 test('every group renders', async ({ page }) => {
@@ -112,9 +134,11 @@ for (const label of [/Format SD card/i, /Delete card contents/i, /^Restart$/]) {
   test(`dismissing the token prompt for ${label.source} sends nothing`, async ({ page }) => {
     await openSettings(page);
     const posts = recordRequests(page, /\/api\/(sdformat|sdpurge|restart)/);
-    page.on('dialog', (d) => void d.dismiss());
+    const seen = dialogLog(page, () => 'dismiss');
     await page.locator('#groups button', { hasText: label }).first().click();
-    await page.waitForTimeout(500);
+    await expect.poll(() => seen.length).toBeGreaterThan(0);
+    expect(seen[0], 'the first guard should be the token prompt').toBe('prompt');
+    await flushPageRequests(page);
     expect(posts, 'a cancelled prompt still hit the device').toHaveLength(0);
   });
 
@@ -123,12 +147,14 @@ for (const label of [/Format SD card/i, /Delete card contents/i, /^Restart$/]) {
     const posts = recordRequests(page, /\/api\/(sdformat|sdpurge|restart)/);
     // Supply a token, then say no at the confirm. This is the misclick case:
     // the guard that actually protects the card.
-    page.on('dialog', (d) => {
-      if (d.type() === 'prompt') return void d.accept('any-token');
-      return void d.dismiss();
-    });
+    const seen = dialogLog(page, (t) => (t === 'prompt' ? 'accept' : 'dismiss'));
     await page.locator('#groups button', { hasText: label }).first().click();
-    await page.waitForTimeout(500);
+    await expect.poll(() => seen.length).toBeGreaterThanOrEqual(2);
+    expect(seen.slice(0, 2), 'a token alone should not be enough to proceed').toEqual([
+      'prompt',
+      'confirm',
+    ]);
+    await flushPageRequests(page);
     expect(posts, 'declining the confirmation still hit the device').toHaveLength(0);
   });
 }
@@ -185,13 +211,14 @@ test('uploading without picking a file is refused, not sent', async ({ page }) =
 
 test('the token field is used instead of prompting', async ({ page }) => {
   await openSettings(page);
-  let prompted = false;
-  page.on('dialog', (d) => {
-    if (d.type() === 'prompt') prompted = true;
-    return void d.dismiss();
-  });
   await page.locator('#ota_t').fill('token-from-the-field');
+
+  // Positive assertion rather than "no prompt appeared": with the field filled
+  // the FIRST dialog must be the confirmation, because the token step was
+  // answered without asking. Waiting a fixed moment and checking a flag proves
+  // nothing about what would have happened a millisecond later.
+  const seen = dialogLog(page, () => 'dismiss');
   await page.locator('#groups button', { hasText: /^Restart$/ }).first().click();
-  await page.waitForTimeout(500);
-  expect(prompted, 'it prompted even though the token field was filled').toBe(false);
+  await expect.poll(() => seen.length).toBeGreaterThan(0);
+  expect(seen[0], 'it prompted even though the token field was filled').toBe('confirm');
 });

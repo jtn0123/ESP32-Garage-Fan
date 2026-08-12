@@ -60,6 +60,21 @@ export const test = base.extend<{ errors: string[] }>({
 
 export { expect };
 
+/**
+ * Prove that anything the page was going to send has already been sent.
+ *
+ * Asserting a request did NOT happen is the awkward case: there is no event for
+ * an absence, and `waitForTimeout(500)` is a guess that gets slower and flakier
+ * on a loaded CI box. Instead, issue a fetch FROM THE PAGE and await it. A
+ * request the click handler dispatched was created earlier in the same task
+ * queue, and Playwright records a request when it is dispatched -- so once ours
+ * completes, theirs is already in the log if it exists at all. Ordering, not
+ * hope.
+ */
+export async function flushPageRequests(page: Page): Promise<void> {
+  await page.evaluate(() => fetch('/api/state', { cache: 'no-store' }).then((r) => r.text()));
+}
+
 /** Record every request the console makes to a path, for "did it actually call?" */
 export function recordRequests(page: Page, match: RegExp): Request[] {
   const seen: Request[] = [];
