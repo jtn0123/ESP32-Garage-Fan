@@ -16,8 +16,8 @@ this test holds that prologue to pin safe-states and the watchdog itself --
 nothing that touches NVS, a bus, a driver, or the network.
 """
 
-import re
 from pathlib import Path
+import re
 
 import pytest
 
