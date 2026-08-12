@@ -10,13 +10,17 @@
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test && npm run build",
-    "setup": "npm ci"
+    "check": "npm run typecheck && npm run test && npm run build && npm run test:e2e",
+    "setup": "npm ci",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:ui": "npm run build && playwright test --ui"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.2.0",
     "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "jsdom": "^26.0.0"
+    "vitest": "^3.0.0"
   }
 }

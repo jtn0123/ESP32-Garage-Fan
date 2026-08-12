@@ -25,6 +25,7 @@ Scenario knobs are flipped at runtime:
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+import os
 from pathlib import Path
 import time
 from urllib.parse import parse_qs, urlparse
@@ -32,7 +33,9 @@ from urllib.parse import parse_qs, urlparse
 # Serve the console straight out of the build tree, so dogfooding always
 # exercises the bundle that would actually ship.
 CONSOLE = Path(__file__).resolve().parents[1] / "web" / "dist" / "console.html"
-PORT = 8099
+# Overridable so the Playwright suite and tests/test_http_contract.py can run at
+# the same time without fighting over one port.
+PORT = int(os.environ.get("MOCK_PORT", "8099"))
 # NOSONAR: plain HTTP is the point. This mocks an ESP32 that has no TLS stack
 # (see net/weather.h for the measured reason), it binds to loopback only, and
 # the console's own Origin check is one of the behaviours under test -- these
@@ -139,7 +142,49 @@ def coerce_scen(key: str, raw: str):
     return int(raw)
 
 
+# Both caches exist for the Playwright suite: a dozen browser contexts hammer
+# this single-process server, and re-reading a 58 KB file and rebuilding 288
+# rows of trig per request made the MOCK the slowest thing in the run. Tests
+# then timed out waiting for the first paint, which reads as a console bug and
+# is not one. Dogfooding by hand gets the same benefit for free.
+#
+# Both are published as a SINGLE tuple rebind, never as two field writes. This
+# is a ThreadingHTTPServer: a version that stored the key first and the value
+# second let another thread observe the new key beside the old (or absent)
+# value, and the handler died mid-response -- the browser saw ERR_EMPTY_RESPONSE
+# and the suite reported it as a console failure. Read once into a local, build
+# off to the side, then swap; rebinding one name is atomic under the GIL.
+_page_cache: "tuple[int, bytes] | None" = None
+
+
+def console_bytes() -> bytes:
+    """web/dist/console.html, re-read only when the build actually changes."""
+    global _page_cache
+    stamp = CONSOLE.stat().st_mtime_ns
+    cached = _page_cache
+    if cached is None or cached[0] != stamp:
+        cached = (stamp, CONSOLE.read_bytes())
+        _page_cache = cached
+    return cached[1]
+
+
+_hist_cache: "tuple[tuple, dict] | None" = None
+
+
 def history():
+    # Keyed on the knobs AND the current second: the rows carry timestamps, so a
+    # cache that ignored the clock would freeze the chart's right-hand edge.
+    global _hist_cache
+    key = (tuple(sorted(SCEN.items())), int(time.time()))
+    cached = _hist_cache
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    value = _history_uncached()
+    _hist_cache = (key, value)
+    return value
+
+
+def _history_uncached():
     n = SCEN["rows"]
     end = int(time.time())
     ts, temp, rh, hpa, out, batt, spd, chg = [], [], [], [], [], [], [], []
@@ -280,7 +325,7 @@ class H(BaseHTTPRequestHandler):
     def _page(self, _query):
         # Sonar's S5131 flow names this read as its source; the suppression and
         # the reasoning live at the sink in _send, where the rule reports.
-        return self._send(200, CONSOLE.read_bytes(), "text/html")
+        return self._send(200, console_bytes(), "text/html")
 
     def _state(self, _query):
         return self._json(200, STATE)
@@ -329,12 +374,21 @@ class H(BaseHTTPRequestHandler):
         STATE["uptime_s"] += 1  # so the console's ordering guard sees progress
         return self._json(200, STATE)
 
+    # Every argument handle_config() in net/web.cpp accepts. A key missing here
+    # is not a harmless omission: the mock answers 200 and echoes STATE back
+    # unchanged, so the console looks like it applied a setting that went
+    # nowhere. onf/offf were missing exactly that way, which is why the
+    # differential steppers had never been exercised end to end by anything.
+    # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
+    # in step with the firmware.
     CONFIG_KEYS = {
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),
         "offc": ("offc", float),
         "offi": ("offi", float),
+        "onf": ("on_f", float),
+        "offf": ("off_f", float),
     }
 
     def _config(self, query):

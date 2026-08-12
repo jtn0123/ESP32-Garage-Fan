@@ -1,0 +1,197 @@
+/**
+ * The settings drawer, including the two buttons that can destroy data.
+ *
+ * The maintenance actions are the reason this file exists. "Format SD card" and
+ * "Delete card contents" are guarded by a token prompt AND a confirm, and the
+ * only thing standing between a misclick and 28 GB is that both guards are
+ * honoured. Nothing tested that before: the unit tests stub the API and the
+ * contract tests never open a browser, so the wiring from button to request was
+ * covered at neither end.
+ */
+import { expect, openConsole, recordRequests, test } from './harness';
+
+async function openSettings(page: import('@playwright/test').Page): Promise<void> {
+  await openConsole(page);
+  await page.locator('#nav').click();
+  await expect(page.locator('#settings')).not.toHaveClass(/hide/);
+}
+
+test('every group renders', async ({ page }) => {
+  await openSettings(page);
+  for (const title of ['AUTO MODE', 'SENSORS', 'NETWORK', 'POWER', 'DEVICE', 'UPDATE']) {
+    await expect(page.locator('#groups')).toContainText(title);
+  }
+});
+
+test('the steppers push a change to the controller', async ({ page }) => {
+  await openSettings(page);
+  const posts = recordRequests(page, /\/api\/config/);
+  // The first +/- pair in the drawer; whichever setting it is, pressing it must
+  // reach the device. There is no save step, so a stepper that changes only the
+  // label is a silent no-op.
+  const plus = page.locator('#groups button', { hasText: '+' }).first();
+  await plus.click();
+  await expect.poll(() => posts.length).toBeGreaterThan(0);
+});
+
+test('a stepper moves its displayed value, and back again', async ({ page }) => {
+  await openSettings(page);
+  const stp = page.locator('#groups .stp').first();
+  const value = stp.locator('span').first();
+  const before = ((await value.textContent()) ?? '').trim();
+
+  await stp.getByRole('button', { name: /^increase / }).click();
+  await expect.poll(async () => ((await value.textContent()) ?? '').trim()).not.toBe(before);
+
+  // Down again returns it, so the suite leaves the mock's config where it found
+  // it -- these specs share one process with everything else in the run.
+  await stp.getByRole('button', { name: /^decrease / }).click();
+  await expect.poll(async () => ((await value.textContent()) ?? '').trim()).toBe(before);
+});
+
+test('the controls carry labels a screen reader can use', async ({ page }) => {
+  await openSettings(page);
+  // Steppers are a bare − and + with no text of their own, and toggles are an
+  // empty box, so without these the drawer is unusable without sight.
+  const steppers = page.locator('#groups .stp');
+  const n = await steppers.count();
+  expect(n, 'no steppers rendered').toBeGreaterThan(0);
+  for (let i = 0; i < n; i++) {
+    await expect(steppers.nth(i).getByRole('button', { name: /^decrease / })).toHaveCount(1);
+    await expect(steppers.nth(i).getByRole('button', { name: /^increase / })).toHaveCount(1);
+  }
+  const toggles = page.locator('#groups button.tgl');
+  for (let i = 0; i < (await toggles.count()); i++) {
+    await expect(toggles.nth(i)).toHaveAttribute('role', 'switch');
+    await expect(toggles.nth(i)).toHaveAttribute('aria-checked', /true|false/);
+    await expect(toggles.nth(i)).toHaveAttribute('aria-label', /.+/);
+  }
+});
+
+test('a toggle keeps aria-checked in step with what it shows', async ({ page }) => {
+  await openSettings(page);
+  const tgl = page.locator('#groups button.tgl').first();
+  const before = await tgl.getAttribute('aria-checked');
+  await tgl.click();
+  await expect.poll(() => tgl.getAttribute('aria-checked')).not.toBe(before);
+  // And the class the eye reads agrees with the attribute the reader reads.
+  const checked = (await tgl.getAttribute('aria-checked')) === 'true';
+  const looksOn = ((await tgl.getAttribute('class')) ?? '').includes('on');
+  expect(looksOn, 'the toggle looks on but reports off (or vice versa)').toBe(checked);
+  await tgl.click(); // leave it as found
+});
+
+test('toggles flip and report to the controller', async ({ page }) => {
+  await openSettings(page);
+  const tgl = page.locator('#groups button.tgl').first();
+  const posts = recordRequests(page, /\/api\/(config|set)/);
+  const before = await tgl.getAttribute('class');
+  await tgl.click();
+  await expect.poll(() => tgl.getAttribute('class')).not.toBe(before);
+  await expect.poll(() => posts.length).toBeGreaterThan(0);
+});
+
+test('the CSV download points at 30 days off the card', async ({ page }) => {
+  await openSettings(page);
+  const link = page.locator('#groups a', { hasText: /Download CSV/i });
+  await expect(link).toHaveAttribute('href', /\/download\.csv\?days=30/);
+});
+
+// ------------------------------------------------------- the dangerous pair
+
+test('the destructive actions are marked as such', async ({ page }) => {
+  await openSettings(page);
+  await expect(page.locator('#groups button.danger', { hasText: /Delete card contents/i })).toHaveCount(1);
+  await expect(page.locator('#groups button.danger', { hasText: /Format SD card/i })).toHaveCount(1);
+  // Restart reboots but destroys nothing, so it must NOT wear the danger style
+  // -- if everything is red, nothing is.
+  await expect(page.locator('#groups button.danger', { hasText: /^Restart$/ })).toHaveCount(0);
+});
+
+for (const label of [/Format SD card/i, /Delete card contents/i, /^Restart$/]) {
+  test(`dismissing the token prompt for ${label.source} sends nothing`, async ({ page }) => {
+    await openSettings(page);
+    const posts = recordRequests(page, /\/api\/(sdformat|sdpurge|restart)/);
+    page.on('dialog', (d) => void d.dismiss());
+    await page.locator('#groups button', { hasText: label }).first().click();
+    await page.waitForTimeout(500);
+    expect(posts, 'a cancelled prompt still hit the device').toHaveLength(0);
+  });
+
+  test(`declining the confirmation for ${label.source} sends nothing`, async ({ page }) => {
+    await openSettings(page);
+    const posts = recordRequests(page, /\/api\/(sdformat|sdpurge|restart)/);
+    // Supply a token, then say no at the confirm. This is the misclick case:
+    // the guard that actually protects the card.
+    page.on('dialog', (d) => {
+      if (d.type() === 'prompt') return void d.accept('any-token');
+      return void d.dismiss();
+    });
+    await page.locator('#groups button', { hasText: label }).first().click();
+    await page.waitForTimeout(500);
+    expect(posts, 'declining the confirmation still hit the device').toHaveLength(0);
+  });
+}
+
+test('confirming a purge does reach the device', async ({ page }) => {
+  await openSettings(page);
+  const posts = recordRequests(page, /\/api\/sdpurge/);
+  const dialogs: string[] = [];
+  page.on('dialog', (d) => {
+    dialogs.push(d.type());
+    return void d.accept(d.type() === 'prompt' ? 'any-token' : '');
+  });
+  await page.locator('#groups button', { hasText: /Delete card contents/i }).first().click();
+  await expect.poll(() => posts.length).toBeGreaterThan(0);
+  // Both guards were asked, in order, before anything was sent.
+  expect(dialogs.slice(0, 2)).toEqual(['prompt', 'confirm']);
+  // The mock refuses the token, so the console must surface the failure rather
+  // than claim success.
+  await expect.poll(() => dialogs.length).toBeGreaterThanOrEqual(3);
+});
+
+test('a purge is POSTed, never GETed', async ({ page }) => {
+  await openSettings(page);
+  const posts = recordRequests(page, /\/api\/sdpurge/);
+  page.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? 'any-token' : ''));
+  await page.locator('#groups button', { hasText: /Delete card contents/i }).first().click();
+  await expect.poll(() => posts.length).toBeGreaterThan(0);
+  // A GET that wipes a card is reachable from a link, a prefetch or a crawler.
+  expect(posts.map((r) => r.method())).not.toContain('GET');
+});
+
+// -------------------------------------------------------------- update / OTA
+
+test('the update section offers a re-check', async ({ page }) => {
+  await openSettings(page);
+  await expect(page.locator('#groups button.updbtn', { hasText: /Check again/i })).toHaveCount(1);
+});
+
+test('the OTA form is present with a token field and a file picker', async ({ page }) => {
+  await openSettings(page);
+  await expect(page.locator('#ota_t')).toBeVisible();
+  await expect(page.locator('#ota_f')).toBeAttached();
+  await expect(page.locator('#ota_go')).toBeVisible();
+});
+
+test('uploading without picking a file is refused, not sent', async ({ page }) => {
+  await openSettings(page);
+  const uploads = recordRequests(page, /\/update/);
+  await page.locator('#ota_t').fill('any-token');
+  await page.locator('#ota_go').click();
+  await expect(page.locator('#otamsg')).not.toBeEmpty();
+  expect(uploads, 'an empty upload was sent to /update').toHaveLength(0);
+});
+
+test('the token field is used instead of prompting', async ({ page }) => {
+  await openSettings(page);
+  let prompted = false;
+  page.on('dialog', (d) => {
+    if (d.type() === 'prompt') prompted = true;
+    return void d.dismiss();
+  });
+  await page.locator('#ota_t').fill('token-from-the-field');
+  await page.locator('#groups button', { hasText: /^Restart$/ }).first().click();
+  await page.waitForTimeout(500);
+  expect(prompted, 'it prompted even though the token field was filled').toBe(false);
+});
