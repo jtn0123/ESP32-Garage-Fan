@@ -10,9 +10,7 @@ import type { DisplayFrame } from './types';
 /** Colours chosen to read as e-ink paper rather than as a screen. */
 const PAPER = '#e8e4dc';
 const INK = '#1b1b1a';
-/** The tricolor red, and the grey a mono panel actually shows instead. */
 const RED = '#c4302b';
-const MONO_ACCENT = '#8a8a86';
 
 /** Decode base64 into bytes. atob is fine here: the payload is ours and small. */
 export function decodePlane(b64: string): Uint8Array {
@@ -51,10 +49,9 @@ export function paintFrame(canvas: HTMLCanvasElement, frame: DisplayFrame, scale
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const img = ctx.createImageData(w, h);
-  const accent = frame.tricolor ? RED : MONO_ACCENT;
   const [pr, pg, pb] = hexToRgb(PAPER);
   const [ir, ig, ib] = hexToRgb(INK);
-  const [ar, ag, ab] = hexToRgb(accent);
+  const [ar, ag, ab] = hexToRgb(RED);
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -67,8 +64,13 @@ export function paintFrame(canvas: HTMLCanvasElement, frame: DisplayFrame, scale
         g = ig;
         b = ib;
       }
-      // Red last: on the glass the colour layer sits over the black one.
-      if (bitAt(red, stride, x, y)) {
+      // Red last, and ONLY on glass that has red ink. On the mono part the
+      // colour plane is never clocked out, so those pixels are blank paper --
+      // painting them a stand-in grey here would show an accent the wall does
+      // not have, and a mirror that invents pixels is worse than no mirror.
+      // This is why the speed bar carries a black hatch under its red fill:
+      // on mono the hatch is what remains, and the bar still reads.
+      if (frame.tricolor && bitAt(red, stride, x, y)) {
         r = ar;
         g = ag;
         b = ab;

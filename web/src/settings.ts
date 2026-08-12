@@ -460,8 +460,8 @@ async function loadPanel(cv: HTMLCanvasElement, msg: HTMLElement): Promise<void>
     // Name the panel kind: on a mono part the accents render grey here, and
     // without saying so the mirror looks like it lost its colour.
     msg.textContent = frame.tricolor
-      ? `${ageText(frame)} · tricolor`
-      : `${ageText(frame)} · mono panel (accents shown grey)`;
+      ? `${ageText(frame)} · tricolor panel`
+      : `${ageText(frame)} · mono panel (the red plane is not shown, because the glass cannot)`;
   } catch (err) {
     msg.textContent = `could not read the panel: ${err instanceof Error ? err.message : String(err)}`;
   }

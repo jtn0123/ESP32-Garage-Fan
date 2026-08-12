@@ -93,6 +93,22 @@ test('the mirror says how stale it is and which panel is fitted', async ({ page 
   // The mock stands in for the mono part, so it must say the accents are grey
   // rather than silently showing a colour the glass cannot produce.
   await expect(page.locator('#pnlmsg')).toContainText(/mono panel/i);
+  // ...and on mono the red plane must not be painted at all. The mock's
+  // header rule is red-only, so if any accent colour appears the mirror is
+  // inventing pixels the glass cannot show.
+  const reds = await page.locator('#pnlcv').evaluate((el) => {
+    const c = el as HTMLCanvasElement;
+    const ctx = c.getContext('2d');
+    if (!ctx) return -1;
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i] ?? 0, g = d[i + 1] ?? 0, b = d[i + 2] ?? 0;
+      if (r > 150 && g < 90 && b < 90) n++;
+    }
+    return n;
+  });
+  expect(reds, 'a mono panel mirror painted red pixels').toBe(0);
 });
 
 test('the refresh button asks the device to repaint', async ({ page }) => {
