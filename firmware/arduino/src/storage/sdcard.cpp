@@ -327,9 +327,14 @@ constexpr size_t kBatchPsram = 2048;
 constexpr size_t kBatchDram = 48;  // ~4.6 KB, leaves the mount guard its room
 constexpr size_t kPathMax = purge_logic::kMaxPathLen;
 
+// One fixed-width path slot. Named rather than spelled inline: the cast
+// `static_cast<char (*)[kPathMax]>` is formatted differently by clang-format 18
+// (CI) and 22 (dev machines), so the build failed on whitespace nobody wrote.
+using PathSlot = char[kPathMax];
+
 struct PurgeScratch {
   size_t cap = 0;
-  char (*batch)[kPathMax] = nullptr;
+  PathSlot* batch = nullptr;
   bool* batch_dir = nullptr;
   purge_logic::Queue dirq;
 };
@@ -353,7 +358,7 @@ bool scratch_alloc() {
     if (!m)
       continue;
     g_scratch.cap = cap;
-    g_scratch.batch = static_cast<char (*)[kPathMax]>(m);
+    g_scratch.batch = static_cast<PathSlot*>(m);
     g_scratch.batch_dir = reinterpret_cast<bool*>(static_cast<char*>(m) + cap * kPathMax);
     g_scratch.dirq.reset();
     return true;
