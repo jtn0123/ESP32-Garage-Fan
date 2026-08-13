@@ -297,8 +297,9 @@ def display_frame():
     speed = max(0, int(STATE["speed"]))
 
     black.frame(0, 0, DISP_W, DISP_H)
-    red.rect(0, 14, DISP_W, 2)  # the header rule, red like the firmware's
-    black.rect(0, 15, DISP_W, 1)
+    # The header rule, red-only and thick like the firmware's tricolor path:
+    # pixels are never set in both planes, because that speckles on the glass.
+    red.rect(0, 13, DISP_W, 4)
 
     # Left: the two temperatures, which must DIFFER. Drawing the same value in
     # both slots would let a console that swapped or duplicated them pass.
@@ -313,9 +314,7 @@ def display_frame():
     black.frame(132, 72, bar_w, 10)
     fill = int(round(speed / 12 * (bar_w - 2)))
     if fill > 0:
-        red.rect(133, 73, fill, 8)
-        for x in range(133, 133 + fill, 3):
-            black.rect(x, 73, 1, 8)
+        red.rect(133, 73, fill, 8)  # red-only, matching the tricolor firmware
 
     black.rect(0, 104, DISP_W, 1)
     return black, red

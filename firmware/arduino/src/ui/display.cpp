@@ -98,9 +98,15 @@ void compose() {
   mode_text(fan::auto_on(), buf, sizeof(buf));
   // Right-aligned by hand: 6 px per character at size 1.
   draw_text(g_black, kWidth - 4 - static_cast<int>(strlen(buf)) * 6, 4, 1, buf);
-  // The rule is pure decoration, so it is the one thing drawn red-only.
-  g_red->fillRect(0, 14, kWidth, 2, 1);
-  g_black->drawFastHLine(0, 15, kWidth, 1);
+  // The rule is pure decoration. On the tricolor glass it is drawn red-only
+  // and THICK: a pixel set in both planes gets an ill-defined waveform and a
+  // 2 px red line is below what the red particles develop cleanly -- the first
+  // deploy showed exactly that as speckling along the rule (2026-08-12). Solid
+  // red blocks (the speed bar) come out clean. Mono gets a plain black line.
+  if (tricolor())
+    g_red->fillRect(0, 13, kWidth, 4, 1);
+  else
+    g_black->drawFastHLine(0, 15, kWidth, 1);
 
   // ---- left column: the two temperatures ----------------------------------
   draw_text(g_black, 4, 22, 1, "IN F");
@@ -132,18 +138,27 @@ void compose() {
   g_black->drawRect(kBarX, kBarY, kBarW, kBarH, 1);
   const int fill = static_cast<int>(speed_fraction(speed) * (kBarW - 2) + 0.5f);
   if (fill > 0) {
-    g_red->fillRect(kBarX + 1, kBarY + 1, fill, kBarH - 2, 1);
-    // Hatch inside the fill so a mono panel still shows extent, not a blank box.
-    for (int x = kBarX + 1; x < kBarX + 1 + fill; x += 3)
-      g_black->drawFastVLine(x, kBarY + 1, kBarH - 2, 1);
+    if (tricolor()) {
+      // Red only. Hatching black under the red fill drove those pixels in
+      // both planes at once, which is what speckles on this chemistry.
+      g_red->fillRect(kBarX + 1, kBarY + 1, fill, kBarH - 2, 1);
+    } else {
+      // Hatch so a mono panel still shows extent, not a blank box.
+      for (int x = kBarX + 1; x < kBarX + 1 + fill; x += 3)
+        g_black->drawFastVLine(x, kBarY + 1, kBarH - 2, 1);
+    }
   }
 
   differential_text(tin, tout, buf, sizeof(buf));
   draw_text(g_black, kRx, 88, 1, buf);
   if (differential_is_hot(tin, tout, fan::engage_f())) {
-    // A caret beside the number, not instead of it.
-    g_red->fillTriangle(kWidth - 14, 94, kWidth - 8, 94, kWidth - 11, 88, 1);
-    g_black->drawTriangle(kWidth - 14, 94, kWidth - 8, 94, kWidth - 11, 88, 1);
+    // A caret beside the number, not instead of it. One plane each: red fill
+    // for the glass that shows it, black outline for the glass that cannot --
+    // never both, or the shared pixels speckle (see the header rule).
+    if (tricolor())
+      g_red->fillTriangle(kWidth - 14, 94, kWidth - 8, 94, kWidth - 11, 88, 1);
+    else
+      g_black->drawTriangle(kWidth - 14, 94, kWidth - 8, 94, kWidth - 11, 88, 1);
   }
 
   // ---- footer -------------------------------------------------------------
