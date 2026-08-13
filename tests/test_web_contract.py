@@ -206,3 +206,51 @@ def test_core_dump_handlers_check_the_token():
             f"image contains g_token itself, so an open read escalates to full "
             f"control of the board."
         )
+
+
+# ------------------------------------------------- the mock's config surface
+#
+# scripts/mock_device.py stands in for the device when dogfooding and in the
+# Playwright suite. A config argument the firmware accepts but the mock does not
+# is worse than a missing feature: the mock answers 200 and echoes its state
+# back unchanged, so the console appears to apply a setting that went nowhere,
+# and every test against the mock agrees with it.
+#
+# That is not hypothetical. `onf` and `offf` -- the auto-mode differential --
+# were absent here, so the two steppers that set it had never been exercised end
+# to end by anything at all.
+def test_mock_accepts_every_config_arg_the_firmware_does():
+    web = (SRC / "net" / "web.cpp").read_text()
+    body = re.search(r"static void handle_config\(\)\s*\{(.*?)\n\}", web, re.S)
+    assert body, "handle_config() not found -- did it move or get renamed?"
+    firmware_args = set(re.findall(r'hasArg\("(\w+)"\)', body.group(1)))
+    assert firmware_args, "handle_config() parses no arguments; the regex is stale"
+
+    mock = (ROOT / "scripts" / "mock_device.py").read_text()
+    keys = re.search(r"CONFIG_KEYS = \{(.*?)\n    \}", mock, re.S)
+    assert keys, "CONFIG_KEYS not found in mock_device.py"
+    mock_args = set(re.findall(r'"(\w+)":', keys.group(1)))
+
+    # newtoken rotates the OTA credential and is gated by a separate `auth`
+    # argument, not by the drawer. It is deliberately not a CONFIG_KEY: the mock
+    # would have to hold and check a token to stand in for it honestly, and a
+    # mock that hands out credentials is not a thing worth building. Named here
+    # rather than filtered loosely, so a genuinely new arg still fails.
+    NOT_A_SETTING = {"newtoken"}
+
+    # The reverse direction matters just as much. A key the MOCK accepts but the
+    # firmware does not lets a control pass its end-to-end test against a server
+    # that happily applied it, while the real device drops the argument on the
+    # floor -- the same silent no-op as `onf`, only discovered on hardware.
+    extra = mock_args - firmware_args
+    assert not extra, (
+        f"mock_device.py accepts config args the firmware does not: {sorted(extra)}. "
+        f"An E2E test can pass against the mock while the device ignores the setting."
+    )
+
+    missing = firmware_args - mock_args - NOT_A_SETTING
+    assert not missing, (
+        f"mock_device.py ignores config args the firmware accepts: {sorted(missing)}. "
+        f"The mock will answer 200 and change nothing, so the console looks like it "
+        f"applied the setting."
+    )

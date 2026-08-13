@@ -169,3 +169,42 @@ export interface PurgeResult {
   restarting: boolean;
   note: string;
 }
+
+/**
+ * `GET /api/display` — the e-ink panel's last frame, for the console's mirror.
+ *
+ * Two 1-bit planes, base64'd, row-major, MSB first, a set bit meaning ink. This
+ * is the firmware's own format, NOT the display driver's: Adafruit_EPD stores
+ * its buffer column-major and rotated with per-driver inversion, so decoding
+ * that here would make the mirror a re-derivation of a private implementation
+ * detail — one that renders something plausible and wrong the first time the
+ * driver changes.
+ *
+ * These are the same bytes that were clocked to the glass, so the picture in
+ * the browser cannot drift from the picture on the wall. That is the whole
+ * reason this is a framebuffer and not a JS re-implementation of the layout.
+ */
+export interface DisplayFrame {
+  /** False until the panel has painted once; every other field is then empty. */
+  ready: boolean;
+  w: number;
+  h: number;
+  /** Bytes per row: (w + 7) / 8. */
+  stride: number;
+  /**
+   * Whether the fitted panel can actually show the red plane.
+   *
+   * Both the mono and tricolor 2.13" FeatherWings are SSD1680 at 250×122, so
+   * the firmware is identical and only the glass differs. Everything red is an
+   * accent over information already legible in black, so a mono panel loses
+   * decoration and no meaning — but the mirror renders red as grey when this is
+   * false, because the point is to show what THIS device displays.
+   */
+  tricolor: boolean;
+  /** Seconds since the last refresh; -1 when it has never painted. */
+  age_s: number;
+  /** base64 of the black plane. */
+  black: string;
+  /** base64 of the red plane. Drawn over black; a pixel may be in both. */
+  red: string;
+}

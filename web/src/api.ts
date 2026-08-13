@@ -4,7 +4,14 @@
 // thrown Error the caller can handle, rather than `undefined` propagating into
 // the render and showing up as NaN three functions later.
 
-import type { DeviceInfo, DeviceState, History, Sensors, Stats } from './types.js';
+import type {
+  DeviceInfo,
+  DeviceState,
+  DisplayFrame,
+  History,
+  Sensors,
+  Stats,
+} from './types.js';
 
 async function json<T>(url: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
   // Timeout so a device that drops off the network mid-request fails the
@@ -18,6 +25,20 @@ export const getState = (): Promise<DeviceState> => json<DeviceState>('/api/stat
 export const getDevice = (): Promise<DeviceInfo> => json<DeviceInfo>('/api/device');
 export const getStats = (): Promise<Stats> => json<Stats>('/api/stats');
 export const getSensors = (): Promise<Sensors> => json<Sensors>('/api/sensors');
+/** The e-ink panel's last frame, for the mirror in the settings drawer. */
+export const getDisplay = (): Promise<DisplayFrame> => json<DisplayFrame>('/api/display');
+/** Repaint the panel now instead of waiting out the 5-minute cadence. */
+export const refreshDisplay = async (): Promise<Response> => {
+  const r = await fetch('/api/display/refresh', { method: 'POST' });
+  if (r.status === 429) {
+    // The device refuses a repaint that comes too soon: each one parks its loop
+    // for seconds. Say how long rather than reporting a bare status code.
+    const body = (await r.json().catch(() => ({}))) as { retry_in_s?: number };
+    throw new Error(`too soon — the panel can repaint again in ${body.retry_in_s ?? '?'}s`);
+  }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r;
+};
 export const getHistory = (days: number): Promise<History> =>
   json<History>(`/api/history?days=${days}`);
 

@@ -22,9 +22,11 @@ Scenario knobs are flipped at runtime:
     curl "http://127.0.0.1:8099/_die"                 # controller goes away
 """
 
+import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+import os
 from pathlib import Path
 import time
 from urllib.parse import parse_qs, urlparse
@@ -32,7 +34,9 @@ from urllib.parse import parse_qs, urlparse
 # Serve the console straight out of the build tree, so dogfooding always
 # exercises the bundle that would actually ship.
 CONSOLE = Path(__file__).resolve().parents[1] / "web" / "dist" / "console.html"
-PORT = 8099
+# Overridable so the Playwright suite and tests/test_http_contract.py can run at
+# the same time without fighting over one port.
+PORT = int(os.environ.get("MOCK_PORT", "8099"))
 # NOSONAR: plain HTTP is the point. This mocks an ESP32 that has no TLS stack
 # (see net/weather.h for the measured reason), it binds to loopback only, and
 # the console's own Origin check is one of the behaviours under test -- these
@@ -107,6 +111,9 @@ SCEN = {
     "corrupt": False,
     "flat_rh": False,
     "down": False,
+    # The panel before its first refresh: the firmware answers ready:false
+    # until then, and the console has a branch for it that nothing could reach.
+    "panel_ready": True,
 }
 
 
@@ -121,6 +128,7 @@ SCEN_SPEC = {
     "corrupt": bool,
     "flat_rh": bool,
     "down": bool,
+    "panel_ready": bool,
 }
 
 
@@ -139,7 +147,49 @@ def coerce_scen(key: str, raw: str):
     return int(raw)
 
 
+# Both caches exist for the Playwright suite: a dozen browser contexts hammer
+# this single-process server, and re-reading a 58 KB file and rebuilding 288
+# rows of trig per request made the MOCK the slowest thing in the run. Tests
+# then timed out waiting for the first paint, which reads as a console bug and
+# is not one. Dogfooding by hand gets the same benefit for free.
+#
+# Both are published as a SINGLE tuple rebind, never as two field writes. This
+# is a ThreadingHTTPServer: a version that stored the key first and the value
+# second let another thread observe the new key beside the old (or absent)
+# value, and the handler died mid-response -- the browser saw ERR_EMPTY_RESPONSE
+# and the suite reported it as a console failure. Read once into a local, build
+# off to the side, then swap; rebinding one name is atomic under the GIL.
+_page_cache: "tuple[int, bytes] | None" = None
+
+
+def console_bytes() -> bytes:
+    """web/dist/console.html, re-read only when the build actually changes."""
+    global _page_cache
+    stamp = CONSOLE.stat().st_mtime_ns
+    cached = _page_cache
+    if cached is None or cached[0] != stamp:
+        cached = (stamp, CONSOLE.read_bytes())
+        _page_cache = cached
+    return cached[1]
+
+
+_hist_cache: "tuple[tuple, dict] | None" = None
+
+
 def history():
+    # Keyed on the knobs AND the current second: the rows carry timestamps, so a
+    # cache that ignored the clock would freeze the chart's right-hand edge.
+    global _hist_cache
+    key = (tuple(sorted(SCEN.items())), int(time.time()))
+    cached = _hist_cache
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    value = _history_uncached()
+    _hist_cache = (key, value)
+    return value
+
+
+def _history_uncached():
     n = SCEN["rows"]
     end = int(time.time())
     ts, temp, rh, hpa, out, batt, spd, chg = [], [], [], [], [], [], [], []
@@ -171,6 +221,104 @@ def history():
         "spd": spd,
         "chg": chg,
     }
+
+
+# ------------------------------------------------------- the e-ink mirror
+#
+# A SYNTHETIC frame, not a reimplementation of ui/display.cpp. The console's
+# mirror is a framebuffer blitter with no layout logic of its own (see
+# web/src/panel.ts), so what it needs exercising is the wire shape and the
+# decode: two 1-bit planes, row-major, MSB first, correct stride, red over
+# black. Copying the firmware's layout here would be a second copy to keep in
+# step, which is the exact trap the framebuffer design avoids.
+#
+# It does track STATE["speed"], so the bar and the digits move when the console
+# drives the fan -- otherwise a test could not tell a live mirror from a
+# hardcoded picture.
+DISP_W = 250
+DISP_H = 122
+DISP_STRIDE = (DISP_W + 7) // 8
+
+# 3x5 digits, one string per glyph, row-major. Enough to read a speed off the
+# mock's panel; the real panel uses the Adafruit GFX font.
+_FONT3X5 = {
+    "0": ("111", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "111"),
+    "2": ("111", "001", "111", "100", "111"),
+    "3": ("111", "001", "111", "001", "111"),
+    "4": ("101", "101", "111", "001", "001"),
+    "5": ("111", "100", "111", "001", "111"),
+    "6": ("111", "100", "111", "101", "111"),
+    "7": ("111", "001", "001", "001", "001"),
+    "8": ("111", "101", "111", "101", "111"),
+    "9": ("111", "101", "111", "001", "111"),
+    "-": ("000", "000", "111", "000", "000"),
+    ".": ("000", "000", "000", "000", "100"),
+}
+
+
+class _Plane:
+    """A 1-bit, row-major, MSB-first plane -- the firmware's format."""
+
+    def __init__(self):
+        self.buf = bytearray(DISP_STRIDE * DISP_H)
+
+    def px(self, x, y):
+        if 0 <= x < DISP_W and 0 <= y < DISP_H:
+            self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
+
+    def rect(self, x, y, w, h):
+        for yy in range(y, y + h):
+            for xx in range(x, x + w):
+                self.px(xx, yy)
+
+    def frame(self, x, y, w, h):
+        for xx in range(x, x + w):
+            self.px(xx, y)
+            self.px(xx, y + h - 1)
+        for yy in range(y, y + h):
+            self.px(x, yy)
+            self.px(x + w - 1, yy)
+
+    def text(self, x, y, s, scale=1):
+        for ch in s:
+            glyph = _FONT3X5.get(ch)
+            if glyph:
+                for gy, row in enumerate(glyph):
+                    for gx, bit in enumerate(row):
+                        if bit == "1":
+                            self.rect(x + gx * scale, y + gy * scale, scale, scale)
+            x += 4 * scale
+
+
+def display_frame():
+    """Compose the mock's panel image: the black plane and the red plane."""
+    black, red = _Plane(), _Plane()
+    speed = max(0, int(STATE["speed"]))
+
+    black.frame(0, 0, DISP_W, DISP_H)
+    red.rect(0, 14, DISP_W, 2)  # the header rule, red like the firmware's
+    black.rect(0, 15, DISP_W, 1)
+
+    # Left: the two temperatures, which must DIFFER. Drawing the same value in
+    # both slots would let a console that swapped or duplicated them pass.
+    inside_f = STATE["outside_f"] + 8
+    black.text(6, 26, f"{inside_f:.0f}", scale=4)
+    black.text(6, 76, f"{STATE['outside_f']:.0f}", scale=3)
+
+    # Right: the fan, with a red bar whose fill follows the speed.
+    black.rect(126, 20, 1, 82)
+    black.text(136, 30, str(speed), scale=6)
+    bar_w = DISP_W - 132 - 6
+    black.frame(132, 72, bar_w, 10)
+    fill = int(round(speed / 12 * (bar_w - 2)))
+    if fill > 0:
+        red.rect(133, 73, fill, 8)
+        for x in range(133, 133 + fill, 3):
+            black.rect(x, 73, 1, 8)
+
+    black.rect(0, 104, DISP_W, 1)
+    return black, red
 
 
 class H(BaseHTTPRequestHandler):
@@ -280,7 +428,7 @@ class H(BaseHTTPRequestHandler):
     def _page(self, _query):
         # Sonar's S5131 flow names this read as its source; the suppression and
         # the reasoning live at the sink in _send, where the rule reports.
-        return self._send(200, CONSOLE.read_bytes(), "text/html")
+        return self._send(200, console_bytes(), "text/html")
 
     def _state(self, _query):
         return self._json(200, STATE)
@@ -329,12 +477,21 @@ class H(BaseHTTPRequestHandler):
         STATE["uptime_s"] += 1  # so the console's ordering guard sees progress
         return self._json(200, STATE)
 
+    # Every argument handle_config() in net/web.cpp accepts. A key missing here
+    # is not a harmless omission: the mock answers 200 and echoes STATE back
+    # unchanged, so the console looks like it applied a setting that went
+    # nowhere. onf/offf were missing exactly that way, which is why the
+    # differential steppers had never been exercised end to end by anything.
+    # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
+    # in step with the firmware.
     CONFIG_KEYS = {
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),
         "offc": ("offc", float),
         "offi": ("offi", float),
+        "onf": ("on_f", float),
+        "offf": ("off_f", float),
     }
 
     def _config(self, query):
@@ -347,6 +504,43 @@ class H(BaseHTTPRequestHandler):
                 return self._json(400, {"error": f"bad {arg}"})
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
+
+    def _display(self, _query):
+        if not SCEN["panel_ready"]:
+            # Exactly what handle_display() answers before the first render.
+            return self._json(
+                200,
+                {
+                    "ready": False,
+                    "w": 0,
+                    "h": 0,
+                    "stride": 0,
+                    "tricolor": False,
+                    "age_s": -1,
+                    "black": "",
+                    "red": "",
+                },
+            )
+        black, red = display_frame()
+        return self._json(
+            200,
+            {
+                "ready": True,
+                "w": DISP_W,
+                "h": DISP_H,
+                "stride": DISP_STRIDE,
+                # The mock stands in for the MONO part recorded in
+                # docs/HARDWARE.md, so the console renders accents grey and the
+                # "mono panel" note is what a test sees by default.
+                "tricolor": False,
+                "age_s": 42,
+                "black": base64.b64encode(bytes(black.buf)).decode(),
+                "red": base64.b64encode(bytes(red.buf)).decode(),
+            },
+        )
+
+    def _display_refresh(self, _query):
+        return self._json(200, {"ok": True})
 
     def _needs_token(self, _query):
         # Token-guarded on the real device; the mock always refuses, which is
@@ -362,6 +556,7 @@ class H(BaseHTTPRequestHandler):
         "/api/sensors": _sensors,
         "/api/events": _events,
         "/api/history": _history,
+        "/api/display": _display,
         "/download.csv": _csv,
         # Reads, but token-guarded: a core dump is a RAM snapshot and RAM holds
         # the token, the WiFi PSK and the MQTT password. See handle_crash().
@@ -371,6 +566,7 @@ class H(BaseHTTPRequestHandler):
     WRITES = {
         "/api/set": _set,
         "/api/config": _config,
+        "/api/display/refresh": _display_refresh,
         "/api/raw": _needs_token,
         "/api/restart": _needs_token,
         "/api/sdformat": _needs_token,

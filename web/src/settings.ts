@@ -7,9 +7,11 @@
 // line; D- was measured idle). Shipping controls that silently do nothing is
 // worse than not shipping them, so those rows are absent rather than inert.
 
+import * as api from './api.js';
 import { el, show } from './dom.js';
 import { hoursMinutes, storage } from './format.js';
 import type { DeviceInfo, DeviceState } from './types.js';
+import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
 
 export type Row =
@@ -18,7 +20,8 @@ export type Row =
   | { kind: 'text'; label: string; hint: string; value: string }
   | { kind: 'actions'; label: string; hint: string; actions: Action[] }
   | { kind: 'update'; label: string; hint: string; status: UpdateStatus | null; recheck: () => void }
-  | { kind: 'ota'; label: string; hint: string };
+  | { kind: 'ota'; label: string; hint: string }
+  | { kind: 'panel'; label: string; hint: string };
 
 export interface Action {
   text: string;
@@ -209,6 +212,11 @@ export function buildGroups(d: SettingsDeps): Group[] {
               : 'not mounted',
         ),
         {
+          kind: 'panel',
+          label: 'Panel',
+          hint: 'What the e-ink display on the device is showing right now. These are the same pixels the firmware sent to the glass, not a redrawing of them, so what you see here is what is on the wall. It repaints on the 5-minute sample cadence.',
+        },
+        {
           kind: 'actions',
           label: 'Maintenance',
           hint: 'Restart reboots into the same slot. "Delete card contents" unlinks every file but leaves the filesystem alone — use it to reclaim space, since Format only rewrites a card that will not mount. Both need the update token.',
@@ -312,6 +320,8 @@ function control(r: Row): HTMLElement {
       return updateControl(r.status, r.recheck);
     case 'ota':
       return otaControl();
+    case 'panel':
+      return panelControl();
   }
 }
 
@@ -399,4 +409,79 @@ function otaControl(): HTMLElement {
   show(msg, true);
   otaRow = box;
   return box;
+}
+
+
+// --------------------------------------------------------------- the mirror
+
+let panelRow: HTMLElement | null = null;
+
+/**
+ * The e-ink panel, as it is right now.
+ *
+ * A canvas rather than a re-drawn layout: the device sends the same two 1-bit
+ * planes it clocked to the glass, so this cannot drift from the wall. See
+ * panel.ts and the DisplayFrame contract in types.ts.
+ *
+ * The panel refreshes on the 5-minute sample cadence, so what you see here is
+ * usually a few minutes old -- said out loud under the image, because a mirror
+ * that looks stale and does not explain itself reads as a broken mirror.
+ */
+function panelControl(): HTMLElement {
+  if (panelRow) return panelRow;
+  const box = el('div', { className: 'pnl' });
+  const cv = el('canvas', { id: 'pnlcv' }) as HTMLCanvasElement;
+  const msg = el('div', { className: 'pnlmsg', id: 'pnlmsg', textContent: 'loading the panel…' });
+  const btn = el('button', {
+    className: 'updbtn',
+    id: 'pnlrefresh',
+    textContent: 'Refresh now',
+    onclick: () => void forcePanelRefresh(cv, msg),
+  });
+  box.append(cv, msg, btn);
+  panelRow = box;
+  // The elements are captured, NOT looked up by id later: this function returns
+  // the box for the caller to append, so at this point nothing here is in the
+  // document yet and a getElementById would find nothing and quietly do
+  // nothing. That is exactly how the first version of this shipped a canvas
+  // that never fetched a frame.
+  void loadPanel(cv, msg);
+  return box;
+}
+
+async function loadPanel(cv: HTMLCanvasElement, msg: HTMLElement): Promise<void> {
+  try {
+    const frame = await api.getDisplay();
+    if (!frame.ready) {
+      msg.textContent = ageText(frame);
+      return;
+    }
+    paintFrame(cv, frame);
+    // Name the panel kind: on a mono part the accents render grey here, and
+    // without saying so the mirror looks like it lost its colour.
+    msg.textContent = frame.tricolor
+      ? `${ageText(frame)} · tricolor panel`
+      : `${ageText(frame)} · mono panel (the red plane is not shown, because the glass cannot)`;
+  } catch (err) {
+    msg.textContent = `could not read the panel: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function forcePanelRefresh(cv: HTMLCanvasElement, msg: HTMLElement): Promise<void> {
+  msg.textContent = 'refreshing the panel…';
+  try {
+    await api.refreshDisplay();
+    // The panel blocks the device for seconds while it clocks the waveform, so
+    // give it a beat before asking for the new frame.
+    await new Promise((r) => setTimeout(r, 4000));
+  } catch (err) {
+    // Reported, not swallowed. Falling through to loadPanel would paint the
+    // PREVIOUS frame under a normal "refreshed Nm ago" line, so a refusal or a
+    // dead controller would read as a slightly stale panel. The device answers
+    // 429 with retry_in_s when a repaint comes too soon, and the operator
+    // should see that rather than a reassuring timestamp.
+    msg.textContent = `could not refresh the panel: ${err instanceof Error ? err.message : String(err)}`;
+    return;
+  }
+  await loadPanel(cv, msg);
 }

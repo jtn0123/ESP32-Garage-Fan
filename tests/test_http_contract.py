@@ -9,6 +9,7 @@ and not sufficient, which is the same caveat written at the top of the mock.
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 import socket
@@ -276,3 +277,30 @@ def test_the_console_page_is_served(mock):
     status, body = req("/")
     assert status == 200
     assert body.lstrip().startswith(b"<!doctype html>")
+
+
+def test_display_frame_has_two_planes_of_the_right_size(mock):
+    """The e-ink mirror's wire shape.
+
+    The console blits these bytes straight to a canvas, so a wrong stride or a
+    short plane does not error -- it renders a skewed or truncated picture that
+    still looks like a display. Sizes are worth pinning.
+    """
+    d = get_json("/api/display")
+    assert d["ready"] is True
+    assert (d["w"], d["h"]) == (250, 122), "the 2.13in FeatherWing is 250x122"
+    assert d["stride"] == (d["w"] + 7) // 8 == 32
+    expected = d["stride"] * d["h"]
+    for plane in ("black", "red"):
+        raw = base64.b64decode(d[plane])
+        assert len(raw) == expected, f"{plane} plane is {len(raw)} bytes, expected {expected}"
+    assert isinstance(d["tricolor"], bool)
+    assert d["age_s"] >= -1
+
+
+def test_display_refresh_is_post_only(mock):
+    """Repainting parks the device for seconds; a GET must not be able to."""
+    status, _ = req("/api/display/refresh", "POST")
+    assert status == 200
+    status, _ = req("/api/display/refresh")
+    assert status in (404, 405), "a GET must not trigger a panel repaint"
