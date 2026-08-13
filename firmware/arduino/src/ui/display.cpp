@@ -4,7 +4,12 @@
 
 #include <Adafruit_EPD.h>
 #include <Adafruit_GFX.h>
+#include <Adafruit_ThinkInk.h>
 #include <Arduino.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
 #include <WiFi.h>
 
 #include <cmath>
@@ -38,9 +43,12 @@ using display_layout::speed_scale_text;
 using display_layout::speed_text;
 using display_layout::temp_f_text;
 
-// 2.13" SSD1680 FeatherWing, landscape; no busy/rst pins wired. The mono and
-// tricolor parts are the same driver at the same size, so one build covers both
-// -- see display.h::tricolor() and the TRICOLOR RULE in display_layout.h.
+// 2.13" SSD1680 FeatherWing, landscape; no busy/rst pins wired. Driven through
+// Adafruit's own panel class for the tricolor MFGNR part: the raw SSD1680
+// default keeps _xram_offset = 1, which shifted the whole image 8 px down this
+// glass -- a band of never-written RAM speckling red above the title, and the
+// footer's bottom rows pushed off the panel (observed 2026-08-12). The MFGNR
+// class zeroes the offset and carries the right refresh timing.
 Adafruit_SSD1680* g_epd = nullptr;
 bool g_ok = false;
 uint32_t g_last_ms = 0;
@@ -68,20 +76,50 @@ constexpr uint32_t kSpeedSettleMs = 60000;
  */
 constexpr uint32_t kMinForcedGapMs = 30000;
 
+/** Built-in 5x7 font, (x, y) = top-left. For labels and the footer. */
 void draw_text(GFXcanvas1* c, int x, int y, uint8_t size, const char* s) {
+  c->setFont(nullptr);
   c->setTextSize(size);
   c->setCursor(x, y);
   c->print(s);
 }
 
+/** A FreeFont, (x, y) = BASELINE, like every GFX custom font. */
+void draw_ftext(GFXcanvas1* c, const GFXfont* f, int x, int y, const char* s, uint16_t color = 1) {
+  c->setFont(f);
+  c->setTextSize(1);
+  c->setTextColor(color);
+  c->setCursor(x, y);
+  c->print(s);
+  c->setTextColor(1);
+  c->setFont(nullptr);
+}
+
+/** Advance width of `s` in font `f`, for right-aligning. */
+int ftext_width(GFXcanvas1* c, const GFXfont* f, const char* s) {
+  int16_t x1;
+  int16_t y1;
+  uint16_t w;
+  uint16_t h;
+  c->setFont(f);
+  c->setTextSize(1);
+  c->getTextBounds(s, 0, 100, &x1, &y1, &w, &h);
+  c->setFont(nullptr);
+  return static_cast<int>(w) + x1;
+}
+
 /**
  * Compose one frame into the two planes.
  *
- * Layout, 250x122 landscape:
- *   header   : name, mode, red rule
- *   left col : IN temp (big), RH, OUT temp
- *   right col: FAN speed (big), /12, red fill bar, differential
- *   footer   : runtime, battery, ip, fw
+ * Layout, 250x122 landscape ("the mix", chosen over A/B/C previews 2026-08-12):
+ *   banner   : solid red band, title and mode knocked out to paper
+ *   left col : IN temp (FreeSansBold 18pt), RH, OUT temp (12pt)
+ *   right col: FAN speed (24pt), /12, red fill bar, differential
+ *   footer   : runtime, battery, ip, fw (built-in 5x7)
+ *
+ * Every element lives in exactly ONE plane -- a pixel set in both RAMs gets an
+ * ill-defined waveform and speckles on this chemistry. The knockout title is
+ * still one plane: it is holes in the red band, not black over red.
  */
 void compose() {
   char buf[48];
@@ -93,54 +131,54 @@ void compose() {
   const float rh = history::count() ? history::rh()[history::count() - 1] : NAN;
   const int speed = fan::speed();
 
-  // ---- header -------------------------------------------------------------
-  draw_text(g_black, 4, 4, 1, "GARAGE FAN");
+  // ---- banner ---------------------------------------------------------------
   mode_text(fan::auto_on(), buf, sizeof(buf));
-  // Right-aligned by hand: 6 px per character at size 1.
-  draw_text(g_black, kWidth - 4 - static_cast<int>(strlen(buf)) * 6, 4, 1, buf);
-  // The rule is pure decoration. On the tricolor glass it is drawn red-only
-  // and THICK: a pixel set in both planes gets an ill-defined waveform and a
-  // 2 px red line is below what the red particles develop cleanly -- the first
-  // deploy showed exactly that as speckling along the rule (2026-08-12). Solid
-  // red blocks (the speed bar) come out clean. Mono gets a plain black line.
-  if (tricolor())
-    g_red->fillRect(0, 13, kWidth, 4, 1);
-  else
-    g_black->drawFastHLine(0, 15, kWidth, 1);
+  if (tricolor()) {
+    g_red->fillRect(0, 0, kWidth, 20, 1);
+    draw_ftext(g_red, &FreeSansBold9pt7b, 5, 15, "GARAGE FAN", 0);
+    draw_ftext(g_red, &FreeSansBold9pt7b, kWidth - 5 - ftext_width(g_red, &FreeSansBold9pt7b, buf),
+               15, buf, 0);
+  } else {
+    draw_ftext(g_black, &FreeSansBold9pt7b, 5, 15, "GARAGE FAN");
+    draw_ftext(g_black, &FreeSansBold9pt7b,
+               kWidth - 5 - ftext_width(g_black, &FreeSansBold9pt7b, buf), 15, buf);
+    g_black->drawFastHLine(0, 19, kWidth, 1);
+  }
 
-  // ---- left column: the two temperatures ----------------------------------
-  draw_text(g_black, 4, 22, 1, "IN F");
+  // ---- left column: the two temperatures ------------------------------------
+  draw_text(g_black, 4, 27, 1, "IN");
   temp_f_text(tin, buf, sizeof(buf));
-  draw_text(g_black, 4, 34, 3, buf);
+  draw_ftext(g_black, &FreeSansBold18pt7b, 2, 60, buf);
+  draw_ftext(g_black, &FreeSansBold9pt7b, g_black->getCursorX() + 2, 47, "F");
   rh_text(rh, buf, sizeof(buf));
-  draw_text(g_black, 4, 60, 1, buf);
+  draw_text(g_black, 4, 66, 1, buf);
 
-  draw_text(g_black, 4, 76, 1, "OUT F");
+  draw_text(g_black, 4, 78, 1, "OUT");
   temp_f_text(tout, buf, sizeof(buf));
-  draw_text(g_black, 4, 88, 2, buf);
+  draw_ftext(g_black, &FreeSansBold12pt7b, 2, 103, buf);
+  draw_ftext(g_black, &FreeSansBold9pt7b, g_black->getCursorX() + 2, 94, "F");
 
-  // ---- right column: the fan ----------------------------------------------
+  // ---- right column: the fan -------------------------------------------------
   constexpr int kRx = 132;
-  g_black->drawFastVLine(kRx - 8, 20, 82, 1);
-  draw_text(g_black, kRx, 22, 1, "FAN");
+  g_black->drawFastVLine(kRx - 8, 24, 78, 1);
+  draw_text(g_black, kRx + 2, 27, 1, "FAN");
   speed_text(speed, buf, sizeof(buf));
-  draw_text(g_black, kRx, 34, speed <= 0 ? 3 : 5, buf);
+  // "OFF" at 24pt would not fit beside the scale; the number always does.
+  draw_ftext(g_black, speed <= 0 ? &FreeSansBold18pt7b : &FreeSansBold24pt7b, kRx, 68, buf);
   speed_scale_text(speed, buf, sizeof(buf));
   if (buf[0])
-    draw_text(g_black, kRx + 40, 52, 2, buf);
+    draw_ftext(g_black, &FreeSansBold9pt7b, g_black->getCursorX() + 4, 68, buf);
 
-  // The bar: red fill, black outline and a black tick at each step. Everything
-  // it says is also in the number above it, so a mono panel loses only colour.
+  // The bar: black outline, red fill strictly inside it -- one plane each.
+  // Everything it says is also in the number above, so mono loses only colour.
   constexpr int kBarX = kRx;
-  constexpr int kBarY = 72;
+  constexpr int kBarY = 76;
   constexpr int kBarW = kWidth - kRx - 6;
-  constexpr int kBarH = 10;
+  constexpr int kBarH = 12;
   g_black->drawRect(kBarX, kBarY, kBarW, kBarH, 1);
   const int fill = static_cast<int>(speed_fraction(speed) * (kBarW - 2) + 0.5f);
   if (fill > 0) {
     if (tricolor()) {
-      // Red only. Hatching black under the red fill drove those pixels in
-      // both planes at once, which is what speckles on this chemistry.
       g_red->fillRect(kBarX + 1, kBarY + 1, fill, kBarH - 2, 1);
     } else {
       // Hatch so a mono panel still shows extent, not a blank box.
@@ -149,20 +187,18 @@ void compose() {
     }
   }
 
-  differential_text(tin, tout, buf, sizeof(buf));
-  draw_text(g_black, kRx, 88, 1, buf);
+  differential_text(tin, tout, buf, sizeof(buf));  // "DIFF +8.2", label included
+  draw_ftext(g_black, &FreeSansBold9pt7b, kRx + 2, 103, buf);
   if (differential_is_hot(tin, tout, fan::engage_f())) {
-    // A caret beside the number, not instead of it. One plane each: red fill
-    // for the glass that shows it, black outline for the glass that cannot --
-    // never both, or the shared pixels speckle (see the header rule).
+    // A caret beside the number, not instead of it. One plane each.
     if (tricolor())
-      g_red->fillTriangle(kWidth - 14, 94, kWidth - 8, 94, kWidth - 11, 88, 1);
+      g_red->fillTriangle(kWidth - 14, 102, kWidth - 6, 102, kWidth - 10, 94, 1);
     else
-      g_black->drawTriangle(kWidth - 14, 94, kWidth - 8, 94, kWidth - 11, 88, 1);
+      g_black->drawTriangle(kWidth - 14, 102, kWidth - 6, 102, kWidth - 10, 94, 1);
   }
 
   // ---- footer -------------------------------------------------------------
-  g_black->drawFastHLine(0, 104, kWidth, 1);
+  g_black->drawFastHLine(0, 106, kWidth, 1);
   // Sized so the concatenation below is provably in range: 15 + 2 + 23 < 64.
   // Reusing the shared buf[48] here left gcc unable to bound the first %s and
   // it warned about truncation -- and this build treats a warning in src/ as an
@@ -194,15 +230,13 @@ void blit() {
 
 void begin() {
   CRUMB("epd_init");
-  static Adafruit_SSD1680 epd(kWidth, kHeight, EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
+  // The MFGNR panel class, not raw Adafruit_SSD1680: it zeroes _xram_offset
+  // (the raw default of 1 shifted the image 8 px down this glass, leaving a
+  // never-written speckle band above the title and clipping the footer) and
+  // its begin() sets rotation 0, which IS upright landscape on this wing.
+  static ThinkInk_213_Tricolor_MFGNR epd(EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
   g_epd = &epd;
-  g_epd->begin();
-  // Rotation 0 IS upright landscape (250x122) on this wing -- the driver is
-  // constructed with the landscape dimensions and maps them to panel RAM
-  // itself. setRotation(1) made the logical space 122 wide, so blitting the
-  // 250-wide planes drew everything 90 degrees off and clipped, and the
-  // red-only header rule became a lone red streak on the glass (2026-08-12).
-  g_epd->setRotation(0);
+  epd.begin(tricolor() ? THINKINK_TRICOLOR : THINKINK_MONO);
   static GFXcanvas1 black(kWidth, kHeight);
   static GFXcanvas1 red(kWidth, kHeight);
   g_black = &black;

@@ -242,6 +242,14 @@ DISP_STRIDE = (DISP_W + 7) // 8
 # 3x5 digits, one string per glyph, row-major. Enough to read a speed off the
 # mock's panel; the real panel uses the Adafruit GFX font.
 _FONT3X5 = {
+    # Letters for the banner knockout ("GARAGE FAN").
+    "G": ("111", "100", "101", "101", "111"),
+    "A": ("010", "101", "111", "101", "101"),
+    "R": ("110", "101", "110", "101", "101"),
+    "E": ("111", "100", "110", "100", "111"),
+    "F": ("111", "100", "110", "100", "100"),
+    "N": ("101", "111", "111", "101", "101"),
+    " ": ("000", "000", "000", "000", "000"),
     "0": ("111", "101", "101", "101", "111"),
     "1": ("010", "110", "010", "010", "111"),
     "2": ("111", "001", "111", "100", "111"),
@@ -263,14 +271,17 @@ class _Plane:
     def __init__(self):
         self.buf = bytearray(DISP_STRIDE * DISP_H)
 
-    def px(self, x, y):
+    def px(self, x, y, on=True):
         if 0 <= x < DISP_W and 0 <= y < DISP_H:
-            self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
+            if on:
+                self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
+            else:
+                self.buf[y * DISP_STRIDE + (x >> 3)] &= ~(0x80 >> (x & 7)) & 0xFF
 
-    def rect(self, x, y, w, h):
+    def rect(self, x, y, w, h, on=True):
         for yy in range(y, y + h):
             for xx in range(x, x + w):
-                self.px(xx, yy)
+                self.px(xx, yy, on)
 
     def frame(self, x, y, w, h):
         for xx in range(x, x + w):
@@ -280,14 +291,14 @@ class _Plane:
             self.px(x, yy)
             self.px(x + w - 1, yy)
 
-    def text(self, x, y, s, scale=1):
+    def text(self, x, y, s, scale=1, on=True):
         for ch in s:
             glyph = _FONT3X5.get(ch)
             if glyph:
                 for gy, row in enumerate(glyph):
                     for gx, bit in enumerate(row):
                         if bit == "1":
-                            self.rect(x + gx * scale, y + gy * scale, scale, scale)
+                            self.rect(x + gx * scale, y + gy * scale, scale, scale, on)
             x += 4 * scale
 
 
@@ -297,9 +308,11 @@ def display_frame():
     speed = max(0, int(STATE["speed"]))
 
     black.frame(0, 0, DISP_W, DISP_H)
-    # The header rule, red-only and thick like the firmware's tricolor path:
-    # pixels are never set in both planes, because that speckles on the glass.
-    red.rect(0, 13, DISP_W, 4)
+    # The banner, like the firmware's tricolor path: a solid red band with the
+    # title knocked out to paper. One plane -- pixels are never set in both,
+    # because that speckles on the glass.
+    red.rect(0, 0, DISP_W, 20)
+    red.text(5, 4, "GARAGE FAN", scale=2, on=False)
 
     # Left: the two temperatures, which must DIFFER. Drawing the same value in
     # both slots would let a console that swapped or duplicated them pass.
