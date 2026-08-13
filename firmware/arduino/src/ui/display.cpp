@@ -25,6 +25,7 @@
 #include "system/eventlog.h"
 #include "system/odometer.h"
 #include "ui/display_layout.h"
+#include "ui/qr_v1.h"
 
 namespace display {
 namespace {
@@ -163,11 +164,32 @@ void compose() {
   g_black->drawFastVLine(kRx - 8, 24, 78, 1);
   draw_text(g_black, kRx + 2, 27, 1, "FAN");
   speed_text(speed, buf, sizeof(buf));
-  // "OFF" at 24pt would not fit beside the scale; the number always does.
-  draw_ftext(g_black, speed <= 0 ? &FreeSansBold18pt7b : &FreeSansBold24pt7b, kRx, 68, buf);
+  // 24pt only for a single digit: "OFF" and two-digit speeds at 24pt would
+  // run "/12" into the QR code on the right.
+  draw_ftext(g_black, (speed >= 1 && speed <= 9) ? &FreeSansBold24pt7b : &FreeSansBold18pt7b, kRx,
+             68, buf);
   speed_scale_text(speed, buf, sizeof(buf));
   if (buf[0])
     draw_ftext(g_black, &FreeSansBold9pt7b, g_black->getCursorX() + 4, 68, buf);
+
+  // The console link as a V1 QR, 2 px per module (8 mm on this glass), in the
+  // dead space right of the speed. Skipped before WiFi has an address: a code
+  // that scans to 0.0.0.0 is worse than none. Quiet zone is the paper around
+  // it -- 6 px to the banner, 4 px to the edge, both >= the 2-module minimum.
+  const IPAddress ip = WiFi.localIP();
+  if (ip != IPAddress()) {
+    char url[32];
+    snprintf(url, sizeof(url), "HTTP://%s", ip.toString().c_str());
+    uint8_t qr[qr_v1::kSize][qr_v1::kSize];
+    if (qr_v1::encode(url, qr)) {
+      constexpr int kQx = 204;
+      constexpr int kQy = 25;
+      for (int qy = 0; qy < qr_v1::kSize; ++qy)
+        for (int qx = 0; qx < qr_v1::kSize; ++qx)
+          if (qr[qy][qx])
+            g_black->fillRect(kQx + qx * 2, kQy + qy * 2, 2, 2, 1);
+    }
+  }
 
   // The bar: black outline, red fill strictly inside it -- one plane each.
   // Everything it says is also in the number above, so mono loses only colour.
