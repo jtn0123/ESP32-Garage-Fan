@@ -38,12 +38,14 @@
 // console whether the red plane actually appears on the glass, so its mirror
 // shows what this device displays rather than an idealised version.
 //
-// docs/HARDWARE.md records the mono part on this build. Everything drawn red is
-// an accent over information already legible in black (see the TRICOLOR RULE in
-// ui/display_layout.h), so flipping this is safe in either direction: the
-// panel keeps working, the mirror just stops lying about the colour.
+// The fitted glass showed the header rule in red (2026-08-12), which settles
+// it: this is the tricolor part, whatever docs/HARDWARE.md guessed. Everything
+// drawn red is an accent over information already legible in black (see the
+// TRICOLOR RULE in ui/display_layout.h), so flipping this is safe in either
+// direction: the panel keeps working, the mirror just stops lying about the
+// colour.
 #ifndef FAN_EPD_TRICOLOR
-#define FAN_EPD_TRICOLOR 0
+#define FAN_EPD_TRICOLOR 1
 #endif
 
 // ------------------------------------------------------------ identity

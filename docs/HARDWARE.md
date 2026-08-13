@@ -12,7 +12,7 @@ without re-deriving anything. Protocol internals live in
 | Fan | **iLiving ILG8SF12V-DC** 12" shutter exhaust fan | 12 V DC motor; ships with a wall controller; speeds 0–12 |
 | Controller link | USB-A **connectors**, not USB | 5 V power + PWM on D+; see below |
 | MCU | **Adafruit Feather ESP32-S2** (`featheresp32-s2`) | USB-C, onboard 1S LiPo charger |
-| Display | Adafruit **2.13" mono eInk FeatherWing**, SSD1680, 250×122 | stacked on the Feather; has microSD + SRAM slots |
+| Display | Adafruit **2.13" tricolor eInk FeatherWing**, SSD1680, 250×122 | stacked on the Feather; has microSD + SRAM slots. Confirmed tricolor 2026-08-12: the glass shows the red plane |
 | Climate sensor | **BME280** (I2C `0x77`, falls back `0x76`) | temp / RH / pressure |
 | Fuel gauge | **LC709203F variant** at I2C `0x0B` | IC version reads `0x2AFF`, which the Adafruit library **rejects** — firmware uses a raw I2C driver (CRC-8/ATM over the full frame, repeated-start reads mandatory) |
 | Battery | **2× 18650, 3200 mAh, in parallel = 6400 mAh (1S)** | gauge APA set to `0x55` for this capacity |

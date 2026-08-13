@@ -168,7 +168,10 @@ void blit() {
   g_epd->clearBuffer();
   g_epd->fillScreen(EPD_WHITE);
   g_epd->drawBitmap(0, 0, g_black->getBuffer(), kWidth, kHeight, EPD_BLACK);
-  g_epd->drawBitmap(0, 0, g_red->getBuffer(), kWidth, kHeight, EPD_RED);
+  // The red plane only goes to the glass that can show it. On the mono part
+  // RAM2 is not a colour plane, so writing accents there invites artifacts.
+  if (tricolor())
+    g_epd->drawBitmap(0, 0, g_red->getBuffer(), kWidth, kHeight, EPD_RED);
   g_epd->display();
 }
 
@@ -179,7 +182,12 @@ void begin() {
   static Adafruit_SSD1680 epd(kWidth, kHeight, EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
   g_epd = &epd;
   g_epd->begin();
-  g_epd->setRotation(1);
+  // Rotation 0 IS upright landscape (250x122) on this wing -- the driver is
+  // constructed with the landscape dimensions and maps them to panel RAM
+  // itself. setRotation(1) made the logical space 122 wide, so blitting the
+  // 250-wide planes drew everything 90 degrees off and clipped, and the
+  // red-only header rule became a lone red streak on the glass (2026-08-12).
+  g_epd->setRotation(0);
   static GFXcanvas1 black(kWidth, kHeight);
   static GFXcanvas1 red(kWidth, kHeight);
   g_black = &black;

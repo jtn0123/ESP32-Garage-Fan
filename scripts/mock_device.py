@@ -529,10 +529,10 @@ class H(BaseHTTPRequestHandler):
                 "w": DISP_W,
                 "h": DISP_H,
                 "stride": DISP_STRIDE,
-                # The mock stands in for the MONO part recorded in
-                # docs/HARDWARE.md, so the console renders accents grey and the
-                # "mono panel" note is what a test sees by default.
-                "tricolor": False,
+                # The fitted glass showed red (2026-08-12), so the mock stands
+                # in for the TRICOLOR part and the console renders the red
+                # accents by default, matching the device.
+                "tricolor": True,
                 "age_s": 42,
                 "black": base64.b64encode(bytes(black.buf)).decode(),
                 "red": base64.b64encode(bytes(red.buf)).decode(),
