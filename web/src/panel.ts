@@ -16,7 +16,7 @@ const RED = '#c4302b';
 export function decodePlane(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.codePointAt(i) ?? 0;
   return out;
 }
 
@@ -92,7 +92,7 @@ export function paintFrame(canvas: HTMLCanvasElement, frame: DisplayFrame, scale
 }
 
 function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
+  const n = Number.parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 

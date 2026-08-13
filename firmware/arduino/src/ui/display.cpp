@@ -8,6 +8,8 @@
 #include <WiFi.h>
 
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 
 #include "config.h"
 #include "fan/control.h"
@@ -22,7 +24,19 @@
 namespace display {
 namespace {
 
-using namespace display_layout;
+using display_layout::battery_text;
+using display_layout::differential_is_hot;
+using display_layout::differential_text;
+using display_layout::kHeight;
+using display_layout::kWidth;
+using display_layout::mode_text;
+using display_layout::refresh_due;
+using display_layout::rh_text;
+using display_layout::runtime_text;
+using display_layout::speed_fraction;
+using display_layout::speed_scale_text;
+using display_layout::speed_text;
+using display_layout::temp_f_text;
 
 // 2.13" SSD1680 FeatherWing, landscape; no busy/rst pins wired. The mono and
 // tricolor parts are the same driver at the same size, so one build covers both
@@ -124,11 +138,16 @@ void compose() {
 
   // ---- footer -------------------------------------------------------------
   g_black->drawFastHLine(0, 104, kWidth, 1);
-  runtime_text(odometer::run_today_s(), buf, sizeof(buf));
-  char line[64];
+  // Sized so the concatenation below is provably in range: 15 + 2 + 23 < 64.
+  // Reusing the shared buf[48] here left gcc unable to bound the first %s and
+  // it warned about truncation -- and this build treats a warning in src/ as an
+  // error, correctly, because a silently clipped footer is a real defect.
+  char rt[16];
   char batt[24];
+  char line[64];
+  runtime_text(odometer::run_today_s(), rt, sizeof(rt));
   battery_text(battery::volts(), battery::percent(), batt, sizeof(batt));
-  snprintf(line, sizeof(line), "%s  %s", buf, batt);
+  snprintf(line, sizeof(line), "%s  %s", rt, batt);
   draw_text(g_black, 4, 108, 1, line);
   snprintf(line, sizeof(line), "%s v%s", WiFi.localIP().toString().c_str(), kFwVersion);
   draw_text(g_black, kWidth - 4 - static_cast<int>(strlen(line)) * 6, 108, 1, line);

@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { expect, test as base, type Page, type Request } from '@playwright/test';
 
 /**
@@ -23,6 +24,33 @@ import { expect, test as base, type Page, type Request } from '@playwright/test'
 
 /** First port of the per-worker block; worker N listens on BASE + N. */
 const MOCK_PORT_BASE = Number(process.env['MOCK_PORT'] ?? 8100);
+
+/**
+ * The interpreter to run the mock with, as an ABSOLUTE path.
+ *
+ * Spawning bare `python3` resolves through PATH, so whatever comes first there
+ * gets executed -- which is why static analysis flags it and why it is worth
+ * not doing even in a test harness. Resolved once per worker: the common fixed
+ * locations first, then, for CI where setup-python installs into a tool cache
+ * outside them, asking Python itself for sys.executable via /usr/bin/env (an
+ * absolute path in its own right).
+ */
+function pythonPath(): string {
+  const explicit = process.env['MOCK_PYTHON'];
+  if (explicit) return explicit;
+  for (const candidate of [
+    '/usr/bin/python3',
+    '/usr/local/bin/python3',
+    '/opt/homebrew/bin/python3',
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return execFileSync('/usr/bin/env', ['python3', '-c', 'import sys;print(sys.executable)'])
+    .toString()
+    .trim();
+}
+
+const PYTHON = pythonPath();
 
 async function waitForMock(port: number, proc: ChildProcess): Promise<void> {
   const deadline = Date.now() + 30_000;
@@ -76,7 +104,7 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
   mockPort: [
     async ({}, use, workerInfo) => {
       const port = MOCK_PORT_BASE + workerInfo.parallelIndex;
-      const proc = spawn('python3', ['../scripts/mock_device.py'], {
+      const proc = spawn(PYTHON, ['../scripts/mock_device.py'], {
         env: { ...process.env, MOCK_PORT: String(port) },
         stdio: ['ignore', 'pipe', 'pipe'],
       });

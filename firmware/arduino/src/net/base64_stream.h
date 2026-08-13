@@ -16,8 +16,10 @@
 
 namespace base64_stream {
 
-inline constexpr char kAlphabet[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+// One line on purpose: wrapped, the continuation is indented inside the
+// namespace, which cpplint rejects (whitespace/indent_namespace). The short
+// name is what keeps it inside clang-format's 100-column limit.
+inline constexpr char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /**
  * Encode `n` bytes, handing complete 4-character groups to `sink`.
@@ -37,7 +39,7 @@ class Encoder {
       bits_ += 8;
       while (bits_ >= 6) {
         bits_ -= 6;
-        char c = kAlphabet[(acc_ >> bits_) & 0x3F];
+        char c = kB64[(acc_ >> bits_) & 0x3F];
         if (!sink(&c, 1)) {
           ok_ = false;
           return false;
@@ -59,7 +61,7 @@ class Encoder {
     if (!ok_)
       return false;
     if (bits_ > 0) {
-      char c = kAlphabet[(acc_ << (6 - bits_)) & 0x3F];
+      char c = kB64[(acc_ << (6 - bits_)) & 0x3F];
       if (!sink(&c, 1)) {
         ok_ = false;
         return false;
