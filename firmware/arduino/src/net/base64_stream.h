@@ -34,6 +34,14 @@ class Encoder {
   bool write(const uint8_t* data, size_t n, Sink&& sink) {
     if (!ok_)
       return false;
+    // Counted HERE, not by the caller. The padding rule is derived entirely
+    // from total_, so an encoder that relies on a separate count() call emits a
+    // body whose length is not a multiple of 4 the moment someone streams
+    // without it -- decoders then reject it or silently drop the last group.
+    // Making the type self-accounting turns that from a convention into a
+    // guarantee. A display plane is 3904 bytes, which is 1 mod 3, so every
+    // frame takes the two-character padding path this controls.
+    total_ += n;
     for (size_t i = 0; i < n; i++) {
       acc_ = (acc_ << 8) | data[i];
       bits_ += 8;
@@ -95,10 +103,6 @@ class Encoder {
     return need - pad_;
   }
 
- public:
-  /** Bytes fed so far; the padding rule is derived from this. */
-  void count(size_t n) { total_ += n; }
-
  private:
   uint32_t acc_ = 0;
   int bits_ = 0;
@@ -116,7 +120,6 @@ class Encoder {
 template <typename Sink>
 inline bool encode(const uint8_t* data, size_t n, Sink&& sink) {
   Encoder e;
-  e.count(n);
   if (!e.write(data, n, sink))
     return false;
   return e.flush(sink);

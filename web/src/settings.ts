@@ -474,8 +474,14 @@ async function forcePanelRefresh(cv: HTMLCanvasElement, msg: HTMLElement): Promi
     // The panel blocks the device for seconds while it clocks the waveform, so
     // give it a beat before asking for the new frame.
     await new Promise((r) => setTimeout(r, 4000));
-  } catch {
-    /* fall through to loadPanel, which reports what it finds */
+  } catch (err) {
+    // Reported, not swallowed. Falling through to loadPanel would paint the
+    // PREVIOUS frame under a normal "refreshed Nm ago" line, so a refusal or a
+    // dead controller would read as a slightly stale panel. The device answers
+    // 429 with retry_in_s when a repaint comes too soon, and the operator
+    // should see that rather than a reassuring timestamp.
+    msg.textContent = `could not refresh the panel: ${err instanceof Error ? err.message : String(err)}`;
+    return;
   }
   await loadPanel(cv, msg);
 }

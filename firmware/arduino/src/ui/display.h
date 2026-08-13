@@ -51,7 +51,15 @@ int32_t age_s();
  */
 bool tricolor();
 
-/** Force a refresh on the next loop pass, regardless of cadence. */
-void request_refresh();
+/**
+ * Force a refresh on the next loop pass, regardless of cadence.
+ *
+ * Returns false when refused: a refresh blocks the loop for seconds, so forced
+ * repaints have a floor between them. Ask forced_retry_in_s() how long is left.
+ */
+bool request_refresh();
+
+/** Seconds until request_refresh() would be accepted again; 0 when ready. */
+uint32_t forced_retry_in_s();
 
 }  // namespace display

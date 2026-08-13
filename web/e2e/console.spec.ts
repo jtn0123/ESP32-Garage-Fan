@@ -51,7 +51,7 @@ test('clicking a rail step commands that speed', async ({ page }) => {
   // Polled, not read once: the DOM can settle before the browser has emitted
   // the request, so an immediate read is a race that fails on a loaded machine.
   await expect
-    .poll(() => posts.some((r) => /speed=7/.test(r.url())), {
+    .poll(() => posts.some((r) => new URL(r.url()).searchParams.get('speed') === '7'), {
       message: 'the rail updated the display without commanding the fan',
     })
     .toBeTruthy();
@@ -74,7 +74,10 @@ test('"Fan off" stops the fan and reads as off, not as a speed', async ({ page }
   // The readout says "off" rather than "0": a stopped fan should not look like
   // just another step on the dial.
   await expect(page.locator('#railnum')).toHaveText('off');
-  await expect.poll(() => posts.some((r) => /speed=0/.test(r.url()))).toBeTruthy();
+  // Parsed, not substring-matched: "speed=0" is also a prefix of "speed=07".
+  await expect
+    .poll(() => posts.some((r) => new URL(r.url()).searchParams.get('speed') === '0'))
+    .toBeTruthy();
 });
 
 test('the auto pill toggles auto mode', async ({ page }) => {
@@ -129,12 +132,6 @@ test('SETTINGS opens the drawer and back returns to the console', async ({ page 
 
 // ------------------------------------------------------------------- fallbacks
 
-/**
- * The device pushes state over SSE on port 8081; the mock does not serve it, so
- * EventSource fails here exactly as it does when that listener is down. The
- * page must still track the fan off the 15 s poll -- api.ts swallows the
- * EventSource error precisely so this keeps working, and nothing tested that.
- */
 /**
  * The device pushes state over SSE on port 8081; the mock does not serve it, so
  * EventSource fails here exactly as it does when that listener is down. The

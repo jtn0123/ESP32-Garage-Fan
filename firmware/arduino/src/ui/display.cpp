@@ -58,6 +58,16 @@ GFXcanvas1* g_red = nullptr;
 /** A speed change waits this long before earning a refresh. See refresh_due. */
 constexpr uint32_t kSpeedSettleMs = 60000;
 
+/**
+ * Floor between FORCED refreshes, for the console's "Refresh now".
+ *
+ * A refresh blocks the loop for seconds (16.7 s measured on this panel), so
+ * back-to-back forced repaints are a denial of service against the fan's own
+ * control loop and its broker session. Longer than one refresh by a wide
+ * margin, short enough that the button is still worth pressing.
+ */
+constexpr uint32_t kMinForcedGapMs = 30000;
+
 void draw_text(GFXcanvas1* c, int x, int y, uint8_t size, const char* s) {
   c->setTextSize(size);
   c->setCursor(x, y);
@@ -180,7 +190,31 @@ void begin() {
   CRUMB_CLEAR();
 }
 
-void request_refresh() { g_force = true; }
+bool request_refresh() {
+  // Rate-limited, and the caller is told when it was refused.
+  //
+  // A forced refresh bypasses refresh_due entirely, and the route that reaches
+  // this is an unauthenticated LAN POST. One full refresh parks the loop long
+  // enough that PubSubClient cannot send a keepalive -- this device already
+  // lost its MQTT session to exactly that, on a 317 s beat, and the panel has
+  // been measured at 16.7 s per refresh on this hardware. A client posting in a
+  // loop would keep the loop parked and the glass cycling indefinitely.
+  //
+  // The automatic path is rate-limited by refresh_due for the same reason; this
+  // gives the manual path the same floor. It lives here, not in web.cpp,
+  // because this module owns g_last_ms.
+  if (g_rendered && millis() - g_last_ms < kMinForcedGapMs)
+    return false;
+  g_force = true;
+  return true;
+}
+
+uint32_t forced_retry_in_s() {
+  if (!g_rendered)
+    return 0;
+  const uint32_t since = millis() - g_last_ms;
+  return since >= kMinForcedGapMs ? 0 : (kMinForcedGapMs - since + 999) / 1000;
+}
 
 void maybe_render() {
   if (!g_ok)

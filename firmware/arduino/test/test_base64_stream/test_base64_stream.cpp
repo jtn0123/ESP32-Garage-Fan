@@ -120,6 +120,33 @@ static void a_refusing_sink_stops_the_encode() {
   TEST_ASSERT_EQUAL_INT(5, calls);
 }
 
+// Streaming in several write() calls must produce the same bytes as one call.
+// The encoder used to derive its padding from a count() the CALLER had to
+// remember to make, so a streaming user got a body whose length was not a
+// multiple of 4 -- accepted by nothing. The type accounts for itself now, and
+// this is what holds it to that.
+static void many_writes_match_one_write() {
+  const char* text = "the quick brown fox jumps over the lazy dog";
+  const size_t len = strlen(text);
+  const std::string want = enc(text);
+
+  for (size_t chunk = 1; chunk <= 7; chunk++) {
+    std::string got;
+    auto sink = [&got](const char* p, size_t n) {
+      got.append(p, n);
+      return true;
+    };
+    base64_stream::Encoder e;
+    for (size_t off = 0; off < len; off += chunk) {
+      const size_t take = (len - off) < chunk ? (len - off) : chunk;
+      e.write(reinterpret_cast<const uint8_t*>(text) + off, take, sink);
+    }
+    e.flush(sink);
+    TEST_ASSERT_EQUAL_STRING(want.c_str(), got.c_str());
+    TEST_ASSERT_EQUAL_size_t(0, got.size() % 4);
+  }
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(rfc4648_vectors);
@@ -128,5 +155,6 @@ int main() {
   RUN_TEST(encoded_len_agrees_with_what_is_emitted);
   RUN_TEST(a_real_plane_length_round_trips);
   RUN_TEST(a_refusing_sink_stops_the_encode);
+  RUN_TEST(many_writes_match_one_write);
   return UNITY_END();
 }

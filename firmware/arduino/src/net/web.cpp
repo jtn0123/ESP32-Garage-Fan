@@ -214,6 +214,37 @@ static void handle_crash() {
 
 // The raw ELF core dump, for scripts/decode_crash.py to turn the backtrace PCs
 // into file:line against the matching build.
+static void handle_crash_raw() {
+  if (!crash_auth_ok())
+    return;
+  size_t addr = 0, size = 0;
+  if (!coredump::image_range(&addr, &size) || size == 0) {
+    g_http.send(404, "application/json", "{\"error\":\"no core dump stored\"}");
+    return;
+  }
+  http_tx::Chunked tx(g_http.client(), "application/octet-stream",
+                      "Content-Disposition: attachment; filename=coredump.elf\r\n");
+  uint8_t chunk[512];
+  bool whole = true;
+  for (size_t off = 0; off < size && tx.ok(); off += sizeof(chunk)) {
+    const size_t want = (size - off) < sizeof(chunk) ? (size - off) : sizeof(chunk);
+    if (!coredump::read_image(off, chunk, want)) {
+      whole = false;
+      break;
+    }
+    esp_task_wdt_reset();
+    tx.write(reinterpret_cast<const char*>(chunk), want);
+  }
+  // A failed READ used to break out and still call end(), which sends the
+  // terminating chunk -- so a short ELF arrived looking complete and decoded
+  // to nonsense. Only a body we actually read in full gets finalized. (A failed
+  // WRITE already suppresses the terminator through the writer's sticky state.)
+  if (whole)
+    tx.end();
+  else
+    tx.abort();
+}
+
 /**
  * GET /api/display -- the panel's last frame, so the console can mirror it.
  *
@@ -257,43 +288,25 @@ static void handle_display() {
     tx.abort();
 }
 
-/** POST /api/display/refresh -- repaint now instead of waiting for the cadence. */
+/**
+ * POST /api/display/refresh -- repaint now instead of waiting for the cadence.
+ *
+ * 429 when refused. A refresh parks the loop for seconds (16.7 s measured on
+ * this panel), so display::request_refresh() keeps a floor between forced
+ * repaints; answering 200 to a refusal would have the console report a repaint
+ * that never happened.
+ */
 static void handle_display_refresh() {
   if (!guard_origin())
     return;
-  display::request_refresh();
-  g_http.send(200, "application/json", "{\"ok\":true}");
-}
-
-static void handle_crash_raw() {
-  if (!crash_auth_ok())
-    return;
-  size_t addr = 0, size = 0;
-  if (!coredump::image_range(&addr, &size) || size == 0) {
-    g_http.send(404, "application/json", "{\"error\":\"no core dump stored\"}");
+  if (!display::request_refresh()) {
+    char body[64];
+    snprintf(body, sizeof(body), "{\"ok\":false,\"retry_in_s\":%lu}",
+             (unsigned long)display::forced_retry_in_s());
+    g_http.send(429, "application/json", body);
     return;
   }
-  http_tx::Chunked tx(g_http.client(), "application/octet-stream",
-                      "Content-Disposition: attachment; filename=coredump.elf\r\n");
-  uint8_t chunk[512];
-  bool whole = true;
-  for (size_t off = 0; off < size && tx.ok(); off += sizeof(chunk)) {
-    const size_t want = (size - off) < sizeof(chunk) ? (size - off) : sizeof(chunk);
-    if (!coredump::read_image(off, chunk, want)) {
-      whole = false;
-      break;
-    }
-    esp_task_wdt_reset();
-    tx.write(reinterpret_cast<const char*>(chunk), want);
-  }
-  // A failed READ used to break out and still call end(), which sends the
-  // terminating chunk -- so a short ELF arrived looking complete and decoded
-  // to nonsense. Only a body we actually read in full gets finalized. (A failed
-  // WRITE already suppresses the terminator through the writer's sticky state.)
-  if (whole)
-    tx.end();
-  else
-    tx.abort();
+  g_http.send(200, "application/json", "{\"ok\":true,\"retry_in_s\":0}");
 }
 
 // Token-guarded: drop the stored dump so the next panic is unambiguous.

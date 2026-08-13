@@ -111,6 +111,9 @@ SCEN = {
     "corrupt": False,
     "flat_rh": False,
     "down": False,
+    # The panel before its first refresh: the firmware answers ready:false
+    # until then, and the console has a branch for it that nothing could reach.
+    "panel_ready": True,
 }
 
 
@@ -125,6 +128,7 @@ SCEN_SPEC = {
     "corrupt": bool,
     "flat_rh": bool,
     "down": bool,
+    "panel_ready": bool,
 }
 
 
@@ -288,7 +292,7 @@ class _Plane:
 
 
 def display_frame():
-    """Compose the mock's panel image and return it base64'd, plane by plane."""
+    """Compose the mock's panel image: the black plane and the red plane."""
     black, red = _Plane(), _Plane()
     speed = max(0, int(STATE["speed"]))
 
@@ -296,10 +300,11 @@ def display_frame():
     red.rect(0, 14, DISP_W, 2)  # the header rule, red like the firmware's
     black.rect(0, 15, DISP_W, 1)
 
-    # Left: the two temperatures.
-    black.text(6, 26, f"{STATE['outside_f']:.0f}", scale=4)
-    out_f = STATE["outside_f"]
-    black.text(6, 76, f"{out_f:.0f}", scale=3)
+    # Left: the two temperatures, which must DIFFER. Drawing the same value in
+    # both slots would let a console that swapped or duplicated them pass.
+    inside_f = STATE["outside_f"] + 8
+    black.text(6, 26, f"{inside_f:.0f}", scale=4)
+    black.text(6, 76, f"{STATE['outside_f']:.0f}", scale=3)
 
     # Right: the fan, with a red bar whose fill follows the speed.
     black.rect(126, 20, 1, 82)
@@ -501,6 +506,21 @@ class H(BaseHTTPRequestHandler):
         return self._json(200, STATE)
 
     def _display(self, _query):
+        if not SCEN["panel_ready"]:
+            # Exactly what handle_display() answers before the first render.
+            return self._json(
+                200,
+                {
+                    "ready": False,
+                    "w": 0,
+                    "h": 0,
+                    "stride": 0,
+                    "tricolor": False,
+                    "age_s": -1,
+                    "black": "",
+                    "red": "",
+                },
+            )
         black, red = display_frame()
         return self._json(
             200,
