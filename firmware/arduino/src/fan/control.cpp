@@ -53,19 +53,26 @@ void set_notify(Notify cb) { g_notify = cb; }
 
 void restore(Preferences* prefs) {
   g_prefs = prefs;
-  if (!prefs)
-    return;
-  g_auto_on = prefs->getBool("auto", false);
-  g_auto_max = prefs->getInt("max", 9);
-  g_auto_min = prefs->getInt("amin", 0);
-  g_auto_onf = prefs->getFloat("onf", 2.5f);
-  g_auto_offf = prefs->getFloat("offf", 1.5f);
-  const int saved = prefs->getInt("speed", 0);
-  if (saved > 0 && saved <= 12) {
-    g_speed = saved;
-    set_wave(kHighUs[saved]);  // resume before WiFi even exists
-    Serial.printf("restored speed %d from nvs\n", saved);
+  if (prefs) {
+    g_auto_on = prefs->getBool("auto", false);
+    g_auto_max = prefs->getInt("max", 9);
+    g_auto_min = prefs->getInt("amin", 0);
+    g_auto_onf = prefs->getFloat("onf", 2.5f);
+    g_auto_offf = prefs->getFloat("offf", 1.5f);
+    const int saved = prefs->getInt("speed", 0);
+    if (saved > 0 && saved <= 12) {
+      g_speed = saved;
+      Serial.printf("restored speed %d from nvs\n", saved);
+    }
   }
+  // Drive the line UNCONDITIONALLY, speed 0 included. The old guard only
+  // touched the pin for saved > 0, so a reboot at speed 0 left the GPIO
+  // floating -- never even rmtInit'd -- and the fan's own pull-up read as
+  // full power on this rig while the panel and console both said OFF, and
+  // auto could never fix it because apply(0) == g_speed short-circuits
+  // (observed live 2026-08-13). An undriven control line is not "off"; it is
+  // "whatever the fan feels like".
+  set_wave(kHighUs[g_speed]);  // resume before WiFi even exists
 }
 
 // source: "boot", "http", "mqtt", "auto" -- log flavour only; `manual` is the
