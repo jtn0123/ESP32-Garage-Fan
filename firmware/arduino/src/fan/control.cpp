@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "fan/auto_logic.h"
+#include "system/eventlog.h"
 #include "sensors/climate.h"
 
 namespace fan {
@@ -16,8 +17,7 @@ namespace {
 
 Preferences* g_prefs = nullptr;
 Notify g_notify = nullptr;
-bool g_rmt_ready = false;
-rmt_data_t g_wave;
+bool g_ledc_ready = false;
 int g_speed = 0;
 bool g_auto_on = false;
 int g_auto_max = 9;
@@ -25,26 +25,39 @@ int g_auto_min = 0;                           // rest speed once equalized (0 = 
 float g_auto_onf = 2.5f, g_auto_offf = 1.5f;  // engage/release, deg F
 bool g_auto_high = false;                     // hysteresis latch for fan_auto_decide
 
+// LEDC, not RMT. On 2026-08-13 the fan ignored an entire 0..12 calibration
+// sweep against a watt meter: rmtWriteLooping() reported success at every
+// step while /api/pinprobe showed the pad stuck LOW with zero transitions --
+// the waveform never left the chip. LEDC is the peripheral PROTOCOL.md's
+// replication plan called for in the first place: hardware-looped, and its
+// output is verifiable on the pad.
+//
+// 12-bit at 100 Hz vs the captured 100.66 Hz: duty FRACTIONS are preserved
+// exactly (both edges scale by the same 0.66%), and the fan demonstrably
+// low-passes duty rather than counting edges. Failures still go to the
+// flight recorder, never Serial -- a deployed S2's CDC drops prints.
+constexpr uint8_t kLedcBits = 12;
+
 void set_wave(uint16_t high_us) {
-  if (!g_rmt_ready) {
-    if (!rmtInit(FAN_PWM_PIN, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 1000000)) {
-      Serial.println("rmtInit FAILED");
+  if (!g_ledc_ready) {
+    if (!ledcAttach(FAN_PWM_PIN, 1000000UL / kPeriodUs, kLedcBits)) {
+      eventlog::log("fan", "ledcAttach FAILED pin %d", FAN_PWM_PIN);
       return;
     }
-    g_rmt_ready = true;
+    g_ledc_ready = true;
   }
-  if (high_us >= kPeriodUs || high_us == 0) {
-    g_wave.level0 = high_us ? 1 : 0;
-    g_wave.duration0 = kPeriodUs / 2;
-    g_wave.level1 = high_us ? 1 : 0;
-    g_wave.duration1 = kPeriodUs - kPeriodUs / 2;
-  } else {
-    g_wave.level0 = 1;
-    g_wave.duration0 = high_us;
-    g_wave.level1 = 0;
-    g_wave.duration1 = kPeriodUs - high_us;
-  }
-  rmtWriteLooping(FAN_PWM_PIN, &g_wave, 1);
+  // duty 0 = solid LOW; duty 2^bits = solid HIGH, no one-tick glitch.
+  uint32_t duty;
+  if (high_us == 0)
+    duty = 0;
+  else if (high_us >= kPeriodUs)
+    duty = 1UL << kLedcBits;
+  else
+    duty = (static_cast<uint32_t>(high_us) * ((1UL << kLedcBits) - 1)) / kPeriodUs;
+  if (!ledcWrite(FAN_PWM_PIN, duty))
+    eventlog::log("fan", "ledcWrite FAILED duty=%lu", (unsigned long)duty);
+  else
+    eventlog::log("fan", "duty %lu/4096 high_us=%u", (unsigned long)duty, high_us);
 }
 
 }  // namespace
