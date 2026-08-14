@@ -59,6 +59,9 @@ const CHIP_ROWS = [
   { key: 'humidity', row: '#sub_h' },
   { key: 'pressure', row: '#sub_p' },
   { key: 'battery', row: '#sub_b' },
+  { key: 'power', row: '#sub_w' },
+  { key: 'voc', row: '#sub_v' },
+  { key: 'nox', row: '#sub_n' },
 ] as const;
 
 test('every series has a chip', async ({ page }) => {
@@ -168,4 +171,26 @@ test('each status bit explains something different', async ({ page }) => {
     seen.add(((await page.locator('#tipt').textContent()) ?? '').trim());
   }
   expect(seen.size, 'status bits share a tooltip title').toBe(n);
+});
+
+/**
+ * The gas rows during warm-up. The mock's default history has the SGP41
+ * appear a third of the way in and its indices go live at two thirds, so the
+ * VOC row must draw SOMETHING (the raw ticks) rather than a flat zero, and
+ * the readout must say which regime the newest sample is in.
+ */
+test('the VOC row shows data and a labelled readout', async ({ page }) => {
+  await openConsole(page);
+  await page.locator('#chips button[data-key="voc"]').click();
+  await expect(page.locator('#sub_v')).not.toHaveClass(/hide/);
+  // The newest mock samples carry live indices, so the readout names one.
+  await expect(page.locator('#roV')).toContainText(/index \d+/, { timeout: 15_000 });
+  await expect(page.locator('#roV')).toContainText(/raw \d+/);
+});
+
+test('the power row plots the plug watts', async ({ page }) => {
+  await openConsole(page);
+  await page.locator('#chips button[data-key="power"]').click();
+  await expect(page.locator('#sub_w')).not.toHaveClass(/hide/);
+  await expect(page.locator('#roW')).toContainText(/W$/, { timeout: 15_000 });
 });

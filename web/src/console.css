@@ -62,6 +62,9 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #boff{border-color:#3a2626;color:#e0a9a9}
 #boff.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
 
+/* ---- plug disagreement ---- */
+#plugwarn{margin-top:14px;padding:10px 14px;border:1px solid #7f1d1d;border-radius:8px;background:rgba(127,29,29,.14);color:#e0a9a9;font-size:13.5px;max-width:660px;text-wrap:pretty}
+
 /* ---- metric strip ---- */
 #metrics{display:flex;gap:44px;margin-top:26px;padding-top:16px;border-top:1px solid var(--ln);flex-wrap:wrap}
 .mv{font-size:15px;color:var(--tx);margin-top:3px}
@@ -124,6 +127,10 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 .crow{display:flex;align-items:baseline;gap:12px;margin:12px 0 2px}
 .crow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--mut)}
 .crow .cd{font-size:11.5px;color:var(--dim)}
+/* Series legend: which line is which sensor. Stays visible on mobile, unlike
+   the prose caption -- knowing which trace is the SHT41 is not optional. */
+.leg{font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
+.leg b{font-weight:700;margin-right:10px}
 .cr{margin-left:auto;font:500 11.5px var(--mono);color:var(--tx);padding-left:12px}
 .srow{display:flex;align-items:baseline;margin:10px 0 0}
 .srow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
@@ -174,6 +181,9 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 .acts button,.acts a{padding:7px 14px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;white-space:nowrap;line-height:1.15;background:transparent;color:var(--tx);text-decoration:none;display:inline-block}
 .acts .danger{border-color:#3a2626;color:#e0a9a9}
 .fld{font-size:12.5px;padding:6px 8px;border-radius:5px;background:#0e1218;color:var(--tx);border:1px solid var(--bd);font-family:var(--mono);max-width:190px}
+/* The native file input needs room for its own "No file chosen" text, which
+   190px clips mid-word. Let it size to content, bounded by the row. */
+.fld[type=file]{max-width:100%;width:auto}
 .fld::file-selector-button{font:500 11px var(--mono);letter-spacing:.06em;padding:4px 9px;margin-right:9px;border-radius:4px;border:1px solid var(--pbd);background:#12161d;color:var(--mut);cursor:pointer}
 #otarow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 #otarow button{padding:7px 14px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}

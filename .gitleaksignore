@@ -1,0 +1,8 @@
+# Fingerprints of historical false positives. gitleaks-action scans every
+# commit in a PR range, so a line fixed in a later commit keeps failing on the
+# commit that introduced it; the inline `gitleaks:allow` on the current line
+# cannot reach back in history.
+#
+# scripts/calibrate_fan_power.py:37 reads HA_TOKEN from the environment
+# (os.environ.get) -- no literal secret ever existed on the line.
+412031a60882bfdb1ebc979db86ddc0e691fdb4d:scripts/calibrate_fan_power.py:bare-credential-assignment:37

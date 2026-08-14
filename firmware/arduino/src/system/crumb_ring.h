@@ -98,12 +98,14 @@ struct Ring {
   }
 
   /**
-   * Oldest-to-newest into `out` as "tag@ms tag@ms ...".
+   * NEWEST-to-oldest into `out` as "tag@ms tag@ms ...".
    *
    * One line, because it goes on the flight recorder next to the boot verdict
-   * and the point is to read the approach to the crash at a glance. Truncates
-   * rather than overflowing; a clipped trail still names the earliest steps,
-   * which are the ones that locate a fault.
+   * and the point is to read the approach to the crash at a glance. Newest
+   * first because something always clips this line -- the eventlog caps rows
+   * at ~104 chars -- and when it does, the steps NEAREST the death must be
+   * the ones that survive. The first deployed trail proved it the other way
+   * round: oldest-first, clipped mid-way, newest steps lost (2026-08-13).
    */
   void render(char* out, size_t cap) const {
     if (!out || cap == 0)
@@ -111,11 +113,10 @@ struct Ring {
     out[0] = '\0';
     if (!valid())
       return;
-    // Once full, the oldest live entry is the slot about to be overwritten.
-    const uint8_t start = count < kSlots ? 0 : next;
+    // The newest live entry is the one just before `next`.
     size_t n = 0;
     for (uint8_t i = 0; i < count && n + 1 < cap; i++) {
-      const Entry& e = entries[(start + i) % kSlots];
+      const Entry& e = entries[(next + kSlots - 1 - i) % kSlots];
       if (e.tag[0] == '\0')
         continue;
       const int w =

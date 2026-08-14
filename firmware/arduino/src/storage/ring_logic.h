@@ -16,22 +16,36 @@
 namespace history {
 
 struct Sample {
-  float t;       // corrected garage temperature, C
-  float h;       // %RH
-  float p;       // hPa
-  float out_f;   // yard, F (NAN = no fresh feed at sample time)
-  float batt_v;  // NAN = no fuel gauge
-  int8_t speed;  // fan speed 0..12 at sample time
-  int8_t chg;    // 1 charging, 0 not, -1 no battery
+  float t;          // garage temperature, C (SHT41 when fitted, else corrected BME280)
+  float h;          // %RH
+  float p;          // hPa (always the BME280; nothing else has a barometer)
+  float out_f;      // yard, F (NAN = no fresh feed at sample time)
+  float batt_v;     // NAN = no fuel gauge
+  float watts;      // fan draw measured at the plug (NAN = no meter reading)
+  float bme_t;      // the BME280's own corrected estimate, C -- beside the SHT41
+  float bme_rh;     //   for the dual-sensor comparison rows
+  int32_t voc_raw;  // SGP41 raw ticks (-1 = no sensor)
+  int32_t nox_raw;  // SGP41 raw ticks (-1 = no sensor)
+  int16_t voc;      // VOC gas index 1..500, 0 = algorithm warming, -1 = absent
+  int16_t nox;      // NOx gas index, same encoding
+  int8_t speed;     // fan speed 0..12 at sample time
+  int8_t chg;       // 1 charging, 0 not, -1 no battery
 };
 
 template <uint16_t kN>
 struct Ring {
   float t[kN], h[kN], p[kN];
-  float o[kN];   // outdoor F at sample time (NAN = none)
-  float bv[kN];  // battery volts at sample time (NAN = none)
-  int8_t s[kN];  // fan speed at sample time
-  int8_t c[kN];  // charging verdict (1/0, -1 = no battery)
+  float o[kN];     // outdoor F at sample time (NAN = none)
+  float bv[kN];    // battery volts at sample time (NAN = none)
+  float w[kN];     // fan draw at the plug (NAN = none)
+  float bt[kN];    // BME280 temperature, C (NAN = none)
+  float bh[kN];    // BME280 humidity, %RH (NAN = none)
+  int32_t vr[kN];  // SGP41 VOC raw ticks (-1 = none)
+  int32_t nr[kN];  // SGP41 NOx raw ticks (-1 = none)
+  int16_t vi[kN];  // VOC index (0 = warming, -1 = none)
+  int16_t ni[kN];  // NOx index, same encoding
+  int8_t s[kN];    // fan speed at sample time
+  int8_t c[kN];    // charging verdict (1/0, -1 = no battery)
   uint16_t n = 0;
 
   /** Append a row, evicting the oldest once full. */
@@ -43,6 +57,13 @@ struct Ring {
       memmove(o, o + 1, (kN - 1) * sizeof(float));
       memmove(s, s + 1, (kN - 1) * sizeof(int8_t));
       memmove(bv, bv + 1, (kN - 1) * sizeof(float));
+      memmove(w, w + 1, (kN - 1) * sizeof(float));
+      memmove(bt, bt + 1, (kN - 1) * sizeof(float));
+      memmove(bh, bh + 1, (kN - 1) * sizeof(float));
+      memmove(vr, vr + 1, (kN - 1) * sizeof(int32_t));
+      memmove(nr, nr + 1, (kN - 1) * sizeof(int32_t));
+      memmove(vi, vi + 1, (kN - 1) * sizeof(int16_t));
+      memmove(ni, ni + 1, (kN - 1) * sizeof(int16_t));
       memmove(c, c + 1, (kN - 1) * sizeof(int8_t));
       n--;
     }
@@ -52,6 +73,13 @@ struct Ring {
     o[n] = row.out_f;
     s[n] = row.speed;
     bv[n] = row.batt_v;
+    w[n] = row.watts;
+    bt[n] = row.bme_t;
+    bh[n] = row.bme_rh;
+    vr[n] = row.voc_raw;
+    nr[n] = row.nox_raw;
+    vi[n] = row.voc;
+    ni[n] = row.nox;
     c[n] = row.chg;
     n++;
   }

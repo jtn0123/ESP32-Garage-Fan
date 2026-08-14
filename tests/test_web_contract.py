@@ -26,7 +26,7 @@ CPP_KEY = re.compile(r'\\"([A-Za-z_]\w*)\\":')
 # The key never appears as a \"name\": literal in the calling function, so
 # CPP_KEY alone cannot see it. (append_series is the pre-1.14.23 spelling; it
 # is kept here so the pattern still matches if a writer is reverted.)
-CPP_SERIES = re.compile(r'(?:append_series|write_series|write_ints)\(\s*\w+,\s*"(\w+)"')
+CPP_SERIES = re.compile(r'(?:append_series|write_series|write_ints|write_gas)\(\s*\w+,\s*"(\w+)"')
 # Fixed-name writers, where the key is baked into the helper rather than
 # passed: write_ts() always emits exactly "ts".
 CPP_FIXED = {"write_ts": "ts", "write_ts_derived": "ts"}
@@ -71,15 +71,23 @@ def ts_block(name: str) -> str:
     text = TYPES.read_text()
     m = re.search(rf"export (?:interface {name}\b[^{{]*{{|type {name}\s*=)", text)
     assert m, f"{name} missing from types.ts"
-    # Interfaces end at the first column-0 brace. Type aliases in this file
-    # are single-line unions whose object members use ';' internally, so the
-    # alias ends at the newline, not at the first semicolon.
+    # Interfaces end at the first column-0 brace. Type aliases end at the
+    # first ';' outside every brace -- the Sensors union grew multi-line when
+    # the air chain landed, so "ends at the newline" stopped being true.
     if "interface" in m.group(0):
         end = text.find("\n}", m.start())
-    else:
-        end = text.find("\n", m.start())
-    assert end != -1
-    return text[m.start() : end]
+        assert end != -1
+        return text[m.start() : end]
+    depth = 0
+    for i in range(m.end(), len(text)):
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == ";" and depth == 0:
+            return text[m.start() : i]
+    raise AssertionError(f"unterminated type alias {name}")
 
 
 def ts_fields(name: str) -> set[str]:
@@ -109,9 +117,9 @@ def check(function: str, *ts_names: str) -> None:
 
 
 def test_state_json_matches_devicestate():
-    # BatteryState is nested under DeviceState.batt and written by the same
-    # function, so both interfaces mirror one writer.
-    check("state_json", "DeviceState", "BatteryState")
+    # BatteryState and PlugState are nested under DeviceState (batt, plug) and
+    # written by the same function, so all three interfaces mirror one writer.
+    check("state_json", "DeviceState", "BatteryState", "PlugState")
 
 
 def test_handle_device_matches_deviceinfo():

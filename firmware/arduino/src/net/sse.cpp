@@ -122,8 +122,8 @@ inline bool origin_is_self(const char* origin, size_t len) {
 void push() {
   if (!g_source)
     return;
-  char st[768];
-  char frame[832];
+  char st[896];
+  char frame[960];
   g_source(st, sizeof(st));
   const int n = snprintf(frame, sizeof(frame), "data: %s\n\n", st);
   if (n < 0 || n >= static_cast<int>(sizeof(frame)))
@@ -168,9 +168,9 @@ void accept() {
       c.setNoDelay(true);
       if (!g_source)
         return;
-      char st[768];
-      // Headroom for the echoed Origin header on top of the 768-byte state.
-      char frame[1152];
+      char st[896];
+      // Headroom for the echoed Origin header on top of the 896-byte state.
+      char frame[1280];
       g_source(st, sizeof(st));
       const int n = snprintf(frame, sizeof(frame),
                              "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"

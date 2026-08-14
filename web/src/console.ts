@@ -8,6 +8,7 @@
 // way.
 
 import {
+  BME_C,
   SERIES_COLOURS,
   drawAxis,
   drawBattery,
@@ -18,6 +19,7 @@ import {
 import { $, at, el, show } from './dom.js';
 import { ago, airflow, cardTight, clock, hoursMinutes, signed, storage } from './format.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
+import type { Series } from './series.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
 import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
 import type { DeviceState } from './types.js';
@@ -224,6 +226,12 @@ function bitValues(): { value: string; colour: string }[] {
     { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
     { value: card, colour: cardColour },
     { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
+    {
+      value: s.plug
+        ? `${s.plug.w.toFixed(1)} W${s.plug.v !== null ? ` · ${s.plug.v.toFixed(1)} V` : ''}`
+        : 'no meter',
+      colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
+    },
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
     {
@@ -272,23 +280,65 @@ export function paintTip(): void {
   $('tipb').textContent = bit.body;
 }
 
+/** One entry of a series legend: a coloured line sample and the sensor name. */
+function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement {
+  const b = el('b', { textContent: `${dashed ? '╌╌' : '——'} ${name}` });
+  b.style.color = colour;
+  return b;
+}
+
+/** Which line is which sensor, on the rows that carry more than one. */
+function paintLegends(s: Series): void {
+  const dual = s.bt.some((v) => v !== null);
+  $('tleg').replaceChildren(
+    legendEntry(dual ? 'SHT41' : 'GARAGE', OR, false),
+    ...(dual ? [legendEntry('BME280', BME_C, true)] : []),
+    legendEntry('OUTSIDE', OUT, true),
+  );
+  const dualH = s.bh.some((v) => v !== null);
+  $('hleg').replaceChildren(
+    legendEntry(dualH ? 'SHT41' : 'GARAGE', SERIES_COLOURS.humidity, false),
+    ...(dualH ? [legendEntry('BME280', BME_C, true)] : []),
+  );
+}
+
+/** "index 93 · raw 30125" / "warming up · raw 29850" / '' -- one gas row. */
+function gasReadout(idx: number | null, raw: number | null): string {
+  if (idx === null && raw === null) return '';
+  const rawPart = raw === null ? '' : ` · raw ${raw.toFixed(0)}`;
+  return idx !== null && idx > 0 ? `index ${idx.toFixed(0)}${rawPart}` : `warming up${rawPart}`;
+}
+
+/** "sht 51% · bme 35%", or the bare value when only one sensor logged. */
+function dualReadout(primary: number | null, secondary: number | null, unit: string): string {
+  if (primary === null) return '';
+  if (secondary === null) return `${primary.toFixed(0)}${unit}`;
+  return `sht ${primary.toFixed(0)}${unit} · bme ${secondary.toFixed(0)}${unit}`;
+}
+
 function paintReadouts(): void {
   const s = view.series;
   const i = sampleIndex();
   if (!s || i < 0) return;
   const tf = at(s.tf, i);
   const of = at(s.of, i);
+  const bt = at(s.bt, i);
   $('roT').textContent =
-    (tf === null ? '–' : `${tf.toFixed(1)}°`) + (of === null ? '' : ` / out ${of.toFixed(1)}°`);
+    (tf === null ? '–' : `${bt === null ? '' : 'sht '}${tf.toFixed(1)}°`) +
+    (bt === null ? '' : ` · bme ${bt.toFixed(1)}°`) +
+    (of === null ? '' : ` · out ${of.toFixed(1)}°`);
   const spd = s.spd.length ? s.spd[i] : undefined;
   $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
-  const rh = at(s.rh, i);
-  $('roH').textContent = rh === null ? '' : `${rh.toFixed(0)}%`;
+  $('roH').textContent = dualReadout(at(s.rh, i), at(s.bh, i), '%');
   const hpa = at(s.hpa, i);
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   const bv = at(s.bv, i);
   $('roB').textContent =
     bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
+  const w = at(s.w, i);
+  $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
+  $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
+  $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
 }
 
 /**
@@ -314,11 +364,12 @@ export function drawAll(): void {
     if (view.historyError) clearPlots(view.historyError);
     return;
   }
+  paintLegends(s);
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub);
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub);
+      (v) => v.toFixed(0), 'no humidity data', view.scrub, undefined, s.bh);
   }
   if (view.rows.pressure) {
     // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
@@ -327,6 +378,23 @@ export function drawAll(): void {
       (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
+  if (view.rows.power) {
+    drawSimple($<HTMLCanvasElement>('cv_w'), s, s.w, SERIES_COLOURS.power,
+      (v) => v.toFixed(1), 'no plug data yet', view.scrub);
+  }
+  // Gas rows plot the INDEX once the algorithm produces one, and the raw
+  // ticks before that -- the user asked to watch the warm-up, not to stare at
+  // a flat zero for the hours Sensirion's blackout lasts.
+  if (view.rows.voc) {
+    const warming = !s.voc.some((v) => v !== null && v > 0);
+    drawSimple($<HTMLCanvasElement>('cv_v'), s, warming ? s.vocr : s.voc, SERIES_COLOURS.voc,
+      (v) => v.toFixed(0), 'no VOC sensor data', view.scrub);
+  }
+  if (view.rows.nox) {
+    const warming = !s.nox.some((v) => v !== null && v > 0);
+    drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
+      (v) => v.toFixed(0), 'no NOx sensor data', view.scrub);
+  }
   drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
   paintReadouts();
 }
@@ -334,7 +402,8 @@ export function drawAll(): void {
 export function paintStats(): void {
   const st = view.stats;
   if (!st) return;
-  $('mW').textContent = `${st.watts_now.toFixed(0)} W`;
+  // The estimate only fills in when there is no watt meter reading.
+  if (!view.state?.plug) $('mW').textContent = `${st.watts_now.toFixed(0)} W`;
   $('mRun').textContent = hoursMinutes(st.run_today_s);
   const tiles: [string, string, string, string][] = [
     ['FAN TODAY', (st.run_today_s / 3600).toFixed(1), 'h', AC],
@@ -429,6 +498,26 @@ export function paint(next?: DeviceState): void {
   $('bauto').textContent = s.auto ? 'auto on' : 'auto off';
   $('boff').className = `pill${s.speed === 0 ? ' on' : ''}`;
   $('mAir').textContent = airflow(s.speed);
+
+  // DRAW prefers the watt meter over the cubic estimate whenever the
+  // controller has a reading; paintStats respects the same preference.
+  if (s.plug) {
+    $('mW').textContent = `${s.plug.w.toFixed(1)} W`;
+    $('mW').title = 'measured at the plug';
+  }
+  // The one alert this page can raise that nothing else can: the meter says
+  // the fan is not doing what it was told (it ran at full power for a day
+  // while everything here honestly said OFF, 2026-08-13).
+  const warn = $('plugwarn');
+  if (s.plug && s.plug.verdict === -1 && !stale) {
+    warn.textContent =
+      `The watt meter reads ${s.plug.w.toFixed(1)} W, which does not match ` +
+      `${s.speed > 0 ? `speed ${s.speed}` : 'off'} — the fan may not be following commands. ` +
+      'Check the control cable at the fan port.';
+    show(warn, true);
+  } else {
+    show(warn, false);
+  }
 
   paintPwm();
   paintHero();
