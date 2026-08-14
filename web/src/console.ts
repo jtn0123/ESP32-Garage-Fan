@@ -302,6 +302,20 @@ function paintLegends(s: Series): void {
   );
 }
 
+/** "index 93 · raw 30125" / "warming up · raw 29850" / '' -- one gas row. */
+function gasReadout(idx: number | null, raw: number | null): string {
+  if (idx === null && raw === null) return '';
+  const rawPart = raw === null ? '' : ` · raw ${raw.toFixed(0)}`;
+  return idx !== null && idx > 0 ? `index ${idx.toFixed(0)}${rawPart}` : `warming up${rawPart}`;
+}
+
+/** "sht 51% · bme 35%", or the bare value when only one sensor logged. */
+function dualReadout(primary: number | null, secondary: number | null, unit: string): string {
+  if (primary === null) return '';
+  if (secondary === null) return `${primary.toFixed(0)}${unit}`;
+  return `sht ${primary.toFixed(0)}${unit} · bme ${secondary.toFixed(0)}${unit}`;
+}
+
 function paintReadouts(): void {
   const s = view.series;
   const i = sampleIndex();
@@ -315,12 +329,7 @@ function paintReadouts(): void {
     (of === null ? '' : ` · out ${of.toFixed(1)}°`);
   const spd = s.spd.length ? s.spd[i] : undefined;
   $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
-  const rh = at(s.rh, i);
-  const bh = at(s.bh, i);
-  $('roH').textContent =
-    rh === null
-      ? ''
-      : `${bh === null ? '' : 'sht '}${rh.toFixed(0)}%${bh === null ? '' : ` · bme ${bh.toFixed(0)}%`}`;
+  $('roH').textContent = dualReadout(at(s.rh, i), at(s.bh, i), '%');
   const hpa = at(s.hpa, i);
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   const bv = at(s.bv, i);
@@ -328,22 +337,8 @@ function paintReadouts(): void {
     bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
   const w = at(s.w, i);
   $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
-  const voc = at(s.voc, i);
-  const vocr = at(s.vocr, i);
-  $('roV').textContent =
-    voc === null && vocr === null
-      ? ''
-      : voc !== null && voc > 0
-        ? `index ${voc.toFixed(0)}${vocr === null ? '' : ` · raw ${vocr.toFixed(0)}`}`
-        : `warming up${vocr === null ? '' : ` · raw ${vocr.toFixed(0)}`}`;
-  const nox = at(s.nox, i);
-  const noxr = at(s.noxr, i);
-  $('roN').textContent =
-    nox === null && noxr === null
-      ? ''
-      : nox !== null && nox > 0
-        ? `index ${nox.toFixed(0)}${noxr === null ? '' : ` · raw ${noxr.toFixed(0)}`}`
-        : `warming up${noxr === null ? '' : ` · raw ${noxr.toFixed(0)}`}`;
+  $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
+  $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
 }
 
 /**

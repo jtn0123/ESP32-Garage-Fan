@@ -40,6 +40,11 @@ float bme_rh();
 bool prefer_sht();
 void set_prefer_sht(bool on);
 
+/** The predicate sample() actually uses: preference AND a live SHT41 reading.
+ *  This is what /api/sensors' `source` must report, or the label can claim
+ *  sht41 for values the BME280 produced. */
+bool sht_driving();
+
 /** Cheap temperature-only refresh for the 30 s auto tick. */
 void refresh_inside();
 

@@ -134,6 +134,8 @@ float bme_rh() { return g_bme_rh; }
 
 bool prefer_sht() { return g_prefer_sht; }
 
+bool sht_driving() { return use_sht(); }
+
 void set_prefer_sht(bool on) {
   g_prefer_sht = on;
   if (g_prefs)

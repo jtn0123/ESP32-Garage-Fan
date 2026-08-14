@@ -75,8 +75,12 @@ void tick() {
     return;
   // Compensation in the SGP41's fixed-point format; datasheet defaults when
   // the SHT41 has no reading yet.
-  const float t = isnan(g_t) ? 25.0f : g_t;
-  const float h = isnan(g_h) ? 50.0f : g_h;
+  float t = isnan(g_t) ? 25.0f : g_t;
+  float h = isnan(g_h) ? 50.0f : g_h;
+  // The conversions have no headroom: an SHT41 reporting 101 %RH in condensing
+  // air would wrap the uint16 ticks to the opposite end of the SGP41's scale.
+  t = t < -45.0f ? -45.0f : (t > 130.0f ? 130.0f : t);
+  h = h < 0.0f ? 0.0f : (h > 100.0f ? 100.0f : h);
   const uint16_t rh_ticks = static_cast<uint16_t>(h * 65535.0f / 100.0f);
   const uint16_t t_ticks = static_cast<uint16_t>((t + 45.0f) * 65535.0f / 175.0f);
   uint16_t voc = 0;
@@ -85,8 +89,15 @@ void tick() {
   if (g_conditioning_left > 0) {
     // NOx needs its hotplate conditioned before the first real measurement.
     err = g_sgp.executeConditioning(rh_ticks, t_ticks, voc);
-    if (err == 0)
+    if (err == 0) {
       --g_conditioning_left;
+      g_sgp_fail = 0;
+    } else if (++g_sgp_fail >= 10) {
+      // Same cap as the measurement path: a conditioning loop that never
+      // completes must not silently pin the readings at -1 forever.
+      eventlog::log("air", "sgp41 never finished conditioning; gas readings disabled");
+      g_sgp_ok = false;
+    }
     return;
   }
   err = g_sgp.measureRawSignals(rh_ticks, t_ticks, voc, nox);

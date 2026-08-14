@@ -254,25 +254,6 @@ void register_routes(WebServer& http, const char* token) {
     String full = String(out) + r.substring(0, r.length() - 1) + "]}";
     g_http->send(200, "application/json", full);
   });
-  http.on("/api/i2cscan", []() {
-    if (!authorized())
-      return;
-    String out = "{\"found\":[";
-    bool first = true;
-    for (uint8_t a = 1; a < 127; a++) {
-      Wire.beginTransmission(a);
-      if (Wire.endTransmission() == 0) {
-        if (!first)
-          out += ',';
-        char b[8];
-        snprintf(b, sizeof(b), "\"0x%02X\"", a);
-        out += b;
-        first = false;
-      }
-    }
-    out += "]}";
-    g_http->send(200, "application/json", out);
-  });
 }
 
 }  // namespace web_debug

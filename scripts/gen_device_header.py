@@ -220,6 +220,12 @@ def main():
     # coordinates above. The token is a credential and lives ONLY in .env.
     ha_url = os.environ.get("HA_URL", "").strip().rstrip("/")
     ha_token = os.environ.get("HA_TOKEN", "").strip()
+    # net/plug.cpp parses a plain-HTTP host:port only (the ESP32-S2 cannot
+    # afford TLS -- see net/weather.h for the measured reason). Anything else
+    # would bake in a host the firmware can never connect to, silently.
+    if ha_url and not ha_url.startswith("http://"):
+        print(f"WARNING: HA_URL must start with http:// (got {ha_url!r}); plug poller disabled")
+        ha_url = ""
     # battery
     battery = data.get("battery", {})
     capacity_mAh = int(battery.get("capacity_mAh", 3500) or 3500)

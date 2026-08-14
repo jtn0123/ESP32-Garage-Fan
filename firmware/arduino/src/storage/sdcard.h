@@ -52,10 +52,10 @@ void on_network_up();
 /**
  * Append one sample row to this month's CSV. Drops the mount on failure.
  *
- * Row format: epoch,temp_c,rh,hpa,out_f,speed,batt_v,chg
- * batt_v and chg were appended 1.14.23. Rows written before that carry six
- * fields; read_range parses both widths and reports the missing columns as
- * absent rather than as zero.
+ * Row format:
+ * epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh batt_v
+ * and chg were appended 1.14.23. Rows written before that carry six fields; read_range parses both
+ * widths and reports the missing columns as absent rather than as zero.
  */
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
                 int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox,

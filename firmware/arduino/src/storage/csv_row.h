@@ -45,10 +45,10 @@ constexpr float kAbsentBelow = -100.0f;
  * Decode one CSV line.
  *
  * Accepts every width this firmware has ever written: 6 fields (pre-1.14.23),
- * 8 (batt_v/chg), and 13 (watts + the four SGP41 columns, 1.14.47). A line is
- * valid only with at least epoch + the three always-present readings;
- * anything shorter (a torn tail row, a stray blank, a header) is rejected
- * rather than half-read.
+ * 8 (batt_v/chg), 13 (watts + the four SGP41 columns, 1.14.47) and 15
+ * (bme_t/bme_rh, the second thermometer, 1.14.48). A line is valid only with
+ * at least epoch + the three always-present readings; anything shorter (a
+ * torn tail row, a stray blank, a header) is rejected rather than half-read.
  */
 inline CsvRow parse_csv_row(const char* line) {
   CsvRow r;

@@ -244,8 +244,10 @@ def _history_uncached():
             voc.append(80 + (i % 30))
             nox.append(1 + (i % 3))
     if SCEN["corrupt"]:  # what a bad CSV row must become
-        temp[5] = None
-        hpa[7] = None
+        if len(temp) > 5:
+            temp[5] = None
+        if len(hpa) > 7:
+            hpa[7] = None
     return {
         "source": "sd" if SCEN["card"] else "ring",
         "interval_s": STEP,

@@ -6,6 +6,7 @@
 #include <new>
 
 #include "config.h"
+#include "system/reboot.h"
 
 namespace history {
 namespace {
@@ -23,6 +24,13 @@ Ring<kRingLen>& ring() {
     void* m = heap_caps_calloc(1, sizeof(Ring<kRingLen>), MALLOC_CAP_SPIRAM);
     if (!m)
       m = heap_caps_calloc(1, sizeof(Ring<kRingLen>), MALLOC_CAP_8BIT);
+    if (!m) {
+      // Placement-new on null is UB and every accessor would then scribble
+      // through it. This allocates once, in early setup, when the heap is at
+      // its emptiest -- if BOTH pools refuse ~10 KB here, the boot is already
+      // doomed, and a reboot with the reason on the tape beats corruption.
+      sysreboot::restart("no memory for the history ring");
+    }
     g_ring = new (m) Ring<kRingLen>();
   }
   return *g_ring;

@@ -22,6 +22,9 @@ test.describe.configure({ mode: 'serial' });
 
 test.afterEach(async ({ page }) => {
   await resetScen(page);
+  // Scenario knobs are not the only shared mock state: the DRAW spec pins the
+  // speed, and 9 is the mock's boot value, so every test starts from it.
+  await page.request.post('/api/set?speed=9');
 });
 
 test('an unmounted card still renders the page', async ({ page }) => {

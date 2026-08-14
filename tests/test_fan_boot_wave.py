@@ -41,6 +41,11 @@ def _restore_body() -> str:
 
 def test_restore_drives_the_wave_outside_every_conditional():
     body = _restore_body()
+    # A brace-free `if (...) set_wave(...);` sits at function depth and would
+    # fool the brace counter below; reject the form outright.
+    assert not re.search(
+        r"\b(?:if|for|while)\s*\([^{};]*\)\s*set_wave\s*\(", body
+    ), "set_wave() must not be the body of a brace-free control statement"
     depth = 0
     unconditional = False
     for m in re.finditer(r"\{|\}|set_wave\s*\(", body):

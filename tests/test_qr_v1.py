@@ -99,5 +99,7 @@ def test_the_encoder_refuses_what_cannot_fit_or_scan():
     assert mock.qr_v1_encode("http://127.0.0.1") is None
     assert mock.qr_v1_encode("") is None
     assert mock.qr_v1_encode("X" * 26) is None
+    # 25 is the V1-L alphanumeric capacity itself, and both ports hardcode it.
+    assert mock.qr_v1_encode("X" * 25) is not None
     # Worst-case dotted quad still fits V1-L.
     assert mock.qr_v1_encode("HTTP://255.255.255.255") is not None

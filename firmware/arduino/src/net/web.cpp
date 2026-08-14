@@ -408,9 +408,12 @@ static void handle_csv() {
     snprintf(disp, sizeof(disp), "Content-Disposition: attachment; filename=garage-fan-%dd.csv\r\n",
              days);
     http_tx::Chunked tx(g_http.client(), "text/csv", disp);
-    // Header names the 1.14.23 column set; older rows in the same file carry
-    // six fields and are streamed exactly as stored rather than back-filled.
-    tx.print("epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n");
+    // Header names the full 1.14.48 column set; older rows in the same file
+    // carry 6, 8 or 13 fields and are streamed exactly as stored rather than
+    // back-filled -- a short row simply has no values under the later labels.
+    tx.print(
+        "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
+        "watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n");
     sdcard::stream_range(
         time(nullptr) - (time_t)days * 86400,
         [](const char* line, void* ctx) {
@@ -425,15 +428,23 @@ static void handle_csv() {
   const uint16_t n = history::count();
   http_tx::Chunked tx(g_http.client(), "text/csv",
                       "Content-Disposition: attachment; filename=garage-fan-ring.csv\r\n");
-  tx.print("epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n");
+  tx.print(
+      "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
+      "watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n");
   for (uint16_t i = 0; i < n && tx.ok(); i++) {
     const long ts =
         history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * (kSampleMs / 1000) : 0;
-    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d\n", ts, history::temp()[i], history::rh()[i],
-              history::hpa()[i], isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
+    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%.2f,%.1f\n", ts,
+              history::temp()[i], history::rh()[i], history::hpa()[i],
+              isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
               static_cast<int>(history::speed()[i]),
               isnan(history::batt_v()[i]) ? -999.0f : history::batt_v()[i],
-              static_cast<int>(history::chg()[i]));
+              static_cast<int>(history::chg()[i]),
+              isnan(history::watts()[i]) ? -999.0f : history::watts()[i],
+              (long)history::voc_raw()[i], (long)history::nox_raw()[i],
+              static_cast<int>(history::voc()[i]), static_cast<int>(history::nox()[i]),
+              isnan(history::bme_t()[i]) ? -999.0f : history::bme_t()[i],
+              isnan(history::bme_rh()[i]) ? -999.0f : history::bme_rh()[i]);
   }
   tx.end();
 }
@@ -565,9 +576,9 @@ static void handle_sensors() {
            "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f,"
            "\"source\":\"%s\",\"voc_raw\":%ld,\"nox_raw\":%ld,\"voc\":%ld,\"nox\":%ld,"
            "\"bme_t\":%.2f,\"bme_rh\":%.1f}",
-           t, h, p, climate::prefer_sht() && air::sht_ok() ? "sht41" : "bme280",
-           (long)air::voc_raw(), (long)air::nox_raw(), (long)air::voc_index(),
-           (long)air::nox_index(), climate::bme_temp_c(), climate::bme_rh());
+           t, h, p, climate::sht_driving() ? "sht41" : "bme280", (long)air::voc_raw(),
+           (long)air::nox_raw(), (long)air::voc_index(), (long)air::nox_index(),
+           climate::bme_temp_c(), climate::bme_rh());
   g_http.send(200, "application/json", buf);
 }
 

@@ -17,5 +17,9 @@
     "11": 30.8,
     "12": 37.8,
     "0_return": 44.1
+  },
+  "notes": {
+    "7": "sampling artifact: the plug's Matter sensor lagged through this step and the sweep recorded a transition value; firmware uses 12.8 W (interpolated) in kBaselineW",
+    "0_return": "sampling artifact: recorded during spin-down while the sensor served stale full-power readings; the fan verifiably idled at ~1.4 W minutes later (see events 2026-08-13)"
   }
 }

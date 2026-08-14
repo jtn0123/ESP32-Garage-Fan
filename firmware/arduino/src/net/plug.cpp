@@ -44,6 +44,8 @@ int g_speed_seen = -99;
 uint32_t g_speed_since_ms = 0;
 int g_verdict = 0;
 int g_bad_streak = 0;
+uint8_t g_fetch_fails = 0;  // consecutive failed polls; the module that exists
+                            // to catch silent faults must not fail silently
 
 /** GET one entity's "state" as a float; NAN on any failure. */
 float fetch_state(const char* entity) {
@@ -67,9 +69,13 @@ float fetch_state(const char* entity) {
   net.setTimeout(5000);
   if (!net.connect(host, port))
     return NAN;
-  net.printf("GET /api/states/%s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer " HA_TOKEN
-             "\r\nConnection: close\r\n\r\n",
-             entity, host);
+  // The token rides as a %s ARGUMENT: pasted into the format string, a '%'
+  // inside it would become a conversion specifier reading arguments that
+  // were never passed.
+  net.printf(
+      "GET /api/states/%s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
+      "Connection: close\r\n\r\n",
+      entity, host, HA_TOKEN);
   char buf[1024];
   size_t n = 0;
   const uint32_t t0 = millis();
@@ -137,10 +143,17 @@ void tick() {
   g_ever_polled = true;
   const float w = fetch_state(FAN_PLUG_POWER_ENTITY);
   if (!isnan(w)) {
+    if (g_fetch_fails >= 4)
+      eventlog::log("plug", "HA reads resumed after %u failed polls", g_fetch_fails);
+    g_fetch_fails = 0;
     g_watts = w;
     g_volts = fetch_state(FAN_PLUG_VOLT_ENTITY);
     g_read_ms = millis();
     g_ever_read = true;
+  } else if (++g_fetch_fails == 4) {
+    // One line at the threshold, not one per poll: enough to name the fault
+    // without turning a dead HA into a log flood.
+    eventlog::log("plug", "cannot read the watt meter from HA (4 consecutive polls)");
   }
   judge();
 }

@@ -46,7 +46,8 @@ def _http(url, method="GET", token=None, timeout=10):
     # Only the two hosts this script exists to talk to, nothing user-shaped:
     # entity ids are interpolated into paths below, so pin the origin here
     # rather than trusting every caller forever.
-    if not (url.startswith(f"{HA_URL}/api/") or url.startswith(f"http://{FAN}/api/")):
+    fan_origin = f"http://{FAN}/api/"  # NOSONAR - LAN device, no TLS stack (net/weather.h)
+    if not (url.startswith(f"{HA_URL}/api/") or url.startswith(fan_origin)):
         raise ValueError(f"refusing URL outside HA or the fan: {url}")
     # Plain HTTP is the deployment reality on this LAN: the ESP32 has no TLS
     # stack (see net/weather.h for the measured reason) and HA is reached by
@@ -89,13 +90,13 @@ def watts(entity):
 
 
 def set_speed(v):
-    _http(f"http://{FAN}/api/set?speed={v}", method="POST")  # NOSONAR - LAN device, no TLS stack
+    url = f"http://{FAN}/api/set?speed={v}"  # NOSONAR - LAN device, no TLS stack
+    _http(url, method="POST")
 
 
 def set_auto(on):
-    _http(
-        f"http://{FAN}/api/config?auto={1 if on else 0}", method="POST"
-    )  # NOSONAR - LAN device, no TLS stack
+    url = f"http://{FAN}/api/config?auto={1 if on else 0}"  # NOSONAR - LAN, no TLS stack
+    _http(url, method="POST")
 
 
 def settle(entity, label):

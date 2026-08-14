@@ -131,9 +131,10 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed, f
   }
   char line[144];
   // batt_v/chg appended 1.14.23; watts + the four SGP41 columns appended
-  // 1.14.47 (plug meter and the air chain). read_range parses the 6- and
-  // 8-field rows written before either change. -999 is the "no reading"
-  // sentinel for float columns, -1 for the gas columns.
+  // 1.14.47 (plug meter and the air chain); bme_t/bme_rh appended 1.14.48
+  // (the second thermometer, for the dual-sensor overlays). read_range parses
+  // the 6-, 8- and 13-field rows written before each change. -999 is the "no
+  // reading" sentinel for float columns, -1 for the gas columns.
   int n = snprintf(line, sizeof(line),
                    "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%.2f,%.1f\n", (long)now,
                    t, h, p, isnan(out_f) ? -999.0f : out_f, speed, isnan(batt_v) ? -999.0f : batt_v,
