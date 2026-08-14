@@ -19,12 +19,15 @@
 namespace plug {
 namespace {
 
-// Measured 2026-08-13 with the sweep in scripts/calibrate_fan_power.py
-// (docs/fan_power_baseline.json). Speed 7 interpolated: the plug's Matter
-// sensor lagged through that step and the sweep recorded a transition value.
+// Measured 2026-08-14 with the lag-hardened sweep in
+// scripts/calibrate_fan_power.py (docs/fan_power_baseline.json). The plug's
+// Matter sensor serves the previous speed's watts for ~a minute, which had
+// shifted the whole 2026-08-13 table one speed to the right; this table
+// waited out that lag at every step and cross-checks against two
+// independently dwelled spot measurements (7 and 8) within 0.1 W.
 // clang-format off
-constexpr float kBaselineW[13] = {1.4f, 2.5f, 3.9f, 4.9f, 7.0f, 7.6f, 10.3f,  // NOLINT
-                                  12.8f, 15.4f, 20.3f, 23.6f, 30.8f, 37.8f};  // NOLINT
+constexpr float kBaselineW[13] = {1.4f, 3.7f, 4.8f, 7.0f, 7.6f, 10.0f, 12.5f,  // NOLINT
+                                  15.8f, 19.7f, 25.0f, 30.2f, 37.7f, 44.2f};   // NOLINT
 // clang-format on
 
 constexpr uint32_t kPollMs = 15000;
