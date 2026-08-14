@@ -86,8 +86,8 @@ static void sample_climate() {
     row.bme_rh = climate::bme_rh();
     row.voc_raw = air::voc_raw();
     row.nox_raw = air::nox_raw();
-    row.voc = (int16_t)air::voc_index();
-    row.nox = (int16_t)air::nox_index();
+    row.voc = static_cast<int16_t>(air::voc_index());
+    row.nox = static_cast<int16_t>(air::nox_index());
     history::append(row, time_synced());
     if (time_synced())
       // row.speed, not fan::speed(): the ring stores the clamped value and the

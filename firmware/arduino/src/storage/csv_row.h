@@ -26,12 +26,12 @@ struct CsvRow {
   float hpa = NAN;
   float out_f = NAN;
   float batt_v = NAN;
-  float watts = NAN;    // fan draw at the plug (1.14.47+ rows)
-  int32_t voc_raw = -1; // SGP41 raw ticks (1.14.47+ rows)
+  float watts = NAN;     // fan draw at the plug (1.14.47+ rows)
+  int32_t voc_raw = -1;  // SGP41 raw ticks (1.14.47+ rows)
   int32_t nox_raw = -1;
-  int16_t voc = -1;     // gas indices; 0 = algorithm was warming
+  int16_t voc = -1;  // gas indices; 0 = algorithm was warming
   int16_t nox = -1;
-  float bme_t = NAN;    // the BME280 beside the SHT41 (1.14.48+ rows)
+  float bme_t = NAN;  // the BME280 beside the SHT41 (1.14.48+ rows)
   float bme_rh = NAN;
   int8_t spd = 0;
   int8_t chg = -1;

@@ -776,8 +776,8 @@ static void handle_history() {
   http_tx::Chunked tx(g_http.client(), "application/json");
   if (have_card) {
     const GraphScratch& s = g_scratch;
-    const sdcard::Samples dst{s.ts, s.t,  s.h,  s.p,  s.o,  s.b, s.sp,
-                              s.cg, s.w,  s.vr, s.nr, s.vi, s.ni, s.bt, s.bh};
+    const sdcard::Samples dst{s.ts, s.t,  s.h,  s.p,  s.o,  s.b,  s.sp, s.cg,
+                              s.w,  s.vr, s.nr, s.vi, s.ni, s.bt, s.bh};
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
     const uint16_t n = sdcard::read_range(cutoff, dst, kGraphMaxPts);
     // interval_s is now only a nominal hint for gap detection; ts[] carries

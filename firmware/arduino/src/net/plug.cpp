@@ -22,8 +22,10 @@ namespace {
 // Measured 2026-08-13 with the sweep in scripts/calibrate_fan_power.py
 // (docs/fan_power_baseline.json). Speed 7 interpolated: the plug's Matter
 // sensor lagged through that step and the sweep recorded a transition value.
-constexpr float kBaselineW[13] = {1.4f,  2.5f,  3.9f,  4.9f,  7.0f,  7.6f, 10.3f,
-                                  12.8f, 15.4f, 20.3f, 23.6f, 30.8f, 37.8f};
+// clang-format off
+constexpr float kBaselineW[13] = {1.4f, 2.5f, 3.9f, 4.9f, 7.0f, 7.6f, 10.3f,  // NOLINT
+                                  12.8f, 15.4f, 20.3f, 23.6f, 30.8f, 37.8f};  // NOLINT
+// clang-format on
 
 constexpr uint32_t kPollMs = 15000;
 constexpr uint32_t kFirstPollDelayMs = 25000;  // let WiFi/MQTT/SD settle first
@@ -102,8 +104,8 @@ void judge() {
     g_speed_since_ms = millis();
     g_bad_streak = 0;
   }
-  if (!g_ever_read || millis() - g_read_ms > kStaleMs ||
-      millis() - g_speed_since_ms < kSettleMs || speed < 0 || speed > 12 || isnan(g_watts)) {
+  if (!g_ever_read || millis() - g_read_ms > kStaleMs || millis() - g_speed_since_ms < kSettleMs ||
+      speed < 0 || speed > 12 || isnan(g_watts)) {
     g_verdict = 0;
     return;
   }
@@ -154,8 +156,6 @@ int32_t age_s() {
 
 int verdict() { return g_verdict; }
 
-float expected_w(int speed) {
-  return (speed >= 0 && speed <= 12) ? kBaselineW[speed] : NAN;
-}
+float expected_w(int speed) { return (speed >= 0 && speed <= 12) ? kBaselineW[speed] : NAN; }
 
 }  // namespace plug

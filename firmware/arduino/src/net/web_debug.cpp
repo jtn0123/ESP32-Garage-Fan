@@ -6,11 +6,10 @@
 #include <SPI.h>
 #include <Wire.h>
 
-#include "soc/gpio_periph.h"
-
 #include <cstdio>
 
 #include "config.h"
+#include "soc/gpio_periph.h"
 #include "sensors/battery.h"
 #include "storage/sdcard.h"
 
@@ -185,8 +184,7 @@ void register_routes(WebServer& http, const char* token) {
     for (uint8_t a = 0x08; a < 0x78; ++a) {
       Wire.beginTransmission(a);
       if (Wire.endTransmission() == 0 && n < sizeof(out) - 12)
-        n += snprintf(out + n, sizeof(out) - n, "%s\"0x%02x\"", first ? "" : ",", a),
-            first = false;
+        n += snprintf(out + n, sizeof(out) - n, "%s\"0x%02x\"", first ? "" : ",", a), first = false;
     }
     snprintf(out + n, sizeof(out) - n, "]}");
     g_http->send(200, "application/json", out);

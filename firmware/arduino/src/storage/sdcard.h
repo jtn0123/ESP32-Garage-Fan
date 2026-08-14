@@ -88,16 +88,16 @@ struct Samples {
   float* temp_c;
   float* rh;
   float* hpa;
-  float* out_f;     // NAN when the row recorded no yard reading
-  float* batt_v;    // NAN on pre-1.14.23 rows
+  float* out_f;   // NAN when the row recorded no yard reading
+  float* batt_v;  // NAN on pre-1.14.23 rows
   int8_t* spd;
-  int8_t* chg;      // 1 charging, 0 not, -1 unknown
-  float* watts;     // NAN on pre-1.14.47 rows
-  int32_t* voc_raw; // -1 on pre-1.14.47 rows
+  int8_t* chg;       // 1 charging, 0 not, -1 unknown
+  float* watts;      // NAN on pre-1.14.47 rows
+  int32_t* voc_raw;  // -1 on pre-1.14.47 rows
   int32_t* nox_raw;
   int16_t* voc;
   int16_t* nox;
-  float* bme_t;   // the second thermometer, for the comparison rows
+  float* bme_t;  // the second thermometer, for the comparison rows
   float* bme_rh;
 };
 

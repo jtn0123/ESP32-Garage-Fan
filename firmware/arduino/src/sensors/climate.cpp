@@ -16,7 +16,7 @@
 namespace climate {
 namespace {
 
-float g_bme_t = NAN;   // the BME280's own corrected estimate, kept for comparison
+float g_bme_t = NAN;  // the BME280's own corrected estimate, kept for comparison
 float g_bme_rh = NAN;
 // Which thermometer drives auto and the displays. True (default) prefers the
 // off-board SHT41 whenever it answers; false forces the BME280 + offsets --

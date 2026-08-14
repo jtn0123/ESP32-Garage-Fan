@@ -46,8 +46,7 @@ void begin() {
   g_sgp.begin(Wire);
   uint16_t test = 0;
   g_sgp_ok = g_sgp.executeSelfTest(test) == 0 && test == 0xD400;
-  eventlog::log("air", "sht41=%s sgp41=%s", g_sht_ok ? "ok" : "absent",
-                g_sgp_ok ? "ok" : "absent");
+  eventlog::log("air", "sht41=%s sgp41=%s", g_sht_ok ? "ok" : "absent", g_sgp_ok ? "ok" : "absent");
 }
 
 void tick() {

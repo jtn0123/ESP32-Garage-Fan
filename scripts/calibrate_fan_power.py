@@ -34,7 +34,7 @@ import time
 import urllib.request
 
 HA_URL = os.environ.get("HA_URL", "").rstrip("/")
-HA_TOKEN = os.environ.get("HA_TOKEN", "")
+HA_TOKEN = os.environ.get("HA_TOKEN", "")  # value from env only; gitleaks:allow
 ENTITY = os.environ.get("HA_POWER_ENTITY", "")
 FAN = os.environ.get("FAN_HOST", "10.27.27.187")
 SETTLE_S = int(os.environ.get("SETTLE_S", "90"))
@@ -43,7 +43,15 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "fan_power_baseline.
 
 
 def _http(url, method="GET", token=None, timeout=10):
-    req = urllib.request.Request(url, method=method)
+    # Only the two hosts this script exists to talk to, nothing user-shaped:
+    # entity ids are interpolated into paths below, so pin the origin here
+    # rather than trusting every caller forever.
+    if not (url.startswith(f"{HA_URL}/api/") or url.startswith(f"http://{FAN}/api/")):
+        raise ValueError(f"refusing URL outside HA or the fan: {url}")
+    # Plain HTTP is the deployment reality on this LAN: the ESP32 has no TLS
+    # stack (see net/weather.h for the measured reason) and HA is reached by
+    # private address. NOSONAR
+    req = urllib.request.Request(url, method=method)  # NOSONAR
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=timeout) as r:  # NOSONAR - LAN
@@ -81,11 +89,13 @@ def watts(entity):
 
 
 def set_speed(v):
-    _http(f"http://{FAN}/api/set?speed={v}", method="POST")
+    _http(f"http://{FAN}/api/set?speed={v}", method="POST")  # NOSONAR - LAN device, no TLS stack
 
 
 def set_auto(on):
-    _http(f"http://{FAN}/api/config?auto={1 if on else 0}", method="POST")
+    _http(
+        f"http://{FAN}/api/config?auto={1 if on else 0}", method="POST"
+    )  # NOSONAR - LAN device, no TLS stack
 
 
 def settle(entity, label):
@@ -110,8 +120,10 @@ def settle(entity, label):
 
 def main():
     if not HA_URL or not HA_TOKEN:
-        sys.exit("HA_URL and HA_TOKEN are required (put them in .env, then "
-                 "`set -a; source .env; set +a` before running)")
+        sys.exit(
+            "HA_URL and HA_TOKEN are required (put them in .env, then "
+            "`set -a; source .env; set +a` before running)"
+        )
     entity = find_entity()
     print(f"watt sensor: {entity}")
     print(f"fan:         {FAN}")
@@ -134,8 +146,10 @@ def main():
             set_auto(True)
             print("restored: speed 0, auto on")
         except OSError as e:
-            print(f"RESTORE FAILED ({e}) -- set the fan yourself: "
-                  f"curl -X POST 'http://{FAN}/api/set?speed=0'")
+            print(
+                f"RESTORE FAILED ({e}) -- set the fan yourself: "
+                f"curl -X POST 'http://{FAN}/api/set?speed=0'"
+            )
 
     out = {
         "entity": entity,

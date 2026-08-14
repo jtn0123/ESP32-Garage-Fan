@@ -229,13 +229,20 @@ def _history_uncached():
     third = max(1, n // 3)
     for i in range(n):
         if i < third:
-            vocr.append(None); noxr.append(None); voc.append(None); nox.append(None)
+            vocr.append(None)
+            noxr.append(None)
+            voc.append(None)
+            nox.append(None)
         elif i < 2 * third:
-            vocr.append(29000 + (i % 40) * 20); noxr.append(15600 + (i % 25) * 8)
-            voc.append(0); nox.append(0)
+            vocr.append(29000 + (i % 40) * 20)
+            noxr.append(15600 + (i % 25) * 8)
+            voc.append(0)
+            nox.append(0)
         else:
-            vocr.append(30000 + (i % 40) * 20); noxr.append(15800 + (i % 25) * 8)
-            voc.append(80 + (i % 30)); nox.append(1 + (i % 3))
+            vocr.append(30000 + (i % 40) * 20)
+            noxr.append(15800 + (i % 25) * 8)
+            voc.append(80 + (i % 30))
+            nox.append(1 + (i % 3))
     if SCEN["corrupt"]:  # what a bad CSV row must become
         temp[5] = None
         hpa[7] = None
@@ -378,9 +385,7 @@ def qr_v1_encode(text):
     put(0, min(4, _QR_DATA_CW * 8 - len(bits)))
     while len(bits) % 8:
         bits.append(0)
-    data = bytearray(
-        int("".join(map(str, bits[i : i + 8])), 2) for i in range(0, len(bits), 8)
-    )
+    data = bytearray(int("".join(map(str, bits[i : i + 8])), 2) for i in range(0, len(bits), 8))
     while len(data) < _QR_DATA_CW:
         data.append(0xEC if (len(data) - len(bits) // 8) % 2 == 0 else 0x11)
 
