@@ -223,7 +223,7 @@ def main():
     # net/plug.cpp parses a plain-HTTP host:port only (the ESP32-S2 cannot
     # afford TLS -- see net/weather.h for the measured reason). Anything else
     # would bake in a host the firmware can never connect to, silently.
-    if ha_url and not ha_url.startswith("http://"):
+    if ha_url and not ha_url.startswith("http://"):  # NOSONAR - the check itself; see above
         print(f"WARNING: HA_URL must start with http:// (got {ha_url!r}); plug poller disabled")
         ha_url = ""
     # battery
