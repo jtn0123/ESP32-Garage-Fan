@@ -80,6 +80,7 @@ STATE = {
     # SCEN plug knob swaps in the disagreement case; "none" serves null, the
     # no-meter build.
     "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
+    "sht_pref": True,
 }
 DEVICE = {
     "id": "garage-fan-d69dbe",
@@ -243,6 +244,8 @@ def _history_uncached():
         "interval_s": STEP,
         "ts": ts,
         "watts": watts,
+        "bme_t": [None if t is None else round(t + 1.8, 2) for t in temp],
+        "bme_rh": [None if r is None else r - 3 for r in rh],
         "voc_raw": vocr,
         "nox_raw": noxr,
         "voc": voc,
@@ -639,6 +642,9 @@ class H(BaseHTTPRequestHandler):
                 "nox_raw": 15810,
                 "voc": 93,
                 "nox": 1,
+                # The on-board sensor reads warm and dry next to the regulator.
+                "bme_t": 25.7,
+                "bme_rh": 35.9,
             },
         )
 
@@ -685,6 +691,7 @@ class H(BaseHTTPRequestHandler):
     # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
     # in step with the firmware.
     CONFIG_KEYS = {
+        "sht": ("sht_pref", lambda v: v not in ("0", "false")),
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),

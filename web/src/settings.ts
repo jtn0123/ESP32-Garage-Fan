@@ -119,16 +119,23 @@ export function buildGroups(d: SettingsDeps): Group[] {
       blurb:
         'Calibration and sampling. Every stored reading is corrected before it is written, so changes here do not rewrite history.',
       rows: [
+        {
+          kind: 'toggle',
+          label: 'Off-board SHT41 drives readings',
+          hint: 'On (default): the SHT41 on the sensor cable is the garage temperature and humidity — no self-heating offset needed. Off: fall back to the on-board BME280 with the offsets below. Both sensors are logged either way, for the comparison overlays in the charts.',
+          on: s.sht_pref,
+          toggle: () => d.setConfig(`sht=${s.sht_pref ? 0 : 1}`),
+        },
         step(
           'Probe offset · charging',
-          'Correction added to the garage sensor while the pack is charging, when the board runs warmest.',
+          'BME280 fallback only: correction added while the pack is charging, when the board runs warmest. Ignored while the SHT41 drives.',
           `${s.offc > 0 ? '+' : ''}${s.offc.toFixed(1)} °C`,
           () => set(`offc=${clamp(s.offc - 0.1, -15, 15)}`),
           () => set(`offc=${clamp(s.offc + 0.1, -15, 15)}`),
         ),
         step(
           'Probe offset · idle',
-          'Correction added to the garage sensor the rest of the time.',
+          'BME280 fallback only: correction added the rest of the time. Ignored while the SHT41 drives.',
           `${s.offi > 0 ? '+' : ''}${s.offi.toFixed(1)} °C`,
           () => set(`offi=${clamp(s.offi - 0.1, -15, 15)}`),
           () => set(`offi=${clamp(s.offi + 0.1, -15, 15)}`),

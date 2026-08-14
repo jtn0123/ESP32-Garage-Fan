@@ -33,6 +33,8 @@ const RING_1D: History = {
   nox_raw: [15800, 15805, 15810, 15810, 15815, 15820, 15820],
   voc: [0, 0, 0, 93, 95, 97, 96],
   nox: [0, 0, 0, 1, 1, 1, 1],
+  bme_t: [27.2, 26.8, 26.7, 26.8, 26.3, 26.2, 26.1],
+  bme_rh: [35, 36, 35, 36, 37, 36, 37],
 };
 
 /**
@@ -59,6 +61,8 @@ const SD_7D: History = {
   nox_raw: [null, null, null, null],
   voc: [null, null, null, null],
   nox: [null, null, null, null],
+  bme_t: [null, null, null, null],
+  bme_rh: [null, null, null, null],
 };
 
 describe('7/30-day history now matches the 24h shape', () => {

@@ -22,6 +22,8 @@ struct Sample {
   float out_f;     // yard, F (NAN = no fresh feed at sample time)
   float batt_v;    // NAN = no fuel gauge
   float watts;     // fan draw measured at the plug (NAN = no meter reading)
+  float bme_t;     // the BME280's own corrected estimate, C -- beside the SHT41
+  float bme_rh;    //   for the dual-sensor comparison rows
   int32_t voc_raw; // SGP41 raw ticks (-1 = no sensor)
   int32_t nox_raw; // SGP41 raw ticks (-1 = no sensor)
   int16_t voc;     // VOC gas index 1..500, 0 = algorithm warming, -1 = absent
@@ -36,6 +38,8 @@ struct Ring {
   float o[kN];      // outdoor F at sample time (NAN = none)
   float bv[kN];     // battery volts at sample time (NAN = none)
   float w[kN];      // fan draw at the plug (NAN = none)
+  float bt[kN];     // BME280 temperature, C (NAN = none)
+  float bh[kN];     // BME280 humidity, %RH (NAN = none)
   int32_t vr[kN];   // SGP41 VOC raw ticks (-1 = none)
   int32_t nr[kN];   // SGP41 NOx raw ticks (-1 = none)
   int16_t vi[kN];   // VOC index (0 = warming, -1 = none)
@@ -54,6 +58,8 @@ struct Ring {
       memmove(s, s + 1, (kN - 1) * sizeof(int8_t));
       memmove(bv, bv + 1, (kN - 1) * sizeof(float));
       memmove(w, w + 1, (kN - 1) * sizeof(float));
+      memmove(bt, bt + 1, (kN - 1) * sizeof(float));
+      memmove(bh, bh + 1, (kN - 1) * sizeof(float));
       memmove(vr, vr + 1, (kN - 1) * sizeof(int32_t));
       memmove(nr, nr + 1, (kN - 1) * sizeof(int32_t));
       memmove(vi, vi + 1, (kN - 1) * sizeof(int16_t));
@@ -68,6 +74,8 @@ struct Ring {
     s[n] = row.speed;
     bv[n] = row.batt_v;
     w[n] = row.watts;
+    bt[n] = row.bme_t;
+    bh[n] = row.bme_rh;
     vr[n] = row.voc_raw;
     nr[n] = row.nox_raw;
     vi[n] = row.voc;

@@ -57,6 +57,8 @@ export interface DeviceState {
    * poller is disabled (no HA credentials baked) or has never read.
    */
   plug: PlugState | null;
+  /** True (default): the off-board SHT41 drives temp/RH when it answers. */
+  sht_pref: boolean;
 }
 
 export interface PlugState {
@@ -126,6 +128,9 @@ export type Sensors =
       /** Sensirion gas indices 1..500; 0 = still warming up, -1 = no sensor. */
       voc: number;
       nox: number;
+      /** The BME280's own estimate, always present, for the live comparison. */
+      bme_t: number;
+      bme_rh: number;
     };
 
 /**
@@ -181,6 +186,9 @@ export interface History {
   /** Sensirion gas indices 1..500. 0 = the algorithm was still warming up. */
   voc: (number | null)[];
   nox: (number | null)[];
+  /** The BME280 logged beside the SHT41, for the dual-sensor overlays. */
+  bme_t: (number | null)[];
+  bme_rh: (number | null)[];
 }
 
 /**

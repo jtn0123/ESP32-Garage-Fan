@@ -284,12 +284,17 @@ function paintReadouts(): void {
   if (!s || i < 0) return;
   const tf = at(s.tf, i);
   const of = at(s.of, i);
+  const bt = at(s.bt, i);
   $('roT').textContent =
-    (tf === null ? '–' : `${tf.toFixed(1)}°`) + (of === null ? '' : ` / out ${of.toFixed(1)}°`);
+    (tf === null ? '–' : `${tf.toFixed(1)}°`) +
+    (of === null ? '' : ` / out ${of.toFixed(1)}°`) +
+    (bt === null ? '' : ` · bme ${bt.toFixed(1)}°`);
   const spd = s.spd.length ? s.spd[i] : undefined;
   $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
   const rh = at(s.rh, i);
-  $('roH').textContent = rh === null ? '' : `${rh.toFixed(0)}%`;
+  const bh = at(s.bh, i);
+  $('roH').textContent =
+    rh === null ? '' : `${rh.toFixed(0)}%${bh === null ? '' : ` · bme ${bh.toFixed(0)}%`}`;
   const hpa = at(s.hpa, i);
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   const bv = at(s.bv, i);
@@ -342,7 +347,7 @@ export function drawAll(): void {
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub);
+      (v) => v.toFixed(0), 'no humidity data', view.scrub, undefined, s.bh);
   }
   if (view.rows.pressure) {
     // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still

@@ -44,6 +44,8 @@ export interface Series {
   noxr: (number | null)[];
   voc: (number | null)[];  // gas indices; 0 = warming
   nox: (number | null)[];
+  bt: (number | null)[];   // the BME280 thermometer, F, beside tf
+  bh: (number | null)[];   // the BME280 hygrometer, %RH, beside rh
 }
 
 /**
@@ -121,6 +123,8 @@ export function build(h: History): Series {
     noxr: pad<number | null>(h.nox_raw, n, null),
     voc: pad<number | null>(h.voc, n, null),
     nox: pad<number | null>(h.nox, n, null),
+    bt: pad<number | null>(h.bme_t, n, null).map((v) => (v === null ? null : (v * 9) / 5 + 32)),
+    bh: pad<number | null>(h.bme_rh, n, null),
   };
 }
 

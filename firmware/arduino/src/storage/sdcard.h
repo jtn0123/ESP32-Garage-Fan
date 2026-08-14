@@ -58,7 +58,8 @@ void on_network_up();
  * absent rather than as zero.
  */
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox);
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox,
+                float bme_t, float bme_rh);
 
 /**
  * Append one flight-recorder line (newline added) to /events.log, rotating
@@ -96,6 +97,8 @@ struct Samples {
   int32_t* nox_raw;
   int16_t* voc;
   int16_t* nox;
+  float* bme_t;   // the second thermometer, for the comparison rows
+  float* bme_rh;
 };
 
 /**
