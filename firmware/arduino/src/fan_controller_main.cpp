@@ -32,6 +32,7 @@
 #include "fan/control.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
+#include "sensors/air.h"
 #include "net/weather.h"
 #include "net/web.h"
 #include "net/wifi_link.h"
@@ -43,6 +44,7 @@
 #include "system/crashlog.h"
 #include "system/crumb_ring.h"
 #include "system/eventlog.h"
+#include "system/reboot.h"
 #include "system/odometer.h"
 #include "system/ota_rollback.h"
 #include "system/timeutil.h"
@@ -77,12 +79,20 @@ static void sample_climate() {
     row.speed = (int8_t)(fan::speed() < 0 ? 0 : fan::speed());
     row.batt_v = battery::kind() ? battery::volts() : NAN;
     row.chg = battery::kind() ? (battery::charging() ? 1 : 0) : -1;
+    // The plug reading is only fresh-ish (15 s poll); a minute-old value is
+    // NAN here so the chart shows a hole rather than a stale flat line.
+    row.watts = (plug::age_s() >= 0 && plug::age_s() < 60) ? plug::watts() : NAN;
+    row.voc_raw = air::voc_raw();
+    row.nox_raw = air::nox_raw();
+    row.voc = (int16_t)air::voc_index();
+    row.nox = (int16_t)air::nox_index();
     history::append(row, time_synced());
     if (time_synced())
       // row.speed, not fan::speed(): the ring stores the clamped value and the
       // CSV used to store the raw one, so a sample taken during an /api/raw
       // sweep left the two records of the same instant disagreeing (0 vs -1).
-      sdcard::log_sample(time(nullptr), t, h, p, row.out_f, row.speed, row.batt_v, row.chg);
+      sdcard::log_sample(time(nullptr), t, h, p, row.out_f, row.speed, row.batt_v, row.chg,
+                         row.watts, row.voc_raw, row.nox_raw, row.voc, row.nox);
     t_sd = millis();
     mqtt_link::publish_climate(t, h, p);
   }
@@ -162,6 +172,7 @@ void setup() {
   if (sdcard::quarantined())
     eventlog::log("sd", "previous boot died in an SD op -- card quarantined");
   Wire.begin();
+  air::begin();  // probe the STEMMA chain while the bus is quiet
   SPI.begin();
   display::begin();
   // SD stays OUT of the boot path (first mount ~60 s later from loop): a
@@ -177,6 +188,7 @@ void setup() {
 }
 
 void loop() {
+  air::tick();  // 1 Hz SGP41 cadence, self rate-limited; ~10 ms when it runs
   if (wifi_link::connected() && !g_services_up) {
     g_services_up = true;
     // Mount the card before the web server takes clients: sdcard.h explains
@@ -256,9 +268,7 @@ void loop() {
   }
   if (!mqtt_link::ever_connected() && !ota_rollback_image_confirmed() &&
       millis() > kUnconfirmedDeadlineMs) {
-    Serial.println("[OTA] unconfirmed image never reached broker; restarting");
-    Serial.flush();
-    esp_restart();
+    sysreboot::restart("unconfirmed image never reached the broker; restarting");
   }
   delay(2);
 }

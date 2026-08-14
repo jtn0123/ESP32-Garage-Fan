@@ -27,6 +27,7 @@
 #include "net/web_debug.h"
 #include "net/web_ota.h"
 #include "net/wifi_link.h"
+#include "sensors/air.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
 #include "storage/history.h"
@@ -552,8 +553,16 @@ static void handle_sensors() {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
-  char buf[128];
-  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
+  // The air chain rides along: which source produced temp/rh, and the gas
+  // readings with raws -- meaningful from the first second -- beside indices
+  // that stay 0 while Sensirion's algorithm warms up. The console labels the
+  // warm-up rather than hiding it.
+  char buf[256];
+  snprintf(buf, sizeof(buf),
+           "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f,"
+           "\"source\":\"%s\",\"voc_raw\":%ld,\"nox_raw\":%ld,\"voc\":%ld,\"nox\":%ld}",
+           t, h, p, air::sht_ok() ? "sht41" : "bme280", (long)air::voc_raw(),
+           (long)air::nox_raw(), (long)air::voc_index(), (long)air::nox_index());
   g_http.send(200, "application/json", buf);
 }
 
@@ -583,6 +592,20 @@ static void write_series(http_tx::Chunked& tx, const char* name, const float* v,
     }
     if (i + 1 < n)
       tx.print(",");
+  }
+  tx.print("]");
+}
+
+// Gas columns: -1 (no sensor / pre-sensor rows) serializes as null so the
+// chart shows absence, not a plausible -1. 0 (algorithm warming) is a VALUE.
+template <typename T>
+static void write_gas(http_tx::Chunked& tx, const char* name, const T* v, uint16_t n) {
+  tx.printf("\"%s\":[", name);
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
+    if (v[i] < 0)
+      tx.print(i + 1 < n ? "null," : "null");
+    else
+      tx.printf(i + 1 < n ? "%ld," : "%ld", static_cast<long>(v[i]));
   }
   tx.print("]");
 }
@@ -632,6 +655,11 @@ struct GraphScratch {
   float* p = nullptr;
   float* o = nullptr;
   float* b = nullptr;
+  float* w = nullptr;
+  int32_t* vr = nullptr;
+  int32_t* nr = nullptr;
+  int16_t* vi = nullptr;
+  int16_t* ni = nullptr;
   int8_t* sp = nullptr;
   int8_t* cg = nullptr;
   bool ready = false;
@@ -657,8 +685,14 @@ bool scratch_ready() {
   g_scratch.b = psram_array<float>(kGraphMaxPts);
   g_scratch.sp = psram_array<int8_t>(kGraphMaxPts);
   g_scratch.cg = psram_array<int8_t>(kGraphMaxPts);
+  g_scratch.w = psram_array<float>(kGraphMaxPts);
+  g_scratch.vr = psram_array<int32_t>(kGraphMaxPts);
+  g_scratch.nr = psram_array<int32_t>(kGraphMaxPts);
+  g_scratch.vi = psram_array<int16_t>(kGraphMaxPts);
+  g_scratch.ni = psram_array<int16_t>(kGraphMaxPts);
   g_scratch.ready = g_scratch.ts && g_scratch.t && g_scratch.h && g_scratch.p && g_scratch.o &&
-                    g_scratch.b && g_scratch.sp && g_scratch.cg;
+                    g_scratch.b && g_scratch.sp && g_scratch.cg && g_scratch.w && g_scratch.vr &&
+                    g_scratch.nr && g_scratch.vi && g_scratch.ni;
   if (!g_scratch.ready) {
     // Release the blocks that DID succeed. Without this a partial failure
     // leaked them and the next chart request allocated a fresh partial set --
@@ -672,6 +706,11 @@ bool scratch_ready() {
     free(g_scratch.b);
     free(g_scratch.sp);
     free(g_scratch.cg);
+    free(g_scratch.w);
+    free(g_scratch.vr);
+    free(g_scratch.nr);
+    free(g_scratch.vi);
+    free(g_scratch.ni);
     g_scratch = GraphScratch{};
     eventlog::log("web", "graph scratch alloc failed");
   }
@@ -726,7 +765,8 @@ static void handle_history() {
   http_tx::Chunked tx(g_http.client(), "application/json");
   if (have_card) {
     const GraphScratch& s = g_scratch;
-    const sdcard::Samples dst{s.ts, s.t, s.h, s.p, s.o, s.b, s.sp, s.cg};
+    const sdcard::Samples dst{s.ts, s.t, s.h, s.p, s.o, s.b, s.sp, s.cg,
+                              s.w,  s.vr, s.nr, s.vi, s.ni};
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
     const uint16_t n = sdcard::read_range(cutoff, dst, kGraphMaxPts);
     // interval_s is now only a nominal hint for gap detection; ts[] carries
@@ -748,6 +788,16 @@ static void handle_history() {
     write_ints(tx, "spd", s.sp, n);
     tx.print(",");
     write_ints(tx, "chg", s.cg, n);
+    tx.print(",");
+    write_series(tx, "watts", s.w, n, 1);
+    tx.print(",");
+    write_gas(tx, "voc_raw", s.vr, n);
+    tx.print(",");
+    write_gas(tx, "nox_raw", s.nr, n);
+    tx.print(",");
+    write_gas(tx, "voc", s.vi, n);
+    tx.print(",");
+    write_gas(tx, "nox", s.ni, n);
     tx.print("}");
   } else {
     // No card and days=1: the ring is all there is, and the response says so
@@ -769,6 +819,16 @@ static void handle_history() {
     write_ints(tx, "spd", history::speed(), rows);
     tx.print(",");
     write_ints(tx, "chg", history::chg(), rows);
+    tx.print(",");
+    write_series(tx, "watts", history::watts(), rows, 1);
+    tx.print(",");
+    write_gas(tx, "voc_raw", history::voc_raw(), rows);
+    tx.print(",");
+    write_gas(tx, "nox_raw", history::nox_raw(), rows);
+    tx.print(",");
+    write_gas(tx, "voc", history::voc(), rows);
+    tx.print(",");
+    write_gas(tx, "nox", history::nox(), rows);
     tx.print("}");
   }
   tx.end();

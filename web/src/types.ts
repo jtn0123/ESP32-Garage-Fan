@@ -111,7 +111,22 @@ export interface Stats {
 }
 
 /** GET /api/sensors -- `ok:false` when the BME280 is missing or the ring is empty. */
-export type Sensors = { ok: false } | { ok: true; temp_c: number; rh: number; hpa: number };
+export type Sensors =
+  | { ok: false }
+  | {
+      ok: true;
+      temp_c: number;
+      rh: number;
+      hpa: number;
+      /** Which sensor produced temp/rh: the off-board SHT41 or the BME280 fallback. */
+      source: 'sht41' | 'bme280';
+      /** SGP41 raw ticks, meaningful from the first second; -1 = no sensor. */
+      voc_raw: number;
+      nox_raw: number;
+      /** Sensirion gas indices 1..500; 0 = still warming up, -1 = no sensor. */
+      voc: number;
+      nox: number;
+    };
 
 /**
  * The 4xx body every endpoint sends for a malformed request. api.ts throws
@@ -158,6 +173,14 @@ export interface History {
   spd: number[];
   batt_v: (number | null)[];
   chg: number[]; // 1 charging, 0 not, -1 no battery
+  /** Fan draw measured at the plug; null before the meter existed (pre-1.14.47 rows). */
+  watts: (number | null)[];
+  /** SGP41 raw ticks -- meaningful from the first sample; null = no sensor / old row. */
+  voc_raw: (number | null)[];
+  nox_raw: (number | null)[];
+  /** Sensirion gas indices 1..500. 0 = the algorithm was still warming up. */
+  voc: (number | null)[];
+  nox: (number | null)[];
 }
 
 /**

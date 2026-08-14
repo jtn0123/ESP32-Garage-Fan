@@ -28,6 +28,11 @@ const RING_1D: History = {
   batt_v: [4.2, 4.21, 4.2, 4.2, 4.22, 4.21, 4.2],
   spd: [5, 9, 7, 9, 9, 9, 9],
   chg: [1, 1, 1, 1, 1, 1, 1],
+  watts: [12.4, 20.3, 15.4, 20.3, 20.1, 20.6, 20.3],
+  voc_raw: [30100, 30125, 30140, 30160, 30150, 30170, 30190],
+  nox_raw: [15800, 15805, 15810, 15810, 15815, 15820, 15820],
+  voc: [0, 0, 0, 93, 95, 97, 96],
+  nox: [0, 0, 0, 1, 1, 1, 1],
 };
 
 /**
@@ -48,6 +53,12 @@ const SD_7D: History = {
   batt_v: [4.1, 4.12, 4.15, 4.18],
   spd: [3, 5, 7, 9],
   chg: [1, 1, 0, 0],
+  // Old rows: the meter and the air chain did not exist yet.
+  watts: [null, null, null, null],
+  voc_raw: [null, null, null, null],
+  nox_raw: [null, null, null, null],
+  voc: [null, null, null, null],
+  nox: [null, null, null, null],
 };
 
 describe('7/30-day history now matches the 24h shape', () => {

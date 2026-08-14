@@ -58,7 +58,7 @@ void on_network_up();
  * absent rather than as zero.
  */
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg);
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox);
 
 /**
  * Append one flight-recorder line (newline added) to /events.log, rotating
@@ -87,10 +87,15 @@ struct Samples {
   float* temp_c;
   float* rh;
   float* hpa;
-  float* out_f;   // NAN when the row recorded no yard reading
-  float* batt_v;  // NAN on pre-1.14.23 rows
+  float* out_f;     // NAN when the row recorded no yard reading
+  float* batt_v;    // NAN on pre-1.14.23 rows
   int8_t* spd;
-  int8_t* chg;  // 1 charging, 0 not, -1 unknown
+  int8_t* chg;      // 1 charging, 0 not, -1 unknown
+  float* watts;     // NAN on pre-1.14.47 rows
+  int32_t* voc_raw; // -1 on pre-1.14.47 rows
+  int32_t* nox_raw;
+  int16_t* voc;
+  int16_t* nox;
 };
 
 /**

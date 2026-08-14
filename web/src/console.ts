@@ -295,6 +295,24 @@ function paintReadouts(): void {
   const bv = at(s.bv, i);
   $('roB').textContent =
     bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
+  const w = at(s.w, i);
+  $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
+  const voc = at(s.voc, i);
+  const vocr = at(s.vocr, i);
+  $('roV').textContent =
+    voc === null && vocr === null
+      ? ''
+      : voc !== null && voc > 0
+        ? `index ${voc.toFixed(0)}${vocr === null ? '' : ` · raw ${vocr.toFixed(0)}`}`
+        : `warming up${vocr === null ? '' : ` · raw ${vocr.toFixed(0)}`}`;
+  const nox = at(s.nox, i);
+  const noxr = at(s.noxr, i);
+  $('roN').textContent =
+    nox === null && noxr === null
+      ? ''
+      : nox !== null && nox > 0
+        ? `index ${nox.toFixed(0)}${noxr === null ? '' : ` · raw ${noxr.toFixed(0)}`}`
+        : `warming up${noxr === null ? '' : ` · raw ${noxr.toFixed(0)}`}`;
 }
 
 /**
@@ -333,6 +351,23 @@ export function drawAll(): void {
       (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
+  if (view.rows.power) {
+    drawSimple($<HTMLCanvasElement>('cv_w'), s, s.w, SERIES_COLOURS.power,
+      (v) => v.toFixed(1), 'no plug data yet', view.scrub);
+  }
+  // Gas rows plot the INDEX once the algorithm produces one, and the raw
+  // ticks before that -- the user asked to watch the warm-up, not to stare at
+  // a flat zero for the hours Sensirion's blackout lasts.
+  if (view.rows.voc) {
+    const warming = !s.voc.some((v) => v !== null && v > 0);
+    drawSimple($<HTMLCanvasElement>('cv_v'), s, warming ? s.vocr : s.voc, SERIES_COLOURS.voc,
+      (v) => v.toFixed(0), 'no VOC sensor data', view.scrub);
+  }
+  if (view.rows.nox) {
+    const warming = !s.nox.some((v) => v !== null && v > 0);
+    drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
+      (v) => v.toFixed(0), 'no NOx sensor data', view.scrub);
+  }
   drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
   paintReadouts();
 }

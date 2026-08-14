@@ -32,6 +32,11 @@ const float* rh();
 const float* hpa();
 const float* out_f();
 const float* batt_v();
+const float* watts();
+const int32_t* voc_raw();
+const int32_t* nox_raw();
+const int16_t* voc();
+const int16_t* nox();
 const int8_t* speed();
 const int8_t* chg();
 

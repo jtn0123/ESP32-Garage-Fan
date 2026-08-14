@@ -7,7 +7,7 @@ import type { DeviceInfo, DeviceState, History, Sensors, Stats } from './types.j
 import type { Series } from './series.js';
 import type { UpdateStatus } from './update.js';
 
-export type RowKey = 'fan' | 'humidity' | 'pressure' | 'battery';
+export type RowKey = 'fan' | 'humidity' | 'pressure' | 'battery' | 'power' | 'voc' | 'nox';
 
 export interface View {
   state: DeviceState | null;
@@ -56,7 +56,7 @@ export const view: View = {
   scopeOpen: false,
   previewOpen: false,
   tip: -1,
-  rows: { fan: true, humidity: false, pressure: false, battery: false },
+  rows: { fan: true, humidity: false, pressure: false, battery: false, power: false, voc: false, nox: false },
   phase: 0,
   raf: null,
   lastOk: 0,
@@ -68,6 +68,9 @@ export const ROW_IDS: Record<RowKey, { sub: string; canvas: string; readout: str
   humidity: { sub: 'sub_h', canvas: 'cv_h', readout: 'roH' },
   pressure: { sub: 'sub_p', canvas: 'cv_p', readout: 'roP' },
   battery: { sub: 'sub_b', canvas: 'cv_b', readout: 'roB' },
+  power: { sub: 'sub_w', canvas: 'cv_w', readout: 'roW' },
+  voc: { sub: 'sub_v', canvas: 'cv_v', readout: 'roV' },
+  nox: { sub: 'sub_n', canvas: 'cv_n', readout: 'roN' },
 };
 
 export const STATUS_BITS = [

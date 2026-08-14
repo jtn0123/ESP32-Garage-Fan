@@ -114,7 +114,7 @@ void mount_guarded() {
 }
 
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg) {
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox) {
   if (!g_ok)
     return;
   struct tm tm_now;
@@ -128,12 +128,15 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed, f
     g_ok = false;  // card yanked; re-detect on reboot
     return;
   }
-  char line[96];
-  // batt_v/chg appended 1.14.23 so the card carries the same seven series the
-  // console draws; read_range still parses the six-field rows written before.
-  // -999 is the "no reading" sentinel for both float columns.
-  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d\n", (long)now, t, h, p,
-                   isnan(out_f) ? -999.0f : out_f, speed, isnan(batt_v) ? -999.0f : batt_v, chg);
+  char line[144];
+  // batt_v/chg appended 1.14.23; watts + the four SGP41 columns appended
+  // 1.14.47 (plug meter and the air chain). read_range parses the 6- and
+  // 8-field rows written before either change. -999 is the "no reading"
+  // sentinel for float columns, -1 for the gas columns.
+  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d\n",
+                   (long)now, t, h, p, isnan(out_f) ? -999.0f : out_f, speed,
+                   isnan(batt_v) ? -999.0f : batt_v, chg, isnan(watts) ? -999.0f : watts,
+                   (long)voc_raw, (long)nox_raw, voc, nox);
   if (n < 0 || n >= static_cast<int>(sizeof(line))) {
     f.close();  // a truncated row would corrupt the CSV for every later reader
     CRUMB_CLEAR();
@@ -246,6 +249,11 @@ uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
         out.spd[kept] = row.spd;
         out.batt_v[kept] = row.batt_v;
         out.chg[kept] = row.chg;
+        out.watts[kept] = row.watts;
+        out.voc_raw[kept] = row.voc_raw;
+        out.nox_raw[kept] = row.nox_raw;
+        out.voc[kept] = row.voc;
+        out.nox[kept] = row.nox;
         kept++;
       }
       f.close();

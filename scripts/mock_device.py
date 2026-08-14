@@ -217,6 +217,24 @@ def _history_uncached():
         batt.append(round(4.20 - (i % 40) * 0.005, 2))
         spd.append(i % 10)
         chg.append(1 if i % 3 else 0)
+    # The watt meter and the air chain: watts follows the logged fan speed
+    # through the baseline table; the SGP41 columns model a sensor that was
+    # plugged in mid-history -- nulls (absent), then raws with index 0
+    # (warming), then indices -- so the console's warm-up handling is
+    # exercised by the default data set.
+    base_w = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
+    watts = [round(base_w[min(sp, 12)] + (i % 3) * 0.2, 1) for i, sp in enumerate(spd)]
+    vocr, noxr, voc, nox = [], [], [], []
+    third = max(1, n // 3)
+    for i in range(n):
+        if i < third:
+            vocr.append(None); noxr.append(None); voc.append(None); nox.append(None)
+        elif i < 2 * third:
+            vocr.append(29000 + (i % 40) * 20); noxr.append(15600 + (i % 25) * 8)
+            voc.append(0); nox.append(0)
+        else:
+            vocr.append(30000 + (i % 40) * 20); noxr.append(15800 + (i % 25) * 8)
+            voc.append(80 + (i % 30)); nox.append(1 + (i % 3))
     if SCEN["corrupt"]:  # what a bad CSV row must become
         temp[5] = None
         hpa[7] = None
@@ -224,6 +242,11 @@ def _history_uncached():
         "source": "sd" if SCEN["card"] else "ring",
         "interval_s": STEP,
         "ts": ts,
+        "watts": watts,
+        "voc_raw": vocr,
+        "nox_raw": noxr,
+        "voc": voc,
+        "nox": nox,
         "temp_c": temp,
         "rh": rh,
         "hpa": hpa,
@@ -603,7 +626,21 @@ class H(BaseHTTPRequestHandler):
         return self._json(200, STATS)
 
     def _sensors(self, _query):
-        return self._json(200, {"ok": True, "temp_c": 23.86, "rh": 38.9, "hpa": 999.9})
+        return self._json(
+            200,
+            {
+                "ok": True,
+                "temp_c": 23.86,
+                "rh": 38.9,
+                "hpa": 999.9,
+                # The off-board chain, warmed up: raws plus live indices.
+                "source": "sht41",
+                "voc_raw": 30125,
+                "nox_raw": 15810,
+                "voc": 93,
+                "nox": 1,
+            },
+        )
 
     def _events(self, _query):
         now = int(time.time())

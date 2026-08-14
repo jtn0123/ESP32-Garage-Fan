@@ -26,6 +26,11 @@ struct CsvRow {
   float hpa = NAN;
   float out_f = NAN;
   float batt_v = NAN;
+  float watts = NAN;    // fan draw at the plug (1.14.47+ rows)
+  int32_t voc_raw = -1; // SGP41 raw ticks (1.14.47+ rows)
+  int32_t nox_raw = -1;
+  int16_t voc = -1;     // gas indices; 0 = algorithm was warming
+  int16_t nox = -1;
   int8_t spd = 0;
   int8_t chg = -1;
   bool valid = false;  // false when the line is not a usable sample
@@ -37,9 +42,11 @@ constexpr float kAbsentBelow = -100.0f;
 /**
  * Decode one CSV line.
  *
- * Accepts both widths. A line is valid only with at least epoch + the three
- * always-present readings; anything shorter (a torn tail row, a stray blank,
- * a header) is rejected rather than half-read.
+ * Accepts every width this firmware has ever written: 6 fields (pre-1.14.23),
+ * 8 (batt_v/chg), and 13 (watts + the four SGP41 columns, 1.14.47). A line is
+ * valid only with at least epoch + the three always-present readings;
+ * anything shorter (a torn tail row, a stray blank, a header) is rejected
+ * rather than half-read.
  */
 inline CsvRow parse_csv_row(const char* line) {
   CsvRow r;
@@ -53,9 +60,11 @@ inline CsvRow parse_csv_row(const char* line) {
   // Initialised: sscanf only assigns the fields that exist, and the compiler
   // cannot correlate that with `got`, so -Wmaybe-uninitialized can fire -- and
   // CI builds with -Werror.
-  float tv = NAN, hv = NAN, pv = NAN, ov = NAN, bv = NAN;
-  int sp = 0, cg = -1;
-  const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d", &tv, &hv, &pv, &ov, &sp, &bv, &cg);
+  float tv = NAN, hv = NAN, pv = NAN, ov = NAN, bv = NAN, wv = NAN;
+  int sp = 0, cg = -1, vi = -1, ni = -1;
+  long vr = -1, nr = -1;
+  const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d,%f,%ld,%ld,%d,%d", &tv, &hv, &pv, &ov,
+                         &sp, &bv, &cg, &wv, &vr, &nr, &vi, &ni);
   if (got < 3)
     return r;
 
@@ -67,6 +76,11 @@ inline CsvRow parse_csv_row(const char* line) {
   r.spd = got >= 5 ? static_cast<int8_t>(sp) : 0;
   r.batt_v = (got >= 6 && bv > 0.0f) ? bv : NAN;
   r.chg = got >= 7 ? static_cast<int8_t>(cg) : -1;
+  r.watts = (got >= 8 && wv > kAbsentBelow) ? wv : NAN;
+  r.voc_raw = got >= 9 ? static_cast<int32_t>(vr) : -1;
+  r.nox_raw = got >= 10 ? static_cast<int32_t>(nr) : -1;
+  r.voc = got >= 11 ? static_cast<int16_t>(vi) : -1;
+  r.nox = got >= 12 ? static_cast<int16_t>(ni) : -1;
   r.valid = true;
   return r;
 }

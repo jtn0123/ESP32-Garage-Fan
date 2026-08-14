@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "config.h"
+#include "sensors/air.h"
 #include "sensors/battery.h"
 #include "system/timeutil.h"
 
@@ -96,8 +97,17 @@ bool sample(float* t, float* h, float* p) {
     g_ok = false;  // sensor wedged or unplugged; re-probe next sample
     return false;
   }
-  *t = corrected(t_raw);
-  *h = hv;
+  // The SHT41 hangs 18 inches off the board precisely so its reading needs no
+  // self-heating correction; when it answers, it IS the garage temperature
+  // and humidity, and the offset knobs only matter for this BME280 fallback.
+  // Pressure always comes from the BME280 -- the SHT41 has no barometer.
+  if (air::sht_ok() && !isnan(air::temp_c())) {
+    *t = air::temp_c();
+    *h = air::rh();
+  } else {
+    *t = corrected(t_raw);
+    *h = hv;
+  }
   *p = pv;
   g_inside_c = *t;
   g_inside_ms = millis();
@@ -105,6 +115,12 @@ bool sample(float* t, float* h, float* p) {
 }
 
 void refresh_inside() {
+  // SHT41 first, same preference as sample() -- and the same reason.
+  if (air::sht_ok() && !isnan(air::temp_c())) {
+    g_inside_c = air::temp_c();
+    g_inside_ms = millis();
+    return;
+  }
   if (!g_ok)
     return;
   const float t = g_bme.readTemperature();

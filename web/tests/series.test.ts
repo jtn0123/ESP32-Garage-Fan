@@ -15,6 +15,11 @@ const h = (over: Partial<History> = {}): History => ({
   spd: [0, 9, 9],
   batt_v: [3.9, null, 4.0],
   chg: [0, 1, 1],
+  watts: [null, 20.3, 21.0],
+  voc_raw: [null, 30125, 30200],
+  nox_raw: [null, 15800, 15810],
+  voc: [null, 0, 87],
+  nox: [null, 0, 1],
   ...over,
 });
 

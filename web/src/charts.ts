@@ -377,4 +377,12 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
   }
 }
 
-export const SERIES_COLOURS = { fan: AC, humidity: RH, pressure: OK, battery: PU } as const;
+export const SERIES_COLOURS = {
+  fan: AC,
+  humidity: RH,
+  pressure: OK,
+  battery: PU,
+  power: '#e8834a',
+  voc: '#22a06b',
+  nox: '#b98add',
+} as const;
