@@ -76,6 +76,10 @@ STATE = {
     "mqtt": True,
     "uptime_s": 1837,
     "ip": "127.0.0.1",
+    # The Tapo watt meter on the fan's supply, as net/plug reports it. The
+    # SCEN plug knob swaps in the disagreement case; "none" serves null, the
+    # no-meter build.
+    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
 }
 DEVICE = {
     "id": "garage-fan-d69dbe",
@@ -114,6 +118,8 @@ SCEN = {
     # The panel before its first refresh: the firmware answers ready:false
     # until then, and the console has a branch for it that nothing could reach.
     "panel_ready": True,
+    # "ok" agree, "bad" sustained disagreement, "none" no meter at all
+    "plug": "ok",
 }
 
 
@@ -129,12 +135,17 @@ SCEN_SPEC = {
     "flat_rh": bool,
     "down": bool,
     "panel_ready": bool,
+    "plug": ("choice", "ok", "bad", "none"),
 }
 
 
 def coerce_scen(key: str, raw: str):
     """Whitelisted parse of one knob. Raises ValueError on anything else."""
     spec = SCEN_SPEC[key]
+    if isinstance(spec, tuple) and spec[0] == "choice":
+        if raw not in spec[1:]:
+            raise ValueError(f"{key} takes one of {'|'.join(spec[1:])}")
+        return raw
     if spec is bool:
         if raw not in ("true", "false"):
             raise ValueError(f"{key} takes true|false")
@@ -573,6 +584,16 @@ class H(BaseHTTPRequestHandler):
         return self._send(200, console_bytes(), "text/html")
 
     def _state(self, _query):
+        mode = SCEN["plug"]
+        if mode == "none":
+            STATE["plug"] = None
+        elif mode == "bad":
+            # The failure this exists to catch: commanded off, meter says full.
+            STATE["plug"] = {"w": 43.5, "v": 120.9, "age_s": 3, "verdict": -1}
+        else:
+            speed = max(0, int(STATE["speed"]))
+            base = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
+            STATE["plug"] = {"w": base[min(speed, 12)], "v": 120.9, "age_s": 3, "verdict": 1}
         return self._json(200, STATE)
 
     def _device(self, _query):

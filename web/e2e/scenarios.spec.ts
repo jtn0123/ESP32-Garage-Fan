@@ -164,3 +164,38 @@ test('recovering from an outage repaints the charts', async ({ page }) => {
     })
     .toBeGreaterThan(0);
 });
+
+/**
+ * The watt meter on the fan's supply -- the link's only feedback.
+ *
+ * The DRAW cell prefers the measured watts over the cubic estimate, the PLUG
+ * status bit carries watts and volts, and a sustained disagreement raises the
+ * one alert this page can raise that nothing else can: the fan ran at full
+ * power for a day while everything on the device honestly said OFF
+ * (2026-08-13), and only the meter could have said so.
+ */
+test('the DRAW cell shows the measured watts, not the estimate', async ({ page }) => {
+  await openConsole(page);
+  // Pin the speed: specs from other files share this worker's mock and leave
+  // whatever speed they last set. At 9 the baseline table says 20.3 W -- the
+  // cubic estimate said 47 W, which is what this cell used to show.
+  await page.request.post('/api/set?speed=9');
+  await expect(page.locator('#mW')).toHaveText('20.3 W', { timeout: 15_000 });
+  await expect(page.locator('#stats')).toContainText('20.3 W · 120.9 V');
+});
+
+test('a plug disagreement raises the warning banner', async ({ page }) => {
+  await scen(page, { plug: 'bad' });
+  await openConsole(page);
+  await expect(page.locator('#plugwarn')).toBeVisible();
+  await expect(page.locator('#plugwarn')).toContainText(/does not match/i);
+});
+
+test('no meter means the estimate and no banner, not a crash', async ({ page }) => {
+  await scen(page, { plug: 'none' });
+  await openConsole(page);
+  await expect(page.locator('#plugwarn')).toBeHidden();
+  await expect(page.locator('#stats')).toContainText('no meter');
+  // The estimate path still fills DRAW from /api/stats.
+  await expect(page.locator('#mW')).toHaveText(/W$/);
+});

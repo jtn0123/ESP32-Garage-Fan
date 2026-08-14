@@ -31,6 +31,7 @@
 #include "esp_task_wdt.h"
 #include "fan/control.h"
 #include "net/mqtt_link.h"
+#include "net/plug.h"
 #include "net/weather.h"
 #include "net/web.h"
 #include "net/wifi_link.h"
@@ -250,7 +251,8 @@ void loop() {
     sdcard::retry_tick();
     eventlog::flush_tick();
     weather::tick();       // internally rate-limited to one fetch per 10 min
-    esp_task_wdt_reset();  // a blackholed resolver makes that fetch a long one
+    plug::tick();          // watt-meter poll, rate-limited to one per 15 s
+    esp_task_wdt_reset();  // a blackholed resolver makes those fetches long ones
   }
   if (!mqtt_link::ever_connected() && !ota_rollback_image_confirmed() &&
       millis() > kUnconfirmedDeadlineMs) {

@@ -87,6 +87,11 @@ export const STATUS_BITS = [
     body: 'Live cell voltage of the backup pack — the same series plotted in the BATTERY row. Roughly 4.10 V is full and 3.3 V is empty. The pack keeps the controller logging when the USB supply drops out; the fan itself runs from its own 12 V brick.',
   },
   {
+    key: 'PLUG',
+    title: 'MEASURED DRAW',
+    body: 'What the Tapo watt meter on the fan’s supply actually measures, polled out of Home Assistant by the controller. This is the fan link’s only feedback — the control wire has no tach — so a draw that disagrees with the commanded speed is the one signal that catches a fan not obeying.',
+  },
+  {
     key: 'T-OFFSET',
     title: 'PROBE CALIBRATION',
     body: 'A fixed correction added to every garage temperature reading to cancel heat the board adds to its own sensor. Charging warms the board much more than idle does, so there are two values — set both in Settings › Sensors after comparing against a reference thermometer.',

@@ -62,6 +62,9 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #boff{border-color:#3a2626;color:#e0a9a9}
 #boff.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
 
+/* ---- plug disagreement ---- */
+#plugwarn{margin-top:14px;padding:10px 14px;border:1px solid #7f1d1d;border-radius:8px;background:rgba(127,29,29,.14);color:#e0a9a9;font-size:13.5px;max-width:660px;text-wrap:pretty}
+
 /* ---- metric strip ---- */
 #metrics{display:flex;gap:44px;margin-top:26px;padding-top:16px;border-top:1px solid var(--ln);flex-wrap:wrap}
 .mv{font-size:15px;color:var(--tx);margin-top:3px}

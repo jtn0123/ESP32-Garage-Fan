@@ -224,6 +224,12 @@ function bitValues(): { value: string; colour: string }[] {
     { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
     { value: card, colour: cardColour },
     { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
+    {
+      value: s.plug
+        ? `${s.plug.w.toFixed(1)} W${s.plug.v !== null ? ` · ${s.plug.v.toFixed(1)} V` : ''}`
+        : 'no meter',
+      colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
+    },
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
     {
@@ -334,7 +340,8 @@ export function drawAll(): void {
 export function paintStats(): void {
   const st = view.stats;
   if (!st) return;
-  $('mW').textContent = `${st.watts_now.toFixed(0)} W`;
+  // The estimate only fills in when there is no watt meter reading.
+  if (!view.state?.plug) $('mW').textContent = `${st.watts_now.toFixed(0)} W`;
   $('mRun').textContent = hoursMinutes(st.run_today_s);
   const tiles: [string, string, string, string][] = [
     ['FAN TODAY', (st.run_today_s / 3600).toFixed(1), 'h', AC],
@@ -429,6 +436,26 @@ export function paint(next?: DeviceState): void {
   $('bauto').textContent = s.auto ? 'auto on' : 'auto off';
   $('boff').className = `pill${s.speed === 0 ? ' on' : ''}`;
   $('mAir').textContent = airflow(s.speed);
+
+  // DRAW prefers the watt meter over the cubic estimate whenever the
+  // controller has a reading; paintStats respects the same preference.
+  if (s.plug) {
+    $('mW').textContent = `${s.plug.w.toFixed(1)} W`;
+    $('mW').title = 'measured at the plug';
+  }
+  // The one alert this page can raise that nothing else can: the meter says
+  // the fan is not doing what it was told (it ran at full power for a day
+  // while everything here honestly said OFF, 2026-08-13).
+  const warn = $('plugwarn');
+  if (s.plug && s.plug.verdict === -1 && !stale) {
+    warn.textContent =
+      `The watt meter reads ${s.plug.w.toFixed(1)} W, which does not match ` +
+      `${s.speed > 0 ? `speed ${s.speed}` : 'off'} — the fan may not be following commands. ` +
+      'Check the control cable at the fan port.';
+    show(warn, true);
+  } else {
+    show(warn, false);
+  }
 
   paintPwm();
   paintHero();

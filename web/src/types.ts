@@ -51,6 +51,25 @@ export interface DeviceState {
   mqtt: boolean;
   uptime_s: number;
   ip: string;
+  /**
+   * The Tapo watt meter on the fan's supply, polled out of Home Assistant by
+   * the firmware (net/plug) -- the fan link's only feedback. Null when the
+   * poller is disabled (no HA credentials baked) or has never read.
+   */
+  plug: PlugState | null;
+}
+
+export interface PlugState {
+  w: number; // measured draw, watts
+  v: number | null; // mains voltage; null if HA has no voltage entity
+  age_s: number; // seconds since the reading
+  /**
+   * Does the measured draw agree with the commanded speed?
+   * 1 agree, -1 sustained disagreement (the "commanded 0 W but the meter says
+   * 40 W" failure that ran the fan for a day, 2026-08-13), 0 cannot say
+   * (stale reading, speed changed too recently).
+   */
+  verdict: -1 | 0 | 1;
 }
 
 export interface BatteryState {

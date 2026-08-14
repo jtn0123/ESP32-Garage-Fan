@@ -109,9 +109,9 @@ def check(function: str, *ts_names: str) -> None:
 
 
 def test_state_json_matches_devicestate():
-    # BatteryState is nested under DeviceState.batt and written by the same
-    # function, so both interfaces mirror one writer.
-    check("state_json", "DeviceState", "BatteryState")
+    # BatteryState and PlugState are nested under DeviceState (batt, plug) and
+    # written by the same function, so all three interfaces mirror one writer.
+    check("state_json", "DeviceState", "BatteryState", "PlugState")
 
 
 def test_handle_device_matches_deviceinfo():

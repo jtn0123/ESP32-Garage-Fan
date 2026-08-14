@@ -90,6 +90,17 @@ inline constexpr uint16_t kPeriodUs = 9934;
 inline constexpr uint16_t kHighUs[13] = {0,    3477, 4072, 4868, 5066, 5661, 6159,
                                          6754, 7251, 7847, 8344, 8940, 9437};
 
+// ------------------------------------------------------- plug watt meter
+// Home Assistant entity ids for the Tapo P110M on the fan's supply (see
+// net/plug.h). Overridable for a different plug; HA_URL/HA_TOKEN come from
+// .env via generated_config.h.
+#ifndef FAN_PLUG_POWER_ENTITY
+#define FAN_PLUG_POWER_ENTITY "sensor.garage_garage_fan_tapo_p110m_plug_power"
+#endif
+#ifndef FAN_PLUG_VOLT_ENTITY
+#define FAN_PLUG_VOLT_ENTITY "sensor.garage_garage_fan_tapo_p110m_plug_effective_voltage"
+#endif
+
 // ---------------------------------------------------------------- MQTT
 inline constexpr const char* kTopicSet = "garage/fan/set";
 inline constexpr const char* kTopicState = "garage/fan/state";

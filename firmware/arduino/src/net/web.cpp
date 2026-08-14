@@ -22,6 +22,7 @@
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/origin_check.h"
+#include "net/plug.h"
 #include "net/sse.h"
 #include "net/web_debug.h"
 #include "net/web_ota.h"
@@ -140,6 +141,18 @@ void state_json(char* out, size_t cap) {
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
+  // The watt meter on the fan's supply, or null when the poller is disabled
+  // or has never read. verdict: 1 agree, -1 disagree, 0 cannot say.
+  char plugs[112];
+  if (plug::enabled() && plug::age_s() >= 0) {
+    char vs[16] = "null";
+    if (!isnan(plug::volts()))
+      snprintf(vs, sizeof(vs), "%.1f", plug::volts());
+    snprintf(plugs, sizeof(plugs), "{\"w\":%.1f,\"v\":%s,\"age_s\":%ld,\"verdict\":%d}",
+             plug::watts(), vs, (long)plug::age_s(), plug::verdict());
+  } else {
+    snprintf(plugs, sizeof(plugs), "null");
+  }
   snprintf(out, cap,
            "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
            "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
@@ -151,7 +164,7 @@ void state_json(char* out, size_t cap) {
            "\"sd_total_mb\":%lu,"
            "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
            "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
+           "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
            climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
@@ -161,7 +174,7 @@ void state_json(char* out, size_t cap) {
            sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),
            (unsigned long)sdcard::used_mb(), (unsigned long)sdcard::free_mb(), batt, WiFi.RSSI(),
            (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
-           millis() / 1000UL, WiFi.localIP().toString().c_str());
+           millis() / 1000UL, WiFi.localIP().toString().c_str(), plugs);
 }
 
 void push_state() { sse::push(); }
@@ -203,7 +216,7 @@ static bool crash_auth_ok() {
 static void handle_crash() {
   if (!crash_auth_ok())
     return;
-  char buf[768];
+  char buf[896];
   const size_t n = coredump::to_json(buf, sizeof(buf));
   if (n == 0) {
     g_http.send(500, "application/json", "{\"error\":\"could not read the core dump\"}");
@@ -396,7 +409,7 @@ static void handle_csv() {
 }
 
 static void handle_state() {
-  char buf[768];
+  char buf[896];
   state_json(buf, sizeof(buf));
   g_http.send(200, "application/json", buf);
 }
