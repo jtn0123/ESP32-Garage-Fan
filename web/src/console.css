@@ -127,6 +127,10 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 .crow{display:flex;align-items:baseline;gap:12px;margin:12px 0 2px}
 .crow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--mut)}
 .crow .cd{font-size:11.5px;color:var(--dim)}
+/* Series legend: which line is which sensor. Stays visible on mobile, unlike
+   the prose caption -- knowing which trace is the SHT41 is not optional. */
+.leg{font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
+.leg b{font-weight:700;margin-right:10px}
 .cr{margin-left:auto;font:500 11.5px var(--mono);color:var(--tx);padding-left:12px}
 .srow{display:flex;align-items:baseline;margin:10px 0 0}
 .srow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)}

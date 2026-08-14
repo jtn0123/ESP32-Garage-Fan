@@ -210,9 +210,9 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
   }
 
   line(surf, s, sc, s.of, OUT, true, 2);
-  // The second thermometer, thin and dashed under the primary: where the two
+  // The second thermometer, dashed amber under the primary: where the two
   // diverge is the BME280's self-heating error, visible instead of argued.
-  if (dual) line(surf, s, sc, s.bt, DIM, true, 1.5);
+  if (dual) line(surf, s, sc, s.bt, BME_C, true, 1.8);
   line(surf, s, sc, s.tf, OR, false, 2.2);
 
   if (index >= 0) {
@@ -309,7 +309,7 @@ export function drawSimple(
     return;
   }
   frame(surf, s, sc, fmt, false);
-  if (second && hasData(second)) line(surf, s, sc, second, DIM, true, 1.5);
+  if (second && hasData(second)) line(surf, s, sc, second, BME_C, true, 1.8);
   line(surf, s, sc, values, colour, false, 2);
   crosshair(surf, s, index);
 }
@@ -385,6 +385,9 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
     c.fillText(label, x, 14);
   }
 }
+
+/** The BME280's trace in the dual-sensor overlays -- amber, dashed. */
+export const BME_C = '#d4a72c';
 
 export const SERIES_COLOURS = {
   fan: AC,

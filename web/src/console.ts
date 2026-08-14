@@ -8,6 +8,7 @@
 // way.
 
 import {
+  BME_C,
   SERIES_COLOURS,
   drawAxis,
   drawBattery,
@@ -18,6 +19,7 @@ import {
 import { $, at, el, show } from './dom.js';
 import { ago, airflow, cardTight, clock, hoursMinutes, signed, storage } from './format.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
+import type { Series } from './series.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
 import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
 import type { DeviceState } from './types.js';
@@ -278,6 +280,28 @@ export function paintTip(): void {
   $('tipb').textContent = bit.body;
 }
 
+/** One entry of a series legend: a coloured line sample and the sensor name. */
+function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement {
+  const b = el('b', { textContent: `${dashed ? '╌╌' : '——'} ${name}` });
+  b.style.color = colour;
+  return b;
+}
+
+/** Which line is which sensor, on the rows that carry more than one. */
+function paintLegends(s: Series): void {
+  const dual = s.bt.some((v) => v !== null);
+  $('tleg').replaceChildren(
+    legendEntry(dual ? 'SHT41' : 'GARAGE', OR, false),
+    ...(dual ? [legendEntry('BME280', BME_C, true)] : []),
+    legendEntry('OUTSIDE', OUT, true),
+  );
+  const dualH = s.bh.some((v) => v !== null);
+  $('hleg').replaceChildren(
+    legendEntry(dualH ? 'SHT41' : 'GARAGE', SERIES_COLOURS.humidity, false),
+    ...(dualH ? [legendEntry('BME280', BME_C, true)] : []),
+  );
+}
+
 function paintReadouts(): void {
   const s = view.series;
   const i = sampleIndex();
@@ -286,15 +310,17 @@ function paintReadouts(): void {
   const of = at(s.of, i);
   const bt = at(s.bt, i);
   $('roT').textContent =
-    (tf === null ? '–' : `${tf.toFixed(1)}°`) +
-    (of === null ? '' : ` / out ${of.toFixed(1)}°`) +
-    (bt === null ? '' : ` · bme ${bt.toFixed(1)}°`);
+    (tf === null ? '–' : `${bt === null ? '' : 'sht '}${tf.toFixed(1)}°`) +
+    (bt === null ? '' : ` · bme ${bt.toFixed(1)}°`) +
+    (of === null ? '' : ` · out ${of.toFixed(1)}°`);
   const spd = s.spd.length ? s.spd[i] : undefined;
   $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
   const rh = at(s.rh, i);
   const bh = at(s.bh, i);
   $('roH').textContent =
-    rh === null ? '' : `${rh.toFixed(0)}%${bh === null ? '' : ` · bme ${bh.toFixed(0)}%`}`;
+    rh === null
+      ? ''
+      : `${bh === null ? '' : 'sht '}${rh.toFixed(0)}%${bh === null ? '' : ` · bme ${bh.toFixed(0)}%`}`;
   const hpa = at(s.hpa, i);
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   const bv = at(s.bv, i);
@@ -343,6 +369,7 @@ export function drawAll(): void {
     if (view.historyError) clearPlots(view.historyError);
     return;
   }
+  paintLegends(s);
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub);
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
