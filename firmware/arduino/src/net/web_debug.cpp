@@ -173,6 +173,24 @@ void register_routes(WebServer& http, const char* token) {
   // left the chip. Samples ~30 ms (three wave periods), counts transitions
   // and the high fraction; INPUT_OUTPUT keeps the RMT matrix routing intact
   // while enabling the input buffer.
+  // Every device answering on the I2C bus. Exists for sensor bring-up: the
+  // SHT41 (0x44) and SGP41 (0x59) arrived on a STEMMA chain 2026-08-13 and
+  // the first question is always "does the bus even see them".
+  http.on("/api/i2cscan", []() {
+    if (!authorized())
+      return;
+    char out[256];
+    size_t n = snprintf(out, sizeof(out), "{\"found\":[");
+    bool first = true;
+    for (uint8_t a = 0x08; a < 0x78; ++a) {
+      Wire.beginTransmission(a);
+      if (Wire.endTransmission() == 0 && n < sizeof(out) - 12)
+        n += snprintf(out + n, sizeof(out) - n, "%s\"0x%02x\"", first ? "" : ",", a),
+            first = false;
+    }
+    snprintf(out + n, sizeof(out) - n, "]}");
+    g_http->send(200, "application/json", out);
+  });
   http.on("/api/pinprobe", []() {
     if (!authorized())
       return;

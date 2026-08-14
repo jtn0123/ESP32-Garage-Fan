@@ -359,6 +359,34 @@ static void handle_stats() {
 // window; the default of 30 is the full retention the two-month path window
 // can address. Falls back to the ring only when there is no card, and says so
 // in the filename so the two are never confused.
+// The whole flight-recorder file, not the 2 KB tail. Exists because the
+// sample log showed overnight 15-minute gaps (reboot + slow SNTP skips CSV
+// rows) and the only record of WHY the board rebooted at 22:37 was sitting in
+// /events.log with no way to read more than its last twenty lines.
+static void handle_events_file() {
+  if (!sdcard::ok()) {
+    g_http.send(503, "application/json", "{\"error\":\"no card\"}");
+    return;
+  }
+  File f = SD.open("/events.log", FILE_READ);
+  if (!f) {
+    g_http.send(404, "application/json", "{\"error\":\"no events.log\"}");
+    return;
+  }
+  http_tx::Chunked tx(g_http.client(), "text/plain", "");
+  char buf[512];
+  while (true) {
+    const int got = f.read(reinterpret_cast<uint8_t*>(buf), sizeof(buf));
+    if (got <= 0)
+      break;
+    if (!tx.write(buf, static_cast<size_t>(got)))
+      break;
+    esp_task_wdt_reset();  // ~512 KB worst case through a slow peer
+  }
+  f.close();
+  tx.end();
+}
+
 static void handle_csv() {
   // Same rule as handle_history: a malformed question gets an error, not a
   // plausible answer. This used to clamp silently, so ?days=90 and ?days=abc
@@ -986,6 +1014,7 @@ void begin(Preferences* prefs) {
   g_http.on("/api/history", handle_history);
   g_http.on("/api/stats", handle_stats);
   g_http.on("/download.csv", handle_csv);
+  g_http.on("/events.log", handle_events_file);
   g_http.on("/manifest.json", []() {
     http_tx::send_big(g_http.client(), "application/json", kManifest, sizeof(kManifest) - 1);
   });
