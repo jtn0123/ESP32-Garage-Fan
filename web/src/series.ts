@@ -73,6 +73,7 @@ export function build(h: History): Series {
   // Real per-row epochs from the device. A 0 means SNTP had not synced when
   // that row was taken, which is "unknown", not 1970.
   const stamps = pad<number>(h.ts, n, 0);
+  const step = Number.isFinite(h.interval_s) && h.interval_s > 0 ? h.interval_s : 300;
   // A 0 means SNTP had not synced when that row was taken -- unknown, not 1970.
   const ts = (i: number): number | null => stamps[i] || null;
 
@@ -87,7 +88,11 @@ export function build(h: History): Series {
       span > 0 && t0 !== null && t !== null ? (t - t0) / span : n > 1 ? i / (n - 1) : 0,
     );
     const prev = i > 0 ? ts(i - 1) : null;
-    gap.push(prev !== null && t !== null && t - prev > h.interval_s * 1.5);
+    // A nonsense interval must not turn every row into an outage: at
+    // interval_s <= 0 the comparison below is "any spacing at all", which
+    // flagged EVERY row and (since the outage bands landed) would shade the
+    // whole chart red. Fall back to the firmware's real cadence.
+    gap.push(prev !== null && t !== null && t - prev > step * 1.5);
   }
 
   const night: boolean[] = [];

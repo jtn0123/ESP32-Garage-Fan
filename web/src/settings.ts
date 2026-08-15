@@ -10,6 +10,7 @@
 import * as api from './api.js';
 import { el, show } from './dom.js';
 import { hoursMinutes, storage } from './format.js';
+import { view } from './state.js';
 import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
@@ -245,7 +246,13 @@ export function buildGroups(d: SettingsDeps): Group[] {
           hint: 'Restart reboots into the same slot. "Delete card contents" unlinks every file but leaves the filesystem alone — use it to reclaim space, since Format only rewrites a card that will not mount. Both need the update token.',
           actions: [
             // 30 days off the card, not the 24 h RAM ring this used to serve.
-            { text: 'Download CSV (30 d)', href: '/download.csv?days=30' },
+            {
+              // Follows the chart's selected range: offering 60 days on the
+              // chart while the export silently capped at 30 meant the data
+              // you could SEE was not the data you could TAKE.
+              text: `Download CSV (${view.days} d)`,
+              href: `/download.csv?days=${view.days}`,
+            },
             { text: 'Restart', run: d.restart },
             { text: 'Delete card contents', run: d.purgeCard, danger: true },
             { text: 'Format SD card', run: d.formatCard, danger: true },

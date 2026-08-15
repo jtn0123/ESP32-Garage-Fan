@@ -99,15 +99,36 @@ export async function uploadFirmware(file: File, token: string): Promise<string>
  * than the WebServer -- see sse_accept(). Failure is silent on purpose: the
  * 15 s poll is the fallback and already covers it.
  */
+let stream: EventSource | null = null;
+
 export function subscribe(onState: (s: DeviceState) => void): void {
+  // Close any previous stream first. Nothing held a reference before, so a
+  // second subscribe() (a re-init, a hot reload) left the old EventSource
+  // running and both kept reconnecting forever.
+  stream?.close();
   try {
     const es = new EventSource(`http://${location.hostname}:8081/`);
+    stream = es;
     es.onmessage = (ev) => {
       try {
         onState(JSON.parse(ev.data as string) as DeviceState);
       } catch {
         /* a torn frame is not worth a console error every few seconds */
       }
+    };
+    // The browser reconnects a failed EventSource roughly every 2 s, forever
+    // and with no backoff -- about 43k connection attempts a day at a device
+    // whose SSE server has a handful of sockets. After a run of consecutive
+    // failures, stop and let the 15 s poll carry the page (which it already
+    // does; failure here has always been silent by design).
+    let fails = 0;
+    es.onerror = () => {
+      if (es.readyState !== EventSource.CLOSED && ++fails < 5) return;
+      es.close();
+      if (stream === es) stream = null;
+    };
+    es.onopen = () => {
+      fails = 0;
     };
   } catch {
     /* EventSource unavailable; polling carries the page */

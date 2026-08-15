@@ -3,6 +3,10 @@
 
 /** Seconds -> "37h12m", the form used for uptime and today's run time. */
 export function hoursMinutes(seconds: number): string {
+  // Math.max(0, NaN) is NaN, so the old guard let "NaNhNaNm" onto the status
+  // line. Every formatter here takes device-supplied numbers and must render
+  // SOMETHING truthful for a value that is not a number.
+  if (!Number.isFinite(seconds)) return '–';
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 }
@@ -15,6 +19,7 @@ export function clock(epochSeconds: number): string {
 
 /** Minutes elapsed -> "45 MIN AGO" / "17H30 AGO", for the scrub stamp. */
 export function ago(minutes: number): string {
+  if (!Number.isFinite(minutes)) return 'AGE UNKNOWN';
   const m = Math.max(0, Math.round(minutes));
   if (m < 60) return `${m} MIN AGO`;
   const rem = m % 60;
@@ -28,6 +33,10 @@ export function signed(v: number, digits = 1): string {
 
 /** Speed 0..12 -> the word shown under AIRFLOW. */
 export function airflow(speed: number): string {
+  // NaN fails EVERY comparison below, so an unknown speed used to fall
+  // through to "Full tilt" -- a missing reading reading as maximum airflow
+  // is the worst possible direction for this particular guess to go.
+  if (!Number.isFinite(speed)) return 'Unknown';
   if (speed <= 0) return 'Still';
   if (speed <= 3) return 'Trickle';
   if (speed <= 6) return 'Steady';
@@ -44,6 +53,7 @@ export function airflow(speed: number): string {
  * invisible, so the formatter has to actually say it.
  */
 export function storage(usedMb: number, totalMb: number, freeMb?: number): string {
+  if (!Number.isFinite(usedMb) || !Number.isFinite(totalMb)) return '–';
   const base = `${(usedMb / 1024).toFixed(2)} / ${(totalMb / 1024).toFixed(1)} GB`;
   if (freeMb === undefined || totalMb <= 0) return base;
   const pctFull = (100 * usedMb) / totalMb;

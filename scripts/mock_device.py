@@ -237,13 +237,17 @@ class H(BaseHTTPRequestHandler):
         return self._json(200, {"boots": boots()})
 
     def _csv(self, query: Query) -> None:
+        # Range and columns both mirror web_history.cpp exactly. They had
+        # drifted -- 8 columns and a 30-day cap against the firmware's 13 and
+        # 60 -- so the mock was certifying an export the device never emits.
         if "days" in query:
             raw = query["days"][0]
-            if not raw.isdigit() or not (1 <= int(raw) <= 30):
-                return self._json(400, {"error": "days must be 1-30"})
+            if not raw.isdigit() or not (1 <= int(raw) <= 60):
+                return self._json(400, {"error": "days must be 1-60"})
         body = (
-            "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n"
-            "1786425931,24.00,40.0,999.9,73.2,9,4.20,1\n"
+            "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
+            "watts,voc_raw,nox_raw,voc,nox\n"
+            "1786425931,24.00,40.0,999.9,73.2,9,4.20,1,20.3,30125,17004,93,1\n"
         )
         return self._send(200, body, "text/csv")
 
@@ -275,14 +279,36 @@ class H(BaseHTTPRequestHandler):
         "offf": ("off_f", float),
     }
 
+    # The ranges handle_config() enforces. Without these the mock happily
+    # stored auto_max=99 and gas_voc=99999 and echoed them back, so the
+    # console could be dogfooded into states the device would never produce.
+    CONFIG_RANGE = {
+        "max": (1, 12),
+        "min": (0, 12),
+        "gasspd": (1, 12),
+        "gasvoc": (100, 500),
+        "ckwh": (0.01, 2.0),
+        "onf": (0.5, 20.0),
+        "offf": (0.0, 20.0),
+    }
+
     def _config(self, query: Query) -> None:
         for arg, (key, cast) in self.CONFIG_KEYS.items():
             if arg not in query:
                 continue
             try:
-                STATE[key] = cast(query[arg][0])
+                value = cast(query[arg][0])
             except ValueError:
                 return self._json(400, {"error": f"bad {arg}"})
+            span = self.CONFIG_RANGE.get(arg)
+            if span is not None and isinstance(value, (int, float)):
+                lo, hi = span
+                if not (lo <= value <= hi):
+                    # Same shape as the firmware: out of range is ignored, not
+                    # an error. See the report -- both sides should arguably
+                    # 400 here, but the mock's job is to match what ships.
+                    continue
+            STATE[key] = value
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
 
