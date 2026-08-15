@@ -11,6 +11,7 @@
 #include "config.h"
 #include "esp_heap_caps.h"
 #include "fan/control.h"
+#include "generated_wire.h"
 #include "net/http_tx.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
@@ -203,33 +204,33 @@ struct SeriesView {
 
 void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
   tx.print(",");
-  write_series(tx, "temp_c", v.t, n, 1);
+  write_series(tx, WN_TEMP_C, v.t, n, 1);
   tx.print(",");
-  write_series(tx, "rh", v.h, n, 0);
+  write_series(tx, WN_RH, v.h, n, 0);
   tx.print(",");
-  write_series(tx, "hpa", v.p, n, 1);
+  write_series(tx, WN_HPA, v.p, n, 1);
   tx.print(",");
-  write_series(tx, "out_f", v.o, n, 1);
+  write_series(tx, WN_OUT_F, v.o, n, 1);
   tx.print(",");
-  write_series(tx, "batt_v", v.b, n, 2);
+  write_series(tx, WN_BATT_V, v.b, n, 2);
   tx.print(",");
-  write_ints(tx, "spd", v.sp, n);
+  write_ints(tx, WN_SPD, v.sp, n);
   tx.print(",");
-  write_ints(tx, "chg", v.cg, n);
+  write_ints(tx, WN_CHG, v.cg, n);
   tx.print(",");
-  write_series(tx, "watts", v.w, n, 1);
+  write_series(tx, WN_WATTS, v.w, n, 1);
   tx.print(",");
-  write_gas(tx, "voc_raw", v.vr, n);
+  write_gas(tx, WN_VOC_RAW, v.vr, n);
   tx.print(",");
-  write_gas(tx, "nox_raw", v.nr, n);
+  write_gas(tx, WN_NOX_RAW, v.nr, n);
   tx.print(",");
-  write_gas(tx, "voc", v.vi, n);
+  write_gas(tx, WN_VOC, v.vi, n);
   tx.print(",");
-  write_gas(tx, "nox", v.ni, n);
+  write_gas(tx, WN_NOX, v.ni, n);
   tx.print(",");
-  write_series(tx, "bme_t", v.bt, n, 2);
+  write_series(tx, WN_BME_T, v.bt, n, 2);
   tx.print(",");
-  write_series(tx, "bme_rh", v.bh, n, 0);
+  write_series(tx, WN_BME_RH, v.bh, n, 0);
   tx.print("}");
 }
 
@@ -375,9 +376,9 @@ void handle_stats() {
   history::temp_stats(&tmin, &tmax, &tavg);
   char buf[288];
   snprintf(buf, sizeof(buf),
-           "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,\"wh_today\":%.1f,"
-           "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
-           "\"t_avg_f\":%.1f,\"samples\":%u}",
+           "{" WK_RUN_TODAY_S "%lu," WK_RUN_TOTAL_S "%lu," WK_ENERGY_WH "%.0f," WK_WH_TODAY
+           "%.1f," WK_WATTS_NOW "%.0f," WK_T_MIN_F "%.1f," WK_T_MAX_F "%.1f," WK_T_AVG_F
+           "%.1f," WK_SAMPLES "%u}",
            (unsigned long)odometer::run_today_s(), (unsigned long)odometer::run_total_s(),
            odometer::energy_wh(), odometer::wh_today(),
            fan::watts(fan::speed() < 0 ? 0 : fan::speed()), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,

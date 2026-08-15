@@ -17,6 +17,7 @@
 #include "esp_ota_ops.h"
 #include "fan/control.h"
 #include "generated_page.h"
+#include "generated_wire.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
@@ -89,7 +90,8 @@ void state_json(char* out, size_t cap) {
     char pcts[16] = "null";
     if (!isnan(battery::percent()))
       snprintf(pcts, sizeof(pcts), "%.0f", battery::percent());
-    snprintf(batt, sizeof(batt), "{\"v\":%.3f,\"pct\":%s,\"chg\":%s,\"eta_h\":%s,\"mvh\":%s}",
+    snprintf(batt, sizeof(batt),
+             "{" WK_V "%.3f," WK_PCT "%s," WK_CHG "%s," WK_ETA_H "%s," WK_MVH "%s}",
              battery::volts(), pcts, chg ? "true" : "false", etas, mvh);
   } else {
     snprintf(batt, sizeof(batt), "null");
@@ -101,25 +103,22 @@ void state_json(char* out, size_t cap) {
     char vs[16] = "null";
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
-    snprintf(plugs, sizeof(plugs), "{\"w\":%.1f,\"v\":%s,\"age_s\":%ld,\"verdict\":%d}",
+    snprintf(plugs, sizeof(plugs), "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d}",
              plug::watts(), vs, (long)plug::age_s(), plug::verdict());
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }
+  // Keys are the WK_* macros generated from web/src/types.ts -- rename a
+  // field there and this stops compiling instead of silently drifting.
   snprintf(out, cap,
-           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
-           "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
-           "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
-           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
-           "\"boots\":%lu,\"prev_death\":\"%s\","
-           "\"sd_q\":%s,"
-           "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
-           "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s,\"sht_pref\":%s,"
-           "\"gas_on\":%s,\"gas_spd\":%d,\"gas_voc\":%d,\"gas_active\":%s,"
-           "\"wh_today\":%.1f,\"cost_kwh\":%.3f}",
+           "{" WK_SPEED "%d," WK_AUTO "%s," WK_AUTO_MAX "%d," WK_AUTO_MIN "%d," WK_ON_F
+           "%.1f," WK_OFF_F "%.1f," WK_OUTSIDE_F "%s," WK_TOFF "%.1f," WK_OFFC "%.1f," WK_OFFI
+           "%.1f," WK_FW "\"%s\"," WK_SLOT "\"%s\"," WK_CONFIRMED "%s," WK_UNHEALTHY_BOOTS
+           "%lu," WK_SENSOR "%s," WK_LAST_RESET "\"%s\"," WK_BOOTS "%lu," WK_PREV_DEATH
+           "\"%s\"," WK_SD_Q "%s," WK_SD_TOTAL_MB "%lu," WK_SD_USED_MB "%lu," WK_SD_FREE_MB
+           "%lu," WK_BATT "%s," WK_RSSI "%d," WK_DROPS "%lu," WK_MQTT "%s," WK_UPTIME_S "%lu," WK_IP
+           "\"%s\"," WK_PLUG "%s," WK_SHT_PREF "%s," WK_GAS_ON "%s," WK_GAS_SPD "%d," WK_GAS_VOC
+           "%d," WK_GAS_ACTIVE "%s," WK_WH_TODAY "%.1f," WK_COST_KWH "%.3f}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
            climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
@@ -175,9 +174,9 @@ static void handle_device() {
   json_str(host, sizeof(host), MQTT_HOST);
   char out[512];
   snprintf(out, sizeof(out),
-           "{\"id\":\"%s-%02x%02x%02x\",\"host\":\"%s\",\"repo\":\"%s\","
-           "\"broker\":\"%s:%d\",\"ssid\":\"%s\",\"topic_set\":\"%s\","
-           "\"topic_out\":\"%s\",\"period_us\":%u,\"sample_s\":%lu,\"high_us\":[%s]}",
+           "{" WK_ID "\"%s-%02x%02x%02x\"," WK_HOST "\"%s\"," WK_REPO "\"%s\"," WK_BROKER
+           "\"%s:%d\"," WK_SSID "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US
+           "%u," WK_SAMPLE_S "%lu," WK_HIGH_US "[%s]}",
            FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host, MQTT_PORT,
            ssid, kTopicSet, kTopicOutdoor, (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000),
            high);
@@ -278,9 +277,9 @@ static void handle_sensors() {
   // warm-up rather than hiding it.
   char buf[256];
   snprintf(buf, sizeof(buf),
-           "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f,"
-           "\"source\":\"%s\",\"voc_raw\":%ld,\"nox_raw\":%ld,\"voc\":%ld,\"nox\":%ld,"
-           "\"bme_t\":%.2f,\"bme_rh\":%.1f}",
+           "{" WK_OK "true," WK_TEMP_C "%.2f," WK_RH "%.1f," WK_HPA "%.1f," WK_SOURCE
+           "\"%s\"," WK_VOC_RAW "%ld," WK_NOX_RAW "%ld," WK_VOC "%ld," WK_NOX "%ld," WK_BME_T
+           "%.2f," WK_BME_RH "%.1f}",
            t, h, p, climate::sht_driving() ? "sht41" : "bme280", (long)air::voc_raw(),
            (long)air::nox_raw(), (long)air::voc_index(), (long)air::nox_index(),
            climate::bme_temp_c(), climate::bme_rh());
