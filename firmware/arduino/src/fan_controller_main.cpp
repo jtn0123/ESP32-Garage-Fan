@@ -59,9 +59,8 @@ static uint32_t g_last_auto_ms = 0;
 // belongs in the same row (battery first, so the row records the verdict this
 // reading produced), then fan it out to the ring, the card and the broker.
 static void sample_climate() {
-  // Battery first and unconditionally: the charging verdict feeds the climate
-  // correction (climate.h documents the dependency), so a wedged BME280 must
-  // not freeze the hysteresis, the voltage slope or the runtime estimate.
+  // Battery first and unconditionally: a wedged sensor must not freeze the
+  // voltage slope or the runtime estimate.
   const uint32_t t0 = millis();
   battery::sample();
   const uint32_t t_batt = millis();
@@ -82,8 +81,6 @@ static void sample_climate() {
     // The plug reading is only fresh-ish (15 s poll); a minute-old value is
     // NAN here so the chart shows a hole rather than a stale flat line.
     row.watts = (plug::age_s() >= 0 && plug::age_s() < 60) ? plug::watts() : NAN;
-    row.bme_t = climate::bme_temp_c();
-    row.bme_rh = climate::bme_rh();
     row.voc_raw = air::voc_raw();
     row.nox_raw = air::nox_raw();
     row.voc = static_cast<int16_t>(air::voc_index());
@@ -94,8 +91,7 @@ static void sample_climate() {
       // CSV used to store the raw one, so a sample taken during an /api/raw
       // sweep left the two records of the same instant disagreeing (0 vs -1).
       sdcard::log_sample(time(nullptr), t, h, p, row.out_f, row.speed, row.batt_v, row.chg,
-                         row.watts, row.voc_raw, row.nox_raw, row.voc, row.nox, row.bme_t,
-                         row.bme_rh);
+                         row.watts, row.voc_raw, row.nox_raw, row.voc, row.nox);
     t_sd = millis();
     mqtt_link::publish_climate(t, h, p);
   }

@@ -17,6 +17,7 @@
 #include "esp_ota_ops.h"
 #include "fan/control.h"
 #include "generated_page.h"
+#include "generated_wire.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
@@ -89,7 +90,8 @@ void state_json(char* out, size_t cap) {
     char pcts[16] = "null";
     if (!isnan(battery::percent()))
       snprintf(pcts, sizeof(pcts), "%.0f", battery::percent());
-    snprintf(batt, sizeof(batt), "{\"v\":%.3f,\"pct\":%s,\"chg\":%s,\"eta_h\":%s,\"mvh\":%s}",
+    snprintf(batt, sizeof(batt),
+             "{" WK_V "%.3f," WK_PCT "%s," WK_CHG "%s," WK_ETA_H "%s," WK_MVH "%s}",
              battery::volts(), pcts, chg ? "true" : "false", etas, mvh);
   } else {
     snprintf(batt, sizeof(batt), "null");
@@ -101,28 +103,24 @@ void state_json(char* out, size_t cap) {
     char vs[16] = "null";
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
-    snprintf(plugs, sizeof(plugs), "{\"w\":%.1f,\"v\":%s,\"age_s\":%ld,\"verdict\":%d}",
+    snprintf(plugs, sizeof(plugs), "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d}",
              plug::watts(), vs, (long)plug::age_s(), plug::verdict());
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }
+  // Keys are the WK_* macros generated from web/src/types.ts -- rename a
+  // field there and this stops compiling instead of silently drifting.
   snprintf(out, cap,
-           "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
-           "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
-           "\"toff\":%.1f,\"offc\":%.1f,\"offi\":%.1f,"
-           "\"fw\":\"%s\",\"slot\":\"%s\",\"confirmed\":%s,"
-           "\"unhealthy_boots\":%lu,\"sensor\":%s,\"last_reset\":\"%s\","
-           "\"boots\":%lu,\"prev_death\":\"%s\","
-           "\"sd_q\":%s,"
-           "\"sd_total_mb\":%lu,"
-           "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
-           "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s,\"sht_pref\":%s,"
-           "\"gas_on\":%s,\"gas_spd\":%d,\"gas_voc\":%d,\"gas_active\":%s,"
-           "\"wh_today\":%.1f,\"cost_kwh\":%.3f}",
+           "{" WK_SPEED "%d," WK_AUTO "%s," WK_AUTO_MAX "%d," WK_AUTO_MIN "%d," WK_ON_F
+           "%.1f," WK_OFF_F "%.1f," WK_OUTSIDE_F "%s," WK_FW "\"%s\"," WK_SLOT
+           "\"%s\"," WK_CONFIRMED "%s," WK_UNHEALTHY_BOOTS "%lu," WK_SENSOR "%s," WK_LAST_RESET
+           "\"%s\"," WK_BOOTS "%lu," WK_PREV_DEATH "\"%s\"," WK_SD_Q "%s," WK_SD_TOTAL_MB
+           "%lu," WK_SD_USED_MB "%lu," WK_SD_FREE_MB "%lu," WK_BATT "%s," WK_RSSI "%d," WK_DROPS
+           "%lu," WK_MQTT "%s," WK_UPTIME_S "%lu," WK_IP "\"%s\"," WK_PLUG "%s," WK_GAS_ON
+           "%s," WK_GAS_SPD "%d," WK_GAS_VOC "%d," WK_GAS_ACTIVE "%s," WK_WH_TODAY
+           "%.1f," WK_COST_KWH "%.3f}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
-           fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
-           climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
+           fan::engage_f(), fan::release_f(), outside, kFwVersion, run ? run->label : "?",
            ota_rollback_image_confirmed() ? "true" : "false",
            (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
            crashlog::last_death(), (unsigned long)crashlog::boots(), crashlog::prev_death(),
@@ -130,9 +128,8 @@ void state_json(char* out, size_t cap) {
            (unsigned long)sdcard::used_mb(), (unsigned long)sdcard::free_mb(), batt, WiFi.RSSI(),
            (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
            millis() / 1000UL, WiFi.localIP().toString().c_str(), plugs,
-           climate::prefer_sht() ? "true" : "false", fan::gas_boost_on() ? "true" : "false",
-           fan::gas_speed(), fan::gas_voc_on(), fan::gas_active() ? "true" : "false",
-           odometer::wh_today(), odometer::cost_per_kwh());
+           fan::gas_boost_on() ? "true" : "false", fan::gas_speed(), fan::gas_voc_on(),
+           fan::gas_active() ? "true" : "false", odometer::wh_today(), odometer::cost_per_kwh());
 }
 
 void push_state() { sse::push(); }
@@ -175,9 +172,9 @@ static void handle_device() {
   json_str(host, sizeof(host), MQTT_HOST);
   char out[512];
   snprintf(out, sizeof(out),
-           "{\"id\":\"%s-%02x%02x%02x\",\"host\":\"%s\",\"repo\":\"%s\","
-           "\"broker\":\"%s:%d\",\"ssid\":\"%s\",\"topic_set\":\"%s\","
-           "\"topic_out\":\"%s\",\"period_us\":%u,\"sample_s\":%lu,\"high_us\":[%s]}",
+           "{" WK_ID "\"%s-%02x%02x%02x\"," WK_HOST "\"%s\"," WK_REPO "\"%s\"," WK_BROKER
+           "\"%s:%d\"," WK_SSID "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US
+           "%u," WK_SAMPLE_S "%lu," WK_HIGH_US "[%s]}",
            FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host, MQTT_PORT,
            ssid, kTopicSet, kTopicOutdoor, (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000),
            high);
@@ -190,8 +187,6 @@ static void handle_config() {
 
   if (g_http.hasArg("auto"))
     fan::set_auto(g_http.arg("auto").toInt() != 0);
-  if (g_http.hasArg("sht"))
-    climate::set_prefer_sht(g_http.arg("sht").toInt() != 0);
   if (g_http.hasArg("gason"))
     fan::set_gas_boost(g_http.arg("gason").toInt() != 0);
   if (g_http.hasArg("gasspd")) {
@@ -215,16 +210,6 @@ static void handle_config() {
     const int m = g_http.arg("max").toInt();
     if (m >= 1 && m <= 12)
       fan::set_auto_max(m);
-  }
-  if (g_http.hasArg("offc")) {
-    const float v = g_http.arg("offc").toFloat();
-    if (v >= -15 && v <= 15)
-      climate::set_offset_charging(v);
-  }
-  if (g_http.hasArg("offi")) {
-    const float v = g_http.arg("offi").toFloat();
-    if (v >= -15 && v <= 15)
-      climate::set_offset_idle(v);
   }
   if (g_http.hasArg("min")) {
     const int m = g_http.arg("min").toInt();
@@ -256,15 +241,10 @@ static void handle_config() {
 }
 
 static void handle_sensors() {
-  // A LIVE read, not the newest ring entry. History is stored
-  // already-corrected -- deliberately, so changing an offset never rewrites
-  // what was already logged -- and it is only appended every 5 minutes, so
-  // serving it here made a freshly changed offset appear to do nothing at
-  // all. Calibrating against a display that will not move is precisely how
-  // this board ended up reading ~10 F low: the offset was pushed further and
-  // further to chase a number that could not respond until the next sample
-  // (2026-08-09). The console polls this once a minute and calls the result
-  // `live`; it should be live. Costs one forced BME280 conversion.
+  // A LIVE read, not the newest ring entry -- the console polls this once a
+  // minute and calls the result `live`; it should be. Temp/RH are the SHT41
+  // (the only thermometer since the BME280 went barometer-only); pressure is
+  // best-effort and serializes as null when the barometer has no answer.
   float t;
   float h;
   float p;
@@ -272,18 +252,17 @@ static void handle_sensors() {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
-  // The air chain rides along: which source produced temp/rh, and the gas
-  // readings with raws -- meaningful from the first second -- beside indices
-  // that stay 0 while Sensirion's algorithm warms up. The console labels the
-  // warm-up rather than hiding it.
-  char buf[256];
+  char hpa[16];
+  if (isnan(p))
+    snprintf(hpa, sizeof(hpa), "null");
+  else
+    snprintf(hpa, sizeof(hpa), "%.1f", p);
+  char buf[224];
   snprintf(buf, sizeof(buf),
-           "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f,"
-           "\"source\":\"%s\",\"voc_raw\":%ld,\"nox_raw\":%ld,\"voc\":%ld,\"nox\":%ld,"
-           "\"bme_t\":%.2f,\"bme_rh\":%.1f}",
-           t, h, p, climate::sht_driving() ? "sht41" : "bme280", (long)air::voc_raw(),
-           (long)air::nox_raw(), (long)air::voc_index(), (long)air::nox_index(),
-           climate::bme_temp_c(), climate::bme_rh());
+           "{" WK_OK "true," WK_TEMP_C "%.2f," WK_RH "%.1f," WK_HPA "%s," WK_VOC_RAW
+           "%ld," WK_NOX_RAW "%ld," WK_VOC "%ld," WK_NOX "%ld}",
+           t, h, hpa, (long)air::voc_raw(), (long)air::nox_raw(), (long)air::voc_index(),
+           (long)air::nox_index());
   g_http.send(200, "application/json", buf);
 }
 

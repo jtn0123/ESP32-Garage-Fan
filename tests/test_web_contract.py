@@ -21,6 +21,10 @@ TYPES = ROOT / "web" / "src" / "types.ts"
 
 # JSON keys as they appear inside C++ string literals: \"key\":
 CPP_KEY = re.compile(r'\\"([A-Za-z_]\w*)\\":')
+# ...or as the WK_/WN_ macros generated from types.ts by gen_wire_keys.py.
+# The macro name IS the field name upper-cased (that is the generator's whole
+# rule), so the reverse map is just .lower().
+CPP_MACRO = re.compile(r"\bW[KN]_([A-Z0-9_]+)\b")
 # Series emitted via a helper that takes the JSON key as its own argument:
 #   write_series(tx, "name", ...)   write_ints(tx, "name", ...)
 # The key never appears as a \"name\": literal in the calling function, so
@@ -61,6 +65,7 @@ def find_function(name: str) -> str:
 def cpp_keys(function: str) -> set[str]:
     body = find_function(function)
     keys = set(CPP_KEY.findall(body)) | set(CPP_SERIES.findall(body))
+    keys |= {m.lower() for m in CPP_MACRO.findall(body)}
     for helper, key in CPP_FIXED.items():
         if re.search(rf"\b{helper}\s*\(", body):
             keys.add(key)
@@ -177,10 +182,11 @@ def test_history_branches_agree():
     emitter = find_function("write_all_series")
     series = [
         "temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg",
-        "watts", "voc_raw", "nox_raw", "voc", "nox", "bme_t", "bme_rh",
+        "watts", "voc_raw", "nox_raw", "voc", "nox",
     ]  # fmt: skip
     for name in series:
-        n = len(re.findall(rf'"{name}"', emitter))
+        # WN_<NAME>, since the emitter spells keys via the generated macros.
+        n = len(re.findall(rf"\bWN_{name.upper()}\b", emitter))
         assert n == 1, (
             f"write_all_series writes '{name}' {n} time(s); expected exactly 1. "
             f"A series missing here is the 7/30-day regression for every range."
@@ -255,7 +261,7 @@ def test_mock_accepts_every_config_arg_the_firmware_does():
     assert firmware_args, "handle_config() parses no arguments; the regex is stale"
 
     mock = (ROOT / "scripts" / "mock_device.py").read_text()
-    keys = re.search(r"CONFIG_KEYS = \{(.*?)\n    \}", mock, re.S)
+    keys = re.search(r"CONFIG_KEYS(?::[^=]*)? = \{(.*?)\n    \}", mock, re.S)
     assert keys, "CONFIG_KEYS not found in mock_device.py"
     mock_args = set(re.findall(r'"(\w+)":', keys.group(1)))
 

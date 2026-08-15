@@ -10,6 +10,7 @@ import glob
 import os
 import subprocess
 import sys
+from typing import IO
 
 
 # ANSI color codes
@@ -25,7 +26,7 @@ class Colors:
     BOLD = "\033[1m"
 
 
-def find_usb_ports():
+def find_usb_ports() -> list[str]:
     """Find USB serial ports, excluding Bluetooth."""
     patterns = [
         "/dev/tty.usbmodem*",
@@ -37,12 +38,12 @@ def find_usb_ports():
 
     exclude_patterns = ["Bluetooth", "bluetooth", "BT", "Wireless", "AirPod", "debug"]
 
-    ports = []
+    ports: list[str] = []
     for pattern in patterns:
         ports.extend(glob.glob(pattern))
 
     # Filter out excluded patterns
-    filtered = []
+    filtered: list[str] = []
     for port in ports:
         if not any(exc in port for exc in exclude_patterns):
             filtered.append(port)
@@ -50,7 +51,7 @@ def find_usb_ports():
     return sorted(set(filtered))
 
 
-def colorize_line(line):
+def colorize_line(line: str) -> str:  # NOSONAR -- predates this PR (only annotations changed)
     """Apply color highlighting to important log lines."""
     # Boot stages
     if "[BOOT-1]" in line:
@@ -113,7 +114,9 @@ def colorize_line(line):
     return line
 
 
-def monitor_serial(port, baud=115200, save_file=None, highlight=True):
+def monitor_serial(
+    port: str, baud: int = 115200, save_file: str | None = None, highlight: bool = True
+) -> None:
     """Monitor serial output with optional highlighting and logging."""
     print(f"{Colors.BOLD}=== SERIAL MONITOR ==={Colors.RESET}")
     print(f"Port: {port}")
@@ -125,7 +128,7 @@ def monitor_serial(port, baud=115200, save_file=None, highlight=True):
     print("-" * 50)
     print()
 
-    log_file = None
+    log_file: IO[str] | None = None
     if save_file:
         try:
             log_file = open(save_file, "a")
@@ -148,6 +151,8 @@ def monitor_serial(port, baud=115200, save_file=None, highlight=True):
             bufsize=1,
         )
 
+        if proc.stdout is None:  # stdout=PIPE above guarantees it is not
+            raise RuntimeError("pio device monitor gave no stdout pipe")
         for line in proc.stdout:
             line = line.rstrip()
 
@@ -173,7 +178,7 @@ def monitor_serial(port, baud=115200, save_file=None, highlight=True):
             log_file.close()
 
 
-def main():
+def main() -> int:  # NOSONAR -- predates this PR (only annotations changed)
     parser = argparse.ArgumentParser(
         description="Serial monitor with colored output for ESP32",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -25,9 +25,6 @@ export interface DeviceState {
   on_f: number; // engage differential, degrees F
   off_f: number; // release differential, degrees F
   outside_f: number | null; // null when the yard feed is missing or stale
-  toff: number; // the probe offset currently in effect, degrees C
-  offc: number; // offset applied while charging
-  offi: number; // offset applied while idle
   fw: string; // FW_VERSION -- the update check compares exactly this
   slot: string; // "app0" | "app1"
   confirmed: boolean;
@@ -57,8 +54,6 @@ export interface DeviceState {
    * poller is disabled (no HA credentials baked) or has never read.
    */
   plug: PlugState | null;
-  /** True (default): the off-board SHT41 drives temp/RH when it answers. */
-  sht_pref: boolean;
   /** Gas boost: in auto mode a high VOC index forces a minimum speed. */
   gas_on: boolean;
   /** The floor speed enforced while the VOC latch holds (1-12). */
@@ -133,18 +128,19 @@ export type Sensors =
       ok: true;
       temp_c: number;
       rh: number;
-      hpa: number;
-      /** Which sensor produced temp/rh: the off-board SHT41 or the BME280 fallback. */
-      source: 'sht41' | 'bme280';
+      /**
+       * Barometric pressure from the BME280, which now serves ONLY as the
+       * barometer (its thermometer self-heated +5degC whenever the fan
+       * rested; the off-board SHT41 is the sole temp/RH source). Null when
+       * the barometer is absent or wedged -- pressure is best-effort.
+       */
+      hpa: number | null;
       /** SGP41 raw ticks, meaningful from the first second; -1 = no sensor. */
       voc_raw: number;
       nox_raw: number;
       /** Sensirion gas indices 1..500; 0 = still warming up, -1 = no sensor. */
       voc: number;
       nox: number;
-      /** The BME280's own estimate, always present, for the live comparison. */
-      bme_t: number;
-      bme_rh: number;
     };
 
 /**
@@ -201,8 +197,6 @@ export interface History {
   voc: (number | null)[];
   nox: (number | null)[];
   /** The BME280 logged beside the SHT41, for the dual-sensor overlays. */
-  bme_t: (number | null)[];
-  bme_rh: (number | null)[];
 }
 
 /**

@@ -11,6 +11,7 @@
 #include "config.h"
 #include "esp_heap_caps.h"
 #include "fan/control.h"
+#include "generated_wire.h"
 #include "net/http_tx.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
@@ -112,8 +113,6 @@ struct GraphScratch {
   float* o = nullptr;
   float* b = nullptr;
   float* w = nullptr;
-  float* bt = nullptr;
-  float* bh = nullptr;
   int32_t* vr = nullptr;
   int32_t* nr = nullptr;
   int16_t* vi = nullptr;
@@ -144,15 +143,13 @@ bool scratch_ready() {
   g_scratch.sp = psram_array<int8_t>(kGraphMaxPts);
   g_scratch.cg = psram_array<int8_t>(kGraphMaxPts);
   g_scratch.w = psram_array<float>(kGraphMaxPts);
-  g_scratch.bt = psram_array<float>(kGraphMaxPts);
-  g_scratch.bh = psram_array<float>(kGraphMaxPts);
   g_scratch.vr = psram_array<int32_t>(kGraphMaxPts);
   g_scratch.nr = psram_array<int32_t>(kGraphMaxPts);
   g_scratch.vi = psram_array<int16_t>(kGraphMaxPts);
   g_scratch.ni = psram_array<int16_t>(kGraphMaxPts);
   g_scratch.ready = g_scratch.ts && g_scratch.t && g_scratch.h && g_scratch.p && g_scratch.o &&
                     g_scratch.b && g_scratch.sp && g_scratch.cg && g_scratch.w && g_scratch.vr &&
-                    g_scratch.nr && g_scratch.vi && g_scratch.ni && g_scratch.bt && g_scratch.bh;
+                    g_scratch.nr && g_scratch.vi && g_scratch.ni;
   if (!g_scratch.ready) {
     // Release the blocks that DID succeed. Without this a partial failure
     // leaked them and the next chart request allocated a fresh partial set --
@@ -167,8 +164,6 @@ bool scratch_ready() {
     free(g_scratch.sp);
     free(g_scratch.cg);
     free(g_scratch.w);
-    free(g_scratch.bt);
-    free(g_scratch.bh);
     free(g_scratch.vr);
     free(g_scratch.nr);
     free(g_scratch.vi);
@@ -191,8 +186,6 @@ struct SeriesView {
   const float* o;
   const float* b;
   const float* w;
-  const float* bt;
-  const float* bh;
   const int8_t* sp;
   const int8_t* cg;
   const int32_t* vr;
@@ -203,33 +196,29 @@ struct SeriesView {
 
 void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
   tx.print(",");
-  write_series(tx, "temp_c", v.t, n, 1);
+  write_series(tx, WN_TEMP_C, v.t, n, 1);
   tx.print(",");
-  write_series(tx, "rh", v.h, n, 0);
+  write_series(tx, WN_RH, v.h, n, 0);
   tx.print(",");
-  write_series(tx, "hpa", v.p, n, 1);
+  write_series(tx, WN_HPA, v.p, n, 1);
   tx.print(",");
-  write_series(tx, "out_f", v.o, n, 1);
+  write_series(tx, WN_OUT_F, v.o, n, 1);
   tx.print(",");
-  write_series(tx, "batt_v", v.b, n, 2);
+  write_series(tx, WN_BATT_V, v.b, n, 2);
   tx.print(",");
-  write_ints(tx, "spd", v.sp, n);
+  write_ints(tx, WN_SPD, v.sp, n);
   tx.print(",");
-  write_ints(tx, "chg", v.cg, n);
+  write_ints(tx, WN_CHG, v.cg, n);
   tx.print(",");
-  write_series(tx, "watts", v.w, n, 1);
+  write_series(tx, WN_WATTS, v.w, n, 1);
   tx.print(",");
-  write_gas(tx, "voc_raw", v.vr, n);
+  write_gas(tx, WN_VOC_RAW, v.vr, n);
   tx.print(",");
-  write_gas(tx, "nox_raw", v.nr, n);
+  write_gas(tx, WN_NOX_RAW, v.nr, n);
   tx.print(",");
-  write_gas(tx, "voc", v.vi, n);
+  write_gas(tx, WN_VOC, v.vi, n);
   tx.print(",");
-  write_gas(tx, "nox", v.ni, n);
-  tx.print(",");
-  write_series(tx, "bme_t", v.bt, n, 2);
-  tx.print(",");
-  write_series(tx, "bme_rh", v.bh, n, 0);
+  write_gas(tx, WN_NOX, v.ni, n);
   tx.print("}");
 }
 
@@ -237,7 +226,7 @@ void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
 // the ring fallback, and two literals had already started to count as
 // duplication before they could start to disagree.
 // clang-format off
-constexpr const char* kCsvHeader = "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n";  // NOLINT(whitespace/line_length)
+constexpr const char* kCsvHeader = "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox\n";  // NOLINT(whitespace/line_length)
 // clang-format on
 
 void handle_history() {
@@ -287,8 +276,8 @@ void handle_history() {
   http_tx::Chunked tx(g_http->client(), "application/json");
   if (have_card) {
     const GraphScratch& s = g_scratch;
-    const sdcard::Samples dst{s.ts, s.t,  s.h,  s.p,  s.o,  s.b,  s.sp, s.cg,
-                              s.w,  s.vr, s.nr, s.vi, s.ni, s.bt, s.bh};
+    const sdcard::Samples dst{s.ts, s.t, s.h,  s.p,  s.o,  s.b, s.sp,
+                              s.cg, s.w, s.vr, s.nr, s.vi, s.ni};
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
     const uint16_t n = sdcard::read_range(cutoff, dst, kGraphMaxPts);
     // interval_s is now only a nominal hint for gap detection; ts[] carries
@@ -296,20 +285,18 @@ void handle_history() {
     // requested_span/actual_span whenever the card held less than the window.
     tx.printf("{\"source\":\"sd\",\"interval_s\":%ld,", step);
     write_ts(tx, s.ts, n);
-    write_all_series(
-        tx, {s.t, s.h, s.p, s.o, s.b, s.w, s.bt, s.bh, s.sp, s.cg, s.vr, s.nr, s.vi, s.ni}, n);
+    write_all_series(tx, {s.t, s.h, s.p, s.o, s.b, s.w, s.sp, s.cg, s.vr, s.nr, s.vi, s.ni}, n);
   } else {
     // No card and days=1: the ring is all there is, and the response says so
     // rather than letting the caller assume persistence it does not have.
     const uint16_t rows = history::count();
     tx.printf("{\"source\":\"ring\",\"interval_s\":%ld,", step);
     write_ts_derived(tx, history::end_ts(), rows, step);
-    write_all_series(
-        tx,
-        {history::temp(), history::rh(), history::hpa(), history::out_f(), history::batt_v(),
-         history::watts(), history::bme_t(), history::bme_rh(), history::speed(), history::chg(),
-         history::voc_raw(), history::nox_raw(), history::voc(), history::nox()},
-        rows);
+    write_all_series(tx,
+                     {history::temp(), history::rh(), history::hpa(), history::out_f(),
+                      history::batt_v(), history::watts(), history::speed(), history::chg(),
+                      history::voc_raw(), history::nox_raw(), history::voc(), history::nox()},
+                     rows);
   }
   tx.end();
 }
@@ -355,17 +342,15 @@ void handle_csv() {
   for (uint16_t i = 0; i < n && tx.ok(); i++) {
     const long ts =
         history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * (kSampleMs / 1000) : 0;
-    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%.2f,%.1f\n", ts,
-              history::temp()[i], history::rh()[i], history::hpa()[i],
+    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d\n", ts, history::temp()[i],
+              history::rh()[i], history::hpa()[i],
               isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
               static_cast<int>(history::speed()[i]),
               isnan(history::batt_v()[i]) ? -999.0f : history::batt_v()[i],
               static_cast<int>(history::chg()[i]),
               isnan(history::watts()[i]) ? -999.0f : history::watts()[i],
               (long)history::voc_raw()[i], (long)history::nox_raw()[i],
-              static_cast<int>(history::voc()[i]), static_cast<int>(history::nox()[i]),
-              isnan(history::bme_t()[i]) ? -999.0f : history::bme_t()[i],
-              isnan(history::bme_rh()[i]) ? -999.0f : history::bme_rh()[i]);
+              static_cast<int>(history::voc()[i]), static_cast<int>(history::nox()[i]));
   }
   tx.end();
 }
@@ -375,9 +360,9 @@ void handle_stats() {
   history::temp_stats(&tmin, &tmax, &tavg);
   char buf[288];
   snprintf(buf, sizeof(buf),
-           "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,\"wh_today\":%.1f,"
-           "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
-           "\"t_avg_f\":%.1f,\"samples\":%u}",
+           "{" WK_RUN_TODAY_S "%lu," WK_RUN_TOTAL_S "%lu," WK_ENERGY_WH "%.0f," WK_WH_TODAY
+           "%.1f," WK_WATTS_NOW "%.0f," WK_T_MIN_F "%.1f," WK_T_MAX_F "%.1f," WK_T_AVG_F
+           "%.1f," WK_SAMPLES "%u}",
            (unsigned long)odometer::run_today_s(), (unsigned long)odometer::run_total_s(),
            odometer::energy_wh(), odometer::wh_today(),
            fan::watts(fan::speed() < 0 ? 0 : fan::speed()), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,

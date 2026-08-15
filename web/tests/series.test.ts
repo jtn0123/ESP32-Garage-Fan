@@ -20,8 +20,6 @@ const h = (over: Partial<History> = {}): History => ({
   nox_raw: [null, 15800, 15810],
   voc: [null, 0, 87],
   nox: [null, 0, 1],
-  bme_t: [22.5, 23.6, 24.8],
-  bme_rh: [55, 56, 57],
   ...over,
 });
 

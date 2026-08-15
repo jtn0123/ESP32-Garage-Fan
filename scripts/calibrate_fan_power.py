@@ -36,6 +36,7 @@ import os
 import statistics
 import sys
 import time
+from typing import Any
 import urllib.error
 import urllib.request
 
@@ -50,7 +51,7 @@ WINDOW_N = 5
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "fan_power_baseline.json")
 
 
-def _http(url, method="GET", token=None, timeout=10):
+def _http(url: str, method: str = "GET", token: str | None = None, timeout: int = 10) -> Any:
     # Only the two hosts this script exists to talk to, nothing user-shaped:
     # entity ids are interpolated into paths below, so pin the origin here
     # rather than trusting every caller forever.
@@ -67,7 +68,7 @@ def _http(url, method="GET", token=None, timeout=10):
         return json.load(r)
 
 
-def _http_retry(url, method="GET", token=None, tries=4):
+def _http_retry(url: str, method: str = "GET", token: str | None = None, tries: int = 4) -> Any:
     """The device parks its whole loop during an eInk refresh (~15 s), so any
     single request can time out through no fault of its own. Ride it out."""
     for i in range(tries):
@@ -80,11 +81,11 @@ def _http_retry(url, method="GET", token=None, tries=4):
             time.sleep(8)
 
 
-def ha_states():
+def ha_states() -> Any:
     return _http(f"{HA_URL}/api/states", token=HA_TOKEN)
 
 
-def find_entity():
+def find_entity() -> str:
     if ENTITY:
         return ENTITY
     hits = [
@@ -102,7 +103,7 @@ def find_entity():
     sys.exit(2)
 
 
-def watts(entity):
+def watts(entity: str) -> float | None:
     try:
         s = _http(f"{HA_URL}/api/states/{entity}", token=HA_TOKEN)
         return float(s["state"])
@@ -110,21 +111,21 @@ def watts(entity):
         return None
 
 
-def set_speed(v):
+def set_speed(v: int) -> None:
     url = f"http://{FAN}/api/set?speed={v}"  # NOSONAR - LAN device, no TLS stack
     _http_retry(url, method="POST")
 
 
-def set_auto(on):
+def set_auto(on: bool) -> None:
     url = f"http://{FAN}/api/config?auto={1 if on else 0}"  # NOSONAR - LAN, no TLS stack
     _http_retry(url, method="POST")
 
 
-def settle(entity, label):
+def settle(entity: str, label: str) -> tuple[float, list[float]]:
     """Poll until WINDOW_N consecutive readings sit inside BAND_W, else time out."""
     t0 = time.time()
-    window = []
-    readings = []
+    window: list[float] = []
+    readings: list[float] = []
     while time.time() - t0 < SETTLE_S:
         w = watts(entity)
         if w is not None:
@@ -140,7 +141,7 @@ def settle(entity, label):
     return statistics.median(readings[-5:]), readings
 
 
-def main():
+def main() -> None:
     if not HA_URL or not HA_TOKEN:
         sys.exit(
             "HA_URL and HA_TOKEN are required (put them in .env, then "
@@ -151,7 +152,7 @@ def main():
     print(f"fan:         {FAN}")
     print("This run disables auto and drives the fan through 0,1..12,0.")
 
-    table = {}
+    table: dict[str, float] = {}
     try:
         set_auto(False)
         for step, speed in enumerate([0] + list(range(1, 13)) + [0]):

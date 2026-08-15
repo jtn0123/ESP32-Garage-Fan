@@ -12,7 +12,7 @@ import sys
 import time
 
 
-def run(cmd: list[str], check=True) -> int:
+def run(cmd: list[str], check: bool = True) -> int:
     """Run a command and optionally check for errors."""
     print("$", " ".join(cmd))
     result = subprocess.call(cmd)
@@ -30,7 +30,7 @@ def run_output(cmd: list[str]) -> str:
         return ""
 
 
-def find_usb_ports():
+def find_usb_ports() -> list[str]:
     """Find USB serial ports, excluding Bluetooth ports."""
     # Common patterns for USB serial ports on different platforms
     patterns = [
@@ -51,12 +51,12 @@ def find_usb_ports():
         "*debug*",
     ]
 
-    ports = []
+    ports: list[str] = []
     for pattern in patterns:
         ports.extend(glob.glob(pattern))
 
     # Filter out excluded patterns
-    filtered_ports = []
+    filtered_ports: list[str] = []
     for port in ports:
         skip = False
         for exclude in exclude_patterns:
@@ -68,7 +68,7 @@ def find_usb_ports():
 
     # Remove macOS duplicates (prefer cu.* over tty.*)
     # On macOS, /dev/cu.* and /dev/tty.* are the same device
-    unique_ports = {}
+    unique_ports: dict[str, str] = {}
     for port in filtered_ports:
         if "/dev/cu." in port:
             # Extract device name after cu.
@@ -86,7 +86,7 @@ def find_usb_ports():
     return sorted(unique_ports.values())  # Return sorted list of unique ports
 
 
-def wait_for_device(timeout=30):
+def wait_for_device(timeout: int = 30) -> str | None:
     """Wait for a USB device to appear."""
     print(f"Waiting for USB device (timeout: {timeout}s)...")
     print("Instructions:")
@@ -113,7 +113,7 @@ def wait_for_device(timeout=30):
     return None
 
 
-def erase_flash(port):
+def erase_flash(port: str) -> bool:
     """Erase flash memory (recovery mode)."""
     print("\n=== ERASING FLASH ===")
     print("This will completely erase the device...")
@@ -137,7 +137,7 @@ def erase_flash(port):
     return False
 
 
-def bump_version():
+def bump_version() -> tuple[str | None, str | None]:
     """Create an empty commit to generate a new version hash."""
     print("\n=== BUMPING VERSION ===")
 
@@ -161,7 +161,7 @@ def bump_version():
         return old_version, old_version
 
 
-def list_ports_command():
+def list_ports_command() -> list[str]:
     """List available USB ports for user reference."""
     ports = find_usb_ports()
     if ports:
@@ -179,7 +179,7 @@ def list_ports_command():
         return []
 
 
-def monitor_device(port):
+def monitor_device(port: str) -> None:
     """Monitor serial output from device."""
     print(f"\n=== MONITORING {port} ===")
     print("Press Ctrl+C to exit")

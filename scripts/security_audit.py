@@ -63,9 +63,9 @@ SKIP_DIRS = [
 ]
 
 
-def check_file_for_credentials(filepath: Path) -> list:
+def check_file_for_credentials(filepath: Path) -> list[dict[str, str | int]]:
     """Check a single file for potential credential leaks."""
-    issues = []
+    issues: list[dict[str, str | int]] = []
 
     # Skip allowed files
     if filepath.name in ALLOWED_FILES:
@@ -102,7 +102,7 @@ def check_file_for_credentials(filepath: Path) -> list:
     return issues
 
 
-def check_git_history():
+def check_git_history() -> list[str]:
     """Check if sensitive files were ever committed to git."""
     sensitive_files = [
         "config/device.yaml",
@@ -111,7 +111,7 @@ def check_git_history():
         "credentials.json",
     ]
 
-    issues = []
+    issues: list[str] = []
     for file in sensitive_files:
         try:
             # Check if file exists in git history
@@ -129,7 +129,7 @@ def check_git_history():
     return issues
 
 
-def check_gitignore():
+def check_gitignore() -> list[str]:
     """Verify that sensitive files are properly ignored."""
     should_be_ignored = [
         "config/device.yaml",
@@ -140,7 +140,7 @@ def check_gitignore():
         "generated_config.h",
     ]
 
-    issues = []
+    issues: list[str] = []
 
     # Read .gitignore
     gitignore_path = Path(".gitignore")
@@ -159,9 +159,9 @@ def check_gitignore():
     return issues
 
 
-def scan_directory(root_path: Path) -> list:
+def scan_directory(root_path: Path) -> list[dict[str, str | int]]:
     """Scan directory tree for credential leaks."""
-    issues = []
+    issues: list[dict[str, str | int]] = []
 
     for filepath in root_path.rglob("*"):
         # Skip directories
@@ -201,13 +201,13 @@ def scan_directory(root_path: Path) -> list:
     return issues
 
 
-def main():
+def main() -> int:
     """Run security audit."""
     print("🔒 Security Audit Starting...")
     print("-" * 60)
 
     root_path = Path.cwd()
-    all_issues = []
+    all_issues: list[dict[str, str | int] | str] = []
 
     # Check for credentials in code
     print("Scanning for credentials in code...")
@@ -227,8 +227,8 @@ def main():
     git_issues = check_git_history()
     if git_issues:
         print(f"  ⚠️  Found {len(git_issues)} files in git history")
-        for issue in git_issues:
-            print(f"    - {issue}")
+        for git_issue in git_issues:
+            print(f"    - {git_issue}")
         all_issues.extend(git_issues)
     else:
         print("  ✅ No sensitive files in git history")
@@ -238,8 +238,8 @@ def main():
     gitignore_issues = check_gitignore()
     if gitignore_issues:
         print(f"  ⚠️  Found {len(gitignore_issues)} .gitignore issues")
-        for issue in gitignore_issues:
-            print(f"    - {issue}")
+        for gitignore_issue in gitignore_issues:
+            print(f"    - {gitignore_issue}")
         all_issues.extend(gitignore_issues)
     else:
         print("  ✅ .gitignore properly configured")
