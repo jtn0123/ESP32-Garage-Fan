@@ -224,7 +224,15 @@ void loop() {
   esp_task_wdt_reset();
   TRAIL("web");
   web::handle();
-  odometer::tick(fan::speed(), fan::watts(fan::speed()));
+  {
+    // Real watts when the meter answered inside a minute, cubic-law estimate
+    // otherwise -- the odometer predates the watt meter and the estimate ran
+    // ~18% low at the top of the curve (37.8 est vs 44.2 measured).
+    const float est = fan::watts(fan::speed());
+    const float meas = plug::watts();
+    const bool fresh = plug::age_s() >= 0 && plug::age_s() < 60;
+    odometer::tick(fan::speed(), fresh && !isnan(meas) ? meas : est);
+  }
   esp_task_wdt_reset();
   TRAIL("epd");
   display::maybe_render();

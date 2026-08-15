@@ -67,6 +67,10 @@ export interface DeviceState {
   gas_voc: number;
   /** True while the latch is holding the floor right now. */
   gas_active: boolean;
+  /** Fan watt-hours since local midnight (measured watts when available). */
+  wh_today: number;
+  /** Electricity price, $/kWh — display math for the cost readouts. */
+  cost_kwh: number;
 }
 
 export interface PlugState {
@@ -113,6 +117,8 @@ export interface Stats {
   run_today_s: number;
   run_total_s: number;
   energy_wh: number;
+  /** Watt-hours since local midnight — the day slice of energy_wh. */
+  wh_today: number;
   watts_now: number;
   t_min_f: number;
   t_max_f: number;

@@ -86,6 +86,8 @@ STATE = {
     "gas_spd": 6,
     "gas_voc": 250,
     "gas_active": False,
+    "wh_today": 412.5,
+    "cost_kwh": 0.15,
 }
 DEVICE = {
     "id": "garage-fan-d69dbe",
@@ -105,6 +107,7 @@ STATS = {
     "run_today_s": 16501,
     "run_total_s": 410634,
     "energy_wh": 5183,
+    "wh_today": 412.5,
     "watts_now": 47,
     "t_min_f": 75.1,
     "t_max_f": 77.1,
@@ -707,6 +710,7 @@ class H(BaseHTTPRequestHandler):
         "gason": ("gas_on", lambda v: v not in ("0", "false")),
         "gasspd": ("gas_spd", int),
         "gasvoc": ("gas_voc", int),
+        "ckwh": ("cost_kwh", float),
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),

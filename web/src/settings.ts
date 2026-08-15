@@ -213,6 +213,18 @@ export function buildGroups(d: SettingsDeps): Group[] {
         ),
         text('Estimated runtime', 'Hours left at the current discharge slope. Blank while charging or flat.',
           s.batt?.eta_h != null ? `${s.batt.eta_h.toFixed(1)} h` : '–'),
+        text(
+          'Fan energy today',
+          'Watt-hours the fan has drawn since local midnight — measured by the Tapo meter when it answers, the cubic-law estimate otherwise — and what that costs at the price below.',
+          `${(s.wh_today / 1000).toFixed(2)} kWh · $${((s.wh_today / 1000) * s.cost_kwh).toFixed(2)}`,
+        ),
+        step(
+          'Electricity price',
+          'Your utility rate, for the cost readouts. Display math only — nothing bills against it.',
+          `$${s.cost_kwh.toFixed(2)} / kWh`,
+          () => set(`ckwh=${clamp(Math.round((s.cost_kwh - 0.01) * 100) / 100, 0.01, 2)}`),
+          () => set(`ckwh=${clamp(Math.round((s.cost_kwh + 0.01) * 100) / 100, 0.01, 2)}`),
+        ),
       ],
     },
     {

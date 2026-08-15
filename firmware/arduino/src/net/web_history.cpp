@@ -368,11 +368,11 @@ void handle_stats() {
   history::temp_stats(&tmin, &tmax, &tavg);
   char buf[288];
   snprintf(buf, sizeof(buf),
-           "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,"
+           "{\"run_today_s\":%lu,\"run_total_s\":%lu,\"energy_wh\":%.0f,\"wh_today\":%.1f,"
            "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
            "\"t_avg_f\":%.1f,\"samples\":%u}",
            (unsigned long)odometer::run_today_s(), (unsigned long)odometer::run_total_s(),
-           odometer::energy_wh(), fan::watts(fan::speed() < 0 ? 0 : fan::speed()),
+           odometer::energy_wh(), odometer::wh_today(), fan::watts(fan::speed() < 0 ? 0 : fan::speed()),
            isnan(tmin) ? 0 : tmin * 9 / 5 + 32, isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
            isnan(tavg) ? 0 : tavg * 9 / 5 + 32, history::count());
   g_http->send(200, "application/json", buf);

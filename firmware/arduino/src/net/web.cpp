@@ -33,6 +33,7 @@
 #include "storage/sdcard.h"
 #include "system/crashlog.h"
 #include "system/eventlog.h"
+#include "system/odometer.h"
 #include "system/ota_rollback.h"
 
 // Static assets served verbatim. At file scope (not in the namespace) so the
@@ -117,7 +118,8 @@ void state_json(char* out, size_t cap) {
            "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
            "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
            "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s,\"sht_pref\":%s,"
-           "\"gas_on\":%s,\"gas_spd\":%d,\"gas_voc\":%d,\"gas_active\":%s}",
+           "\"gas_on\":%s,\"gas_spd\":%d,\"gas_voc\":%d,\"gas_active\":%s,"
+           "\"wh_today\":%.1f,\"cost_kwh\":%.3f}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
            climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
@@ -129,7 +131,8 @@ void state_json(char* out, size_t cap) {
            (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
            millis() / 1000UL, WiFi.localIP().toString().c_str(), plugs,
            climate::prefer_sht() ? "true" : "false", fan::gas_boost_on() ? "true" : "false",
-           fan::gas_speed(), fan::gas_voc_on(), fan::gas_active() ? "true" : "false");
+           fan::gas_speed(), fan::gas_voc_on(), fan::gas_active() ? "true" : "false",
+           odometer::wh_today(), odometer::cost_per_kwh());
 }
 
 void push_state() { sse::push(); }
@@ -195,6 +198,11 @@ static void handle_config() {
     const int v = g_http.arg("gasspd").toInt();
     if (v >= 1 && v <= 12)
       fan::set_gas_speed(v);
+  }
+  if (g_http.hasArg("ckwh")) {
+    const float v = g_http.arg("ckwh").toFloat();
+    if (v >= 0.01f && v <= 2.0f)
+      odometer::set_cost_per_kwh(v);
   }
   if (g_http.hasArg("gasvoc")) {
     // Floor of 100: the index recenters on 100 by construction, so a lower

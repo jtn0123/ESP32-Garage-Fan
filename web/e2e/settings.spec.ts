@@ -131,6 +131,15 @@ test('the gas boost controls reach the controller with their own keys', async ({
   await expect.poll(() => posts.some((r) => r.url().includes('gasspd='))).toBe(true);
 });
 
+test('the electricity price stepper reaches the controller as ckwh', async ({ page }) => {
+  await openSettings(page);
+  const posts = recordRequests(page, /\/api\/config/);
+  const row = page.locator('#groups .grow', { hasText: 'Electricity price' });
+  await row.locator('button').last().click();
+  await expect.poll(() => posts.some((r) => r.url().includes('ckwh='))).toBe(true);
+  await row.locator('button').first().click(); // leave the price as found
+});
+
 test('the CSV download points at 30 days off the card', async ({ page }) => {
   await openSettings(page);
   const link = page.locator('#groups a', { hasText: /Download CSV/i });

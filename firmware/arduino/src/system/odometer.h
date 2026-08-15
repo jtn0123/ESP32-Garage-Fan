@@ -21,5 +21,11 @@ void tick(int speed, float watts);
 uint32_t run_today_s();
 uint32_t run_total_s();
 float energy_wh();
+/** Watt-hours since local midnight (measured watts when the meter answers). */
+float wh_today();
+
+/** Electricity price, $/kWh, for the console's cost readouts. */
+float cost_per_kwh();
+void set_cost_per_kwh(float v);
 
 }  // namespace odometer
