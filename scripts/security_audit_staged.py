@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+from typing import Any
 
 
 # Severity levels
@@ -41,8 +42,9 @@ CREDENTIAL_PATTERNS = [
     (Severity.LOW, r'ssid\s*[=:]\s*["\'][^"\']+["\']', "WiFi SSID"),
 ]
 
-# Files/patterns that are allowed to have these patterns
-EXCLUSIONS = {
+# Files/patterns that are allowed to have these patterns. Three differently
+# shaped sections under one roof, hence the Any.
+EXCLUSIONS: dict[str, Any] = {
     # File-based exclusions
     "files": {
         ".env.example": [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW],
@@ -79,7 +81,7 @@ EXCLUSIONS = {
 }
 
 
-def get_staged_files():
+def get_staged_files() -> list[str]:
     """Get list of files staged for commit.
 
     In CI there is no index to read: the Security Scan workflow diffs the pull
@@ -129,7 +131,7 @@ def get_staged_files():
         return []
 
 
-def is_excluded(filepath, severity, content=None):
+def is_excluded(filepath: str, severity: str, content: str | None = None) -> bool:
     """Check if a finding should be excluded."""
     filename = os.path.basename(filepath)
 
@@ -152,9 +154,11 @@ def is_excluded(filepath, severity, content=None):
     return False
 
 
-def check_file_for_credentials(filepath):
+def check_file_for_credentials(  # NOSONAR -- complexity predates this PR
+    filepath: str,
+) -> list[dict[str, str | int]]:
     """Check a single file for credentials."""
-    findings = []
+    findings: list[dict[str, str | int]] = []
 
     if not os.path.exists(filepath):
         return findings
@@ -191,7 +195,7 @@ def check_file_for_credentials(filepath):
     return findings
 
 
-def main():
+def main() -> int:  # NOSONAR -- predates this PR (only annotations changed)
     """Main function."""
     print("🔍 Scanning staged files for credentials...")
 
@@ -205,7 +209,7 @@ def main():
     print(f"  Checking {len(staged_files)} staged files...")
 
     # Check each staged file
-    all_findings = []
+    all_findings: list[dict[str, str | int]] = []
     for filepath in staged_files:
         # Skip certain file types
         if filepath.endswith(

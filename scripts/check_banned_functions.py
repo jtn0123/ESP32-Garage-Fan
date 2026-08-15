@@ -24,7 +24,7 @@ SKIP_PATTERNS = [
 
 def check_file(filepath: Path) -> list[tuple[int, str, str]]:
     """Check a file for banned functions. Returns list of (line_num, function, suggestion)."""
-    issues = []
+    issues: list[tuple[int, str, str]] = []
 
     try:
         content = filepath.read_text()
@@ -49,7 +49,7 @@ def check_file(filepath: Path) -> list[tuple[int, str, str]]:
     return issues
 
 
-def main():
+def main() -> None:
     firmware_dir = Path("firmware/arduino/src")
 
     if not firmware_dir.exists():

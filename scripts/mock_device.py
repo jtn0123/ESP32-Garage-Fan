@@ -22,10 +22,12 @@ Scenario knobs are flipped at runtime:
     curl "http://127.0.0.1:8099/_die"                 # controller goes away
 """
 
+from __future__ import annotations
+
 import base64
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import math
 import os
 from pathlib import Path
 import time
@@ -44,487 +46,38 @@ PORT = int(os.environ.get("MOCK_PORT", "8099"))
 # scripts/deploy.sh for the same rule.
 SELF_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
 
-STEP = 300
-BOOT = time.time()
+# The SELF_ORIGINS block above is config, not code, hence the late import.
+import sys as _sys  # noqa: E402
 
-STATE = {
-    "speed": 9,
-    "auto": True,
-    "auto_max": 9,
-    "auto_min": 0,
-    "on_f": 2.5,
-    "off_f": 1.5,
-    "outside_f": 73.2,
-    "toff": -8.0,
-    "offc": -8.0,
-    "offi": -8.0,
-    "fw": "1.14.23",
-    "slot": "ota_0",
-    "confirmed": True,
-    "unhealthy_boots": 0,
-    "sensor": True,
-    "last_reset": "sw_reset",
-    "boots": 41,
-    "prev_death": "sw_reset",
-    "sd_q": False,
-    "sd_total_mb": 28887,
-    "sd_used_mb": 28677,
-    "sd_free_mb": 210,
-    "batt": {"v": 4.195, "pct": 100, "chg": True, "eta_h": None, "mvh": -6},
-    "rssi": -63,
-    "drops": 0,
-    "mqtt": True,
-    "uptime_s": 1837,
-    "ip": "127.0.0.1",
-    # The Tapo watt meter on the fan's supply, as net/plug reports it. The
-    # SCEN plug knob swaps in the disagreement case; "none" serves null, the
-    # no-meter build.
-    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
-    "sht_pref": True,
-    # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
-    "gas_on": True,
-    "gas_spd": 6,
-    "gas_voc": 250,
-    "gas_active": False,
-    "wh_today": 412.5,
-    "cost_kwh": 0.15,
-}
-DEVICE = {
-    "id": "garage-fan-d69dbe",
-    "host": "garage-fan",
-    "repo": "jtn0123/ESP32-Garage-Fan",
-    # Placeholders on purpose. This file is public and a mock has no reason to
-    # carry the real broker address or the site's actual SSID.
-    "broker": "192.0.2.10:1883",
-    "ssid": "example-wifi",
-    "topic_set": "garage/fan/set",
-    "topic_out": "home/outdoor/temp_f",
-    "period_us": 9934,
-    "sample_s": STEP,
-    "high_us": [0, 3477, 4072, 4868, 5066, 5661, 6159, 6754, 7251, 7847, 8344, 8940, 9437],
-}
-STATS = {
-    "run_today_s": 16501,
-    "run_total_s": 410634,
-    "energy_wh": 5183,
-    "wh_today": 412.5,
-    "watts_now": 47,
-    "t_min_f": 75.1,
-    "t_max_f": 77.1,
-    "t_avg_f": 75.9,
-    "samples": 288,
-}
+# Path bootstrap: this file is run as a script (pytest spawns it by path,
+# Playwright's harness too) AND loaded via importlib by tests/test_qr_v1.py,
+# so the sibling modules are found relative to THIS file, not the cwd.
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Harness knobs.
-SCEN = {
-    "card": True,
-    "synced": True,
-    "rows": 288,
-    "gap_at": None,
-    "corrupt": False,
-    "flat_rh": False,
-    "down": False,
-    # The panel before its first refresh: the firmware answers ready:false
-    # until then, and the console has a branch for it that nothing could reach.
-    "panel_ready": True,
-    # "ok" agree, "bad" sustained disagreement, "none" no meter at all
-    "plug": "ok",
-}
+from mock_data import console_bytes, history  # noqa: E402
+from mock_panel import (  # noqa: E402
+    DISP_H,
+    DISP_STRIDE,
+    DISP_W,
+    display_frame,
+    qr_v1_encode,  # noqa: F401  (re-exported for tests/test_qr_v1.py)
+)
+from mock_state import BOOT, DEVICE, SCEN, SCEN_SPEC, STATE, STATS, coerce_scen  # noqa: E402
 
-
-# Type and bounds for every scenario knob. /_scen coerces through this rather
-# than storing whatever arrived, so nothing a caller sends survives as a string
-# anywhere in this process.
-SCEN_SPEC = {
-    "card": bool,
-    "synced": bool,
-    "rows": (int, 0, 8640),
-    "gap_at": (int, 0, 8640),  # or None
-    "corrupt": bool,
-    "flat_rh": bool,
-    "down": bool,
-    "panel_ready": bool,
-    "plug": ("choice", "ok", "bad", "none"),
-}
-
-
-def coerce_scen(key: str, raw: str):
-    """Whitelisted parse of one knob. Raises ValueError on anything else."""
-    spec = SCEN_SPEC[key]
-    if isinstance(spec, tuple) and spec[0] == "choice":
-        if raw not in spec[1:]:
-            raise ValueError(f"{key} takes one of {'|'.join(spec[1:])}")
-        return raw
-    if spec is bool:
-        if raw not in ("true", "false"):
-            raise ValueError(f"{key} takes true|false")
-        return raw == "true"
-    _, lo, hi = spec
-    if raw == "none":
-        return None
-    if not raw.isdigit() or not (lo <= int(raw) <= hi):
-        raise ValueError(f"{key} takes {lo}..{hi} or none")
-    return int(raw)
-
-
-# Both caches exist for the Playwright suite: a dozen browser contexts hammer
-# this single-process server, and re-reading a 58 KB file and rebuilding 288
-# rows of trig per request made the MOCK the slowest thing in the run. Tests
-# then timed out waiting for the first paint, which reads as a console bug and
-# is not one. Dogfooding by hand gets the same benefit for free.
-#
-# Both are published as a SINGLE tuple rebind, never as two field writes. This
-# is a ThreadingHTTPServer: a version that stored the key first and the value
-# second let another thread observe the new key beside the old (or absent)
-# value, and the handler died mid-response -- the browser saw ERR_EMPTY_RESPONSE
-# and the suite reported it as a console failure. Read once into a local, build
-# off to the side, then swap; rebinding one name is atomic under the GIL.
-_page_cache: "tuple[int, bytes] | None" = None
-
-
-def console_bytes() -> bytes:
-    """web/dist/console.html, re-read only when the build actually changes."""
-    global _page_cache
-    stamp = CONSOLE.stat().st_mtime_ns
-    cached = _page_cache
-    if cached is None or cached[0] != stamp:
-        cached = (stamp, CONSOLE.read_bytes())
-        _page_cache = cached
-    return cached[1]
-
-
-_hist_cache: "tuple[tuple, dict] | None" = None
-
-
-def history():
-    # Keyed on the knobs AND the current second: the rows carry timestamps, so a
-    # cache that ignored the clock would freeze the chart's right-hand edge.
-    global _hist_cache
-    key = (tuple(sorted(SCEN.items())), int(time.time()))
-    cached = _hist_cache
-    if cached is not None and cached[0] == key:
-        return cached[1]
-    value = _history_uncached()
-    _hist_cache = (key, value)
-    return value
-
-
-def _history_uncached():
-    n = SCEN["rows"]
-    end = int(time.time())
-    ts, temp, rh, hpa, out, batt, spd, chg = [], [], [], [], [], [], [], []
-    t = end - (n - 1) * STEP
-    for i in range(n):
-        if SCEN["gap_at"] is not None and i == SCEN["gap_at"]:
-            t += STEP * 40  # a dark stretch
-        ts.append(t)
-        t += STEP
-        temp.append(round(24 + math.sin(i / 20) * 2.0, 1))
-        rh.append(40 if SCEN["flat_rh"] else 38 + (i % 5))
-        hpa.append(round(999.9 + math.cos(i / 30) * 0.4, 1))
-        out.append(None if i % 17 == 0 else round(73 + math.sin(i / 25) * 4, 1))
-        batt.append(round(4.20 - (i % 40) * 0.005, 2))
-        spd.append(i % 10)
-        chg.append(1 if i % 3 else 0)
-    # The watt meter and the air chain: watts follows the logged fan speed
-    # through the baseline table; the SGP41 columns model a sensor that was
-    # plugged in mid-history -- nulls (absent), then raws with index 0
-    # (warming), then indices -- so the console's warm-up handling is
-    # exercised by the default data set.
-    base_w = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
-    watts = [round(base_w[min(sp, 12)] + (i % 3) * 0.2, 1) for i, sp in enumerate(spd)]
-    vocr, noxr, voc, nox = [], [], [], []
-    third = max(1, n // 3)
-    for i in range(n):
-        if i < third:
-            vocr.append(None)
-            noxr.append(None)
-            voc.append(None)
-            nox.append(None)
-        elif i < 2 * third:
-            vocr.append(29000 + (i % 40) * 20)
-            noxr.append(15600 + (i % 25) * 8)
-            voc.append(0)
-            nox.append(0)
-        else:
-            vocr.append(30000 + (i % 40) * 20)
-            noxr.append(15800 + (i % 25) * 8)
-            voc.append(80 + (i % 30))
-            nox.append(1 + (i % 3))
-    if SCEN["corrupt"]:  # what a bad CSV row must become
-        if len(temp) > 5:
-            temp[5] = None
-        if len(hpa) > 7:
-            hpa[7] = None
-    return {
-        "source": "sd" if SCEN["card"] else "ring",
-        "interval_s": STEP,
-        "ts": ts,
-        "watts": watts,
-        "bme_t": [None if t is None else round(t + 1.8, 2) for t in temp],
-        "bme_rh": [None if r is None else r - 3 for r in rh],
-        "voc_raw": vocr,
-        "nox_raw": noxr,
-        "voc": voc,
-        "nox": nox,
-        "temp_c": temp,
-        "rh": rh,
-        "hpa": hpa,
-        "out_f": out,
-        "batt_v": batt,
-        "spd": spd,
-        "chg": chg,
-    }
-
-
-# ------------------------------------------------------- the e-ink mirror
-#
-# A SYNTHETIC frame, not a reimplementation of ui/display.cpp. The console's
-# mirror is a framebuffer blitter with no layout logic of its own (see
-# web/src/panel.ts), so what it needs exercising is the wire shape and the
-# decode: two 1-bit planes, row-major, MSB first, correct stride, red over
-# black. Copying the firmware's layout here would be a second copy to keep in
-# step, which is the exact trap the framebuffer design avoids.
-#
-# It does track STATE["speed"], so the bar and the digits move when the console
-# drives the fan -- otherwise a test could not tell a live mirror from a
-# hardcoded picture.
-DISP_W = 250
-DISP_H = 122
-DISP_STRIDE = (DISP_W + 7) // 8
-
-# 3x5 digits, one string per glyph, row-major. Enough to read a speed off the
-# mock's panel; the real panel uses the Adafruit GFX font.
-_FONT3X5 = {
-    # Letters for the banner knockout ("GARAGE FAN").
-    "G": ("111", "100", "101", "101", "111"),
-    "A": ("010", "101", "111", "101", "101"),
-    "R": ("110", "101", "110", "101", "101"),
-    "E": ("111", "100", "110", "100", "111"),
-    "F": ("111", "100", "110", "100", "100"),
-    "N": ("101", "111", "111", "101", "101"),
-    " ": ("000", "000", "000", "000", "000"),
-    "0": ("111", "101", "101", "101", "111"),
-    "1": ("010", "110", "010", "010", "111"),
-    "2": ("111", "001", "111", "100", "111"),
-    "3": ("111", "001", "111", "001", "111"),
-    "4": ("101", "101", "111", "001", "001"),
-    "5": ("111", "100", "111", "001", "111"),
-    "6": ("111", "100", "111", "101", "111"),
-    "7": ("111", "001", "001", "001", "001"),
-    "8": ("111", "101", "111", "101", "111"),
-    "9": ("111", "101", "111", "001", "111"),
-    "-": ("000", "000", "111", "000", "000"),
-    ".": ("000", "000", "000", "000", "100"),
-}
-
-
-class _Plane:
-    """A 1-bit, row-major, MSB-first plane -- the firmware's format."""
-
-    def __init__(self):
-        self.buf = bytearray(DISP_STRIDE * DISP_H)
-
-    def px(self, x, y, on=True):
-        if 0 <= x < DISP_W and 0 <= y < DISP_H:
-            if on:
-                self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
-            else:
-                self.buf[y * DISP_STRIDE + (x >> 3)] &= ~(0x80 >> (x & 7)) & 0xFF
-
-    def rect(self, x, y, w, h, on=True):
-        for yy in range(y, y + h):
-            for xx in range(x, x + w):
-                self.px(xx, yy, on)
-
-    def frame(self, x, y, w, h):
-        for xx in range(x, x + w):
-            self.px(xx, y)
-            self.px(xx, y + h - 1)
-        for yy in range(y, y + h):
-            self.px(x, yy)
-            self.px(x + w - 1, yy)
-
-    def text(self, x, y, s, scale=1, on=True):
-        for ch in s:
-            glyph = _FONT3X5.get(ch)
-            if glyph:
-                for gy, row in enumerate(glyph):
-                    for gx, bit in enumerate(row):
-                        if bit == "1":
-                            self.rect(x + gx * scale, y + gy * scale, scale, scale, on)
-            x += 4 * scale
-
-
-# ---- V1-L alphanumeric QR, mask 0: the same fixed encoder the firmware
-# carries in ui/qr_v1.h, ported line for line. tests/test_qr_v1.py pins this
-# against a matrix from the `segno` reference library; if you change one port,
-# change both and re-pin.
-_QR_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
-QR_SIZE = 21
-_QR_DATA_CW, _QR_ECC_CW = 19, 7
-
-
-def _gf_mul(a, b):
-    r = 0
-    while b:
-        if b & 1:
-            r ^= a
-        a <<= 1
-        if a & 0x100:
-            a ^= 0x11D
-        b >>= 1
-    return r
-
-
-def qr_v1_encode(text):
-    """21x21 matrix of 0/1 for `text`, or None if it does not fit V1-L."""
-    if not text or len(text) > 25 or any(c not in _QR_ALNUM for c in text):
-        return None
-    bits = []
-
-    def put(val, n):
-        bits.extend((val >> i) & 1 for i in range(n - 1, -1, -1))
-
-    put(0b0010, 4)
-    put(len(text), 9)
-    for i in range(0, len(text) - 1, 2):
-        put(_QR_ALNUM.index(text[i]) * 45 + _QR_ALNUM.index(text[i + 1]), 11)
-    if len(text) % 2:
-        put(_QR_ALNUM.index(text[-1]), 6)
-    put(0, min(4, _QR_DATA_CW * 8 - len(bits)))
-    while len(bits) % 8:
-        bits.append(0)
-    data = bytearray(int("".join(map(str, bits[i : i + 8])), 2) for i in range(0, len(bits), 8))
-    while len(data) < _QR_DATA_CW:
-        data.append(0xEC if (len(data) - len(bits) // 8) % 2 == 0 else 0x11)
-
-    gen = [1]
-    root = 1
-    for _ in range(_QR_ECC_CW):
-        nxt = [0] * (len(gen) + 1)
-        for i, g in enumerate(gen):
-            nxt[i] ^= _gf_mul(g, root)
-            nxt[i + 1] ^= g
-        gen, root = nxt, _gf_mul(root, 2)
-    gen = gen[::-1]
-    rem = bytearray(_QR_ECC_CW)
-    for b in data:
-        factor = b ^ rem[0]
-        rem = rem[1:] + bytearray(1)
-        for i in range(_QR_ECC_CW):
-            rem[i] ^= _gf_mul(gen[i + 1], factor)
-    codewords = bytes(data) + bytes(rem)
-
-    mod = [[0] * QR_SIZE for _ in range(QR_SIZE)]
-    isf = [[False] * QR_SIZE for _ in range(QR_SIZE)]
-
-    def setf(x, y, v):
-        mod[y][x] = int(bool(v))
-        isf[y][x] = True
-
-    for cx, cy in ((3, 3), (QR_SIZE - 4, 3), (3, QR_SIZE - 4)):
-        for dy in range(-4, 5):
-            for dx in range(-4, 5):
-                x, y = cx + dx, cy + dy
-                if 0 <= x < QR_SIZE and 0 <= y < QR_SIZE:
-                    d = max(abs(dx), abs(dy))
-                    setf(x, y, d != 2 and d != 4)
-    for t in range(8, QR_SIZE - 8):
-        setf(t, 6, t % 2 == 0)
-        setf(6, t, t % 2 == 0)
-    fdata = 1 << 3  # ECC L, mask 0
-    frem = fdata
-    for _ in range(10):
-        frem = (frem << 1) ^ ((frem >> 9) * 0x537)
-    fbits = (fdata << 10 | frem) ^ 0x5412
-
-    def fb(i):
-        return (fbits >> i) & 1
-
-    for i in range(6):
-        setf(8, i, fb(i))
-    setf(8, 7, fb(6))
-    setf(8, 8, fb(7))
-    setf(7, 8, fb(8))
-    for i in range(9, 15):
-        setf(14 - i, 8, fb(i))
-    for i in range(8):
-        setf(QR_SIZE - 1 - i, 8, fb(i))
-    for i in range(8, 15):
-        setf(8, QR_SIZE - 15 + i, fb(i))
-    setf(8, QR_SIZE - 8, 1)
-
-    bit = 0
-    total = len(codewords) * 8
-    right = QR_SIZE - 1
-    while right >= 1:
-        if right == 6:
-            right = 5
-        for vert in range(QR_SIZE):
-            for j in range(2):
-                x = right - j
-                upward = ((right + 1) & 2) == 0
-                y = QR_SIZE - 1 - vert if upward else vert
-                if not isf[y][x] and bit < total:
-                    mod[y][x] = (codewords[bit >> 3] >> (7 - (bit & 7))) & 1
-                    bit += 1
-        right -= 2
-    for y in range(QR_SIZE):
-        for x in range(QR_SIZE):
-            if not isf[y][x] and (x + y) % 2 == 0:
-                mod[y][x] ^= 1
-    return mod
-
-
-def display_frame():
-    """Compose the mock's panel image: the black plane and the red plane."""
-    black, red = _Plane(), _Plane()
-    speed = max(0, int(STATE["speed"]))
-
-    black.frame(0, 0, DISP_W, DISP_H)
-    # The banner, like the firmware's tricolor path: a solid red band with the
-    # title knocked out to paper. One plane -- pixels are never set in both,
-    # because that speckles on the glass.
-    red.rect(0, 0, DISP_W, 20)
-    red.text(5, 4, "GARAGE FAN", scale=2, on=False)
-
-    # Left: the two temperatures, which must DIFFER. Drawing the same value in
-    # both slots would let a console that swapped or duplicated them pass.
-    inside_f = STATE["outside_f"] + 8
-    black.text(6, 26, f"{inside_f:.0f}", scale=4)
-    black.text(6, 76, f"{STATE['outside_f']:.0f}", scale=3)
-
-    # Right: the fan, with a red bar whose fill follows the speed, and the
-    # console link as a QR in the same spot the firmware draws it.
-    black.rect(126, 20, 1, 82)
-    black.text(136, 30, str(speed), scale=6)
-    qr = qr_v1_encode(f"HTTP://{STATE['ip']}".upper())
-    if qr:
-        for qy in range(QR_SIZE):
-            for qx in range(QR_SIZE):
-                if qr[qy][qx]:
-                    black.rect(204 + qx * 2, 25 + qy * 2, 2, 2)
-    bar_w = DISP_W - 132 - 6
-    black.frame(132, 72, bar_w, 10)
-    fill = int(round(speed / 12 * (bar_w - 2)))
-    if fill > 0:
-        red.rect(133, 73, fill, 8)  # red-only, matching the tricolor firmware
-
-    black.rect(0, 104, DISP_W, 1)
-    return black, red
+# What parse_qs hands every handler: each query key to its list of values.
+Query = dict[str, list[str]]
 
 
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *args):
+    def log_message(self, *args: object) -> None:
         # Silence BaseHTTPRequestHandler's per-request stderr line. The console
         # polls every 15 s and redraws on every frame, so the default access
         # log buries the tracebacks this harness exists to surface.
         pass
 
-    def _send(self, code, body, ctype="application/json"):
+    def _send(self, code: int, body: bytes | str, ctype: str = "application/json") -> None:
         raw = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -544,15 +97,15 @@ class H(BaseHTTPRequestHandler):
         # comparison before it is stored.
         self.wfile.write(raw)  # NOSONAR
 
-    def _json(self, code, obj):
+    def _json(self, code: int, obj: object) -> None:
         self._send(code, json.dumps(obj))
 
     # --- the guards the firmware now enforces -----------------------------
-    def _origin_ok(self):
+    def _origin_ok(self) -> bool:
         o = self.headers.get("Origin")
         return o is None or o in SELF_ORIGINS
 
-    def _write_guard(self):
+    def _write_guard(self) -> bool:
         """POST-only + Origin, matching web.cpp. Returns True if refused."""
         if self.command != "POST":
             self._json(404, {"error": "404"})
@@ -562,10 +115,10 @@ class H(BaseHTTPRequestHandler):
             return True
         return False
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         self.route()
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         self.route()
 
     # --- routing ----------------------------------------------------------
@@ -573,7 +126,7 @@ class H(BaseHTTPRequestHandler):
     # to a cognitive complexity of 67, which is exactly the shape that hides a
     # missing guard.
 
-    def route(self):
+    def route(self) -> None:
         STATE["uptime_s"] = int(time.time() - BOOT) + 1837
         u = urlparse(self.path)
         path, query = u.path, parse_qs(u.query)
@@ -591,7 +144,7 @@ class H(BaseHTTPRequestHandler):
         return handler(self, query)
 
     # --- harness ----------------------------------------------------------
-    def _harness(self, path, query):
+    def _harness(self, path: str, query: Query) -> None:
         if path == "/_die":
             SCEN["down"] = True
             return self._json(200, {"ok": True})
@@ -619,12 +172,12 @@ class H(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "applied": applied})
 
     # --- reads ------------------------------------------------------------
-    def _page(self, _query):
+    def _page(self, _query: Query) -> None:
         # Sonar's S5131 flow names this read as its source; the suppression and
         # the reasoning live at the sink in _send, where the rule reports.
         return self._send(200, console_bytes(), "text/html")
 
-    def _state(self, _query):
+    def _state(self, _query: Query) -> None:
         mode = SCEN["plug"]
         if mode == "none":
             STATE["plug"] = None
@@ -637,13 +190,13 @@ class H(BaseHTTPRequestHandler):
             STATE["plug"] = {"w": base[min(speed, 12)], "v": 120.9, "age_s": 3, "verdict": 1}
         return self._json(200, STATE)
 
-    def _device(self, _query):
+    def _device(self, _query: Query) -> None:
         return self._json(200, DEVICE)
 
-    def _stats(self, _query):
+    def _stats(self, _query: Query) -> None:
         return self._json(200, STATS)
 
-    def _sensors(self, _query):
+    def _sensors(self, _query: Query) -> None:
         return self._json(
             200,
             {
@@ -663,14 +216,14 @@ class H(BaseHTTPRequestHandler):
             },
         )
 
-    def _events(self, _query):
+    def _events(self, _query: Query) -> None:
         now = int(time.time())
         body = "\n".join(
             f"{now - i * 30} {1000 - i * 30} health rssi=-63 heap=46724 drops=0" for i in range(30)
         )
         return self._send(200, body, "text/plain")
 
-    def _history(self, query):
+    def _history(self, query: Query) -> None:
         days = query.get("days", [None])[0]
         if days not in ("1", "7", "30", "60"):
             return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
@@ -678,7 +231,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(503, {"error": "sd card not mounted"})
         return self._json(200, history())
 
-    def _csv(self, query):
+    def _csv(self, query: Query) -> None:
         if "days" in query:
             raw = query["days"][0]
             if not raw.isdigit() or not (1 <= int(raw) <= 30):
@@ -690,7 +243,7 @@ class H(BaseHTTPRequestHandler):
         return self._send(200, body, "text/csv")
 
     # --- writes -----------------------------------------------------------
-    def _set(self, query):
+    def _set(self, query: Query) -> None:
         raw = query.get("speed", [None])[0]
         if raw is None or not raw.isdigit() or not (0 <= int(raw) <= 12):
             return self._json(400, {"error": "0-12 only"})
@@ -705,7 +258,7 @@ class H(BaseHTTPRequestHandler):
     # differential steppers had never been exercised end to end by anything.
     # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
     # in step with the firmware.
-    CONFIG_KEYS = {
+    CONFIG_KEYS: dict[str, tuple[str, Callable[[str], object]]] = {
         "sht": ("sht_pref", lambda v: v not in ("0", "false")),
         "gason": ("gas_on", lambda v: v not in ("0", "false")),
         "gasspd": ("gas_spd", int),
@@ -720,7 +273,7 @@ class H(BaseHTTPRequestHandler):
         "offf": ("off_f", float),
     }
 
-    def _config(self, query):
+    def _config(self, query: Query) -> None:
         for arg, (key, cast) in self.CONFIG_KEYS.items():
             if arg not in query:
                 continue
@@ -731,7 +284,7 @@ class H(BaseHTTPRequestHandler):
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
 
-    def _display(self, _query):
+    def _display(self, _query: Query) -> None:
         if not SCEN["panel_ready"]:
             # Exactly what handle_display() answers before the first render.
             return self._json(
@@ -765,10 +318,10 @@ class H(BaseHTTPRequestHandler):
             },
         )
 
-    def _display_refresh(self, _query):
+    def _display_refresh(self, _query: Query) -> None:
         return self._json(200, {"ok": True})
 
-    def _needs_token(self, _query):
+    def _needs_token(self, _query: Query) -> None:
         # Token-guarded on the real device; the mock always refuses, which is
         # what the console's error path should be exercised against.
         return self._json(403, {"error": "bad token"})

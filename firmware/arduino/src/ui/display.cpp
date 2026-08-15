@@ -54,8 +54,49 @@ using display_layout::voc_text;
 // glass -- a band of never-written RAM speckling red above the title, and the
 // footer's bottom rows pushed off the panel (observed 2026-08-12). The MFGNR
 // class zeroes the offset and carries the right refresh timing.
-Adafruit_SSD1680* g_epd = nullptr;
+/**
+ * The stock Adafruit_EPD::display() is synchronous: after kicking the panel
+ * it delay()s default_refresh_delay (13 s here, no busy pin wired) with the
+ * whole loop parked -- no HTTP, no MQTT keepalive, no auto tick, ~5% of the
+ * device's life frozen. But the SSD1680 refreshes AUTONOMOUSLY once
+ * MASTER_ACTIVATE lands: it clocks the waveform from its own RAM with CS
+ * high, and the shared SPI bus is free for the SD card the whole time. So
+ * this subclass splits display() at exactly that line: start_refresh() does
+ * everything up to and including the kick (~0.3 s of real SPI work), and
+ * finish_refresh() powers the panel down after the loop has waited out the
+ * window ASYNCHRONOUSLY (see maybe_render). The panel must simply not be
+ * spoken to in between.
+ */
+class AsyncEink : public ThinkInk_213_Tricolor_MFGNR {
+ public:
+  using ThinkInk_213_Tricolor_MFGNR::ThinkInk_213_Tricolor_MFGNR;
+
+  void start_refresh() {
+    powerUp();
+    setRAMAddress(0, 0);
+    writeRAMFramebufferToEPD(buffer1, buffer1_size, 0);
+    if (buffer2_size != 0) {
+      delay(2);
+      setRAMAddress(0, 0);
+      writeRAMFramebufferToEPD(buffer2, buffer2_size, 1);
+    }
+    uint8_t buf[1] = {_display_update_val};
+    EPD_command(SSD1680_DISP_CTRL2, buf, 1);
+    EPD_command(SSD1680_MASTER_ACTIVATE);
+    // NO wait: the panel is now refreshing itself from its own RAM.
+  }
+
+  void finish_refresh() { powerDown(); }
+};
+
+AsyncEink* g_epd = nullptr;
 bool g_ok = false;
+// The refresh window. default_refresh_delay is 13 s for this glass and the
+// full blocking path measured 14.74 s; 16 s clears both with margin. While
+// g_refreshing, the panel owns itself and this module only watches the clock.
+constexpr uint32_t kRefreshHoldMs = 16000;
+bool g_refreshing = false;
+uint32_t g_refresh_kicked_ms = 0;
 uint32_t g_last_ms = 0;
 bool g_rendered = false;
 int g_speed_shown = -99;
@@ -275,7 +316,9 @@ void blit() {
   // RAM2 is not a colour plane, so writing accents there invites artifacts.
   if (tricolor())
     g_epd->drawBitmap(0, 0, g_red->getBuffer(), kWidth, kHeight, EPD_RED);
-  g_epd->display();
+  g_epd->start_refresh();
+  g_refreshing = true;
+  g_refresh_kicked_ms = millis();
 }
 
 }  // namespace
@@ -286,7 +329,7 @@ void begin() {
   // (the raw default of 1 shifted the image 8 px down this glass, leaving a
   // never-written speckle band above the title and clipping the footer) and
   // its begin() sets rotation 0, which IS upright landscape on this wing.
-  static ThinkInk_213_Tricolor_MFGNR epd(EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
+  static AsyncEink epd(EPD_DC_PIN, -1, EPD_CS_PIN, -1, -1);
   g_epd = &epd;
   epd.begin(tricolor() ? THINKINK_TRICOLOR : THINKINK_MONO);
   static GFXcanvas1 black(kWidth, kHeight);
@@ -328,6 +371,17 @@ uint32_t forced_retry_in_s() {
 void maybe_render() {
   if (!g_ok)
     return;
+  // A refresh in flight owns the panel. The loop keeps running -- that is
+  // the whole point -- and this module only checks the clock: inside the
+  // window nothing may talk to the glass, at its end the panel is powered
+  // down and normal service resumes. g_force survives the window and is
+  // honoured on the next pass.
+  if (g_refreshing) {
+    if (millis() - g_refresh_kicked_ms < kRefreshHoldMs)
+      return;
+    g_epd->finish_refresh();
+    g_refreshing = false;
+  }
   const bool due = g_force || refresh_due(millis(), g_last_ms, kSampleMs, fan::speed(),
                                           g_speed_shown, kSpeedSettleMs, !g_rendered);
   if (!due)
@@ -346,18 +400,15 @@ void maybe_render() {
   CRUMB_CLEAR();
   g_rendered = true;
   g_speed_shown = fan::speed();
-  // Adafruit_EPD::display() is synchronous: it parks the entire loop while the
-  // panel clocks its waveform out. Long enough that PubSubClient cannot send a
-  // keepalive, which is what the broker was recording as "Client
-  // garage-fan-03f784 disconnected: exceeded timeout" on a 317 s beat. Never
-  // let that cost be invisible again -- the sample and the SD flush were both
-  // instrumented and exonerated before anyone thought to time the screen.
-  // A tricolor SSD1680 full refresh measures 14.74 s +/- 10 ms on this glass,
-  // so "slow" must mean slower than the panel's own physics -- the old 2 s
-  // threshold (mono-era) flagged every refresh and buried the event log.
+  // Only the BLOCKING portion is timed now: compose + RAM writes + the kick,
+  // ~0.3 s. The 13-14 s waveform runs asynchronously (see AsyncEink) with the
+  // loop live, which is what ended the era of this refresh parking MQTT
+  // keepalives and HTTP for 14.74 s at a time ("Client garage-fan-03f784
+  // disconnected: exceeded timeout" on a 317 s beat, 2026-08-09). Anything
+  // over 2 s here means the SPI write path itself is sick.
   const uint32_t dt = millis() - t_render;
-  if (dt > 18000)
-    eventlog::log("slow", "epd refresh %lums", (unsigned long)dt);
+  if (dt > 2000)
+    eventlog::log("slow", "epd kick %lums", (unsigned long)dt);
 }
 
 const uint8_t* plane_black() { return g_rendered && g_black ? g_black->getBuffer() : nullptr; }
