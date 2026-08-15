@@ -204,12 +204,14 @@ def test_handle_sd_purge_matches_purgeresult():
 # tests/test_http_contract.py pins the behaviour against the mock; this pins the
 # firmware itself, which is the thing that actually serves the bytes.
 def test_core_dump_handlers_check_the_token():
-    web = (SRC / "net" / "web.cpp").read_text()
+    # The handlers moved to web_maint.cpp in the web.cpp split; scan wherever
+    # they live so a future move breaks on "not found", not on a stale path.
+    web = "\n".join(p.read_text() for p in (SRC / "net").glob("web*.cpp"))
     for handler in ("handle_crash", "handle_crash_raw", "handle_crash_erase"):
-        m = re.search(r"static void " + handler + r"\(\)\s*\{(.*?)\n\}", web, re.S)
+        m = re.search(r"(?:static )?void " + handler + r"\(\)\s*\{(.*?)\n\}", web, re.S)
         assert m, f"{handler} not found -- did it move or get renamed?"
         body = m.group(1)
-        assert "crash_auth_ok()" in body or "token_ok(" in body, (
+        assert "crash_auth_ok()" in body or "token_ok(" in body or "guard_token(" in body, (
             f"{handler} serves core-dump data without checking the token. That "
             f"image contains g_token itself, so an open read escalates to full "
             f"control of the board."
