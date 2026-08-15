@@ -12,14 +12,34 @@
 #include "esp_ota_ops.h"
 
 #include "boot_health.h"
+#include "system/reboot.h"
 
-// Consecutive boots that never reached the broker. RTC: survives esp_restart
-// (the link-recovery reboots that usually drive this count), not power loss.
-RTC_DATA_ATTR static uint32_t rtc_unhealthy_boots = 0;
+// Consecutive boots that never reached the broker.
+//
+// RTC_NOINIT_ATTR, not RTC_DATA_ATTR: .rtc.data is re-initialised by startup
+// on every reset except a deep-sleep wake, so the DATA variant reset this
+// counter to zero at each boot -- it read 1 forever and the rollback
+// threshold was unreachable. The safety net this module exists to be never
+// once armed (found 2026-08-13 chasing why no boot ever carried a crumb
+// trail). NOINIT survives esp_restart and panics; after power-on it is
+// garbage, which the streak-sha guard below catches.
+RTC_NOINIT_ATTR static uint32_t rtc_unhealthy_boots;
 // Which image owns the streak. An OTA reboots via esp_restart, so without this
 // a NEW image would inherit the old image's failure streak and could hit the
-// rollback threshold before its first fair chance to confirm.
-RTC_DATA_ATTR static char rtc_streak_sha[17] = {0};
+// rollback threshold before its first fair chance to confirm. Doubles as the
+// power-on garbage guard: noise is never 16 lowercase-hex chars.
+RTC_NOINIT_ATTR static char rtc_streak_sha[17];
+
+// 16 lowercase-hex chars and a NUL: what running_sha_hex writes, and what
+// power-on noise essentially never is.
+static bool streak_sha_plausible() {
+  for (int i = 0; i < 16; i++) {
+    const char c = rtc_streak_sha[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+      return false;
+  }
+  return rtc_streak_sha[16] == '\0';
+}
 
 static bool g_confirmed_this_boot = false;
 static bool g_running_confirmed = false;
@@ -54,7 +74,7 @@ void ota_rollback_check_at_boot() {
   // A different image than the one that accumulated the streak starts fresh.
   char sha[17];
   running_sha_hex(sha, sizeof(sha));
-  if (strncmp(rtc_streak_sha, sha, sizeof(sha)) != 0) {
+  if (!streak_sha_plausible() || strncmp(rtc_streak_sha, sha, sizeof(sha)) != 0) {
     rtc_unhealthy_boots = 0;
     snprintf(rtc_streak_sha, sizeof(rtc_streak_sha), "%s", sha);
   }
@@ -83,13 +103,14 @@ void ota_rollback_check_at_boot() {
     return;
   }
 
-  Serial.printf(
-      "[ROLLBACK] %lu boots without reaching the broker and this image was "
-      "never confirmed - rolling back to %s\n",
-      (unsigned long)rtc_unhealthy_boots, other->label);
-  Serial.flush();
-  rtc_unhealthy_boots = 0;
-  esp_restart();
+  {
+    char why[96];
+    snprintf(why, sizeof(why),
+             "%lu boots without reaching the broker, image unconfirmed - rolling back to %s",
+             (unsigned long)rtc_unhealthy_boots, other->label);
+    rtc_unhealthy_boots = 0;
+    sysreboot::restart(why);
+  }
 }
 
 void ota_rollback_mark_healthy() {

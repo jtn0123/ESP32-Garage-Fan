@@ -215,6 +215,17 @@ def main():
 
     weather_lat = _coord("WEATHER_LAT", -90.0, 90.0)
     weather_lon = _coord("WEATHER_LON", -180.0, 180.0)
+    # Home Assistant, for the plug watt-meter poll (net/plug). Both optional:
+    # a clone without them builds with the poller disabled, like the weather
+    # coordinates above. The token is a credential and lives ONLY in .env.
+    ha_url = os.environ.get("HA_URL", "").strip().rstrip("/")
+    ha_token = os.environ.get("HA_TOKEN", "").strip()
+    # net/plug.cpp parses a plain-HTTP host:port only (the ESP32-S2 cannot
+    # afford TLS -- see net/weather.h for the measured reason). Anything else
+    # would bake in a host the firmware can never connect to, silently.
+    if ha_url and not ha_url.startswith("http://"):  # NOSONAR - the check itself; see above
+        print(f"WARNING: HA_URL must start with http:// (got {ha_url!r}); plug poller disabled")
+        ha_url = ""
     # battery
     battery = data.get("battery", {})
     capacity_mAh = int(battery.get("capacity_mAh", 3500) or 3500)
@@ -354,6 +365,8 @@ def main():
         f.write(f"#define MQTT_PASS {c_string(mqtt_pass)}\n")
         f.write(f"#define WEATHER_LAT {c_string(weather_lat)}\n")
         f.write(f"#define WEATHER_LON {c_string(weather_lon)}\n")
+        f.write(f"#define HA_URL {c_string(ha_url)}\n")
+        f.write(f"#define HA_TOKEN {c_string(ha_token)}\n")
         f.write(f"#define BATTERY_CAPACITY_MAH {capacity_mAh}\n")
         f.write(f"#define SLEEP_CURRENT_MA {sleep_current_mA}\n")
         f.write(f"#define ACTIVE_CURRENT_MA {active_current_mA}\n")

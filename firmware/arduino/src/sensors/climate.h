@@ -22,6 +22,29 @@ void restore(Preferences* prefs);
  */
 bool sample(float* t, float* h, float* p);
 
+/**
+ * The BME280's own last estimate (offset-corrected), NAN before the first
+ * sample. Logged beside the SHT41 so the two thermometers can be compared on
+ * the charts; when the SHT41 is absent this IS the primary reading.
+ */
+float bme_temp_c();
+float bme_rh();
+
+/**
+ * Which thermometer drives auto mode and the displays. Defaults to the
+ * off-board SHT41 whenever it answers (its reading needs no self-heating
+ * offset); switching it off forces the BME280 + offset path -- the escape
+ * hatch if the new sensor misbehaves. Effective source is /api/sensors'
+ * `source`; this is the PREFERENCE.
+ */
+bool prefer_sht();
+void set_prefer_sht(bool on);
+
+/** The predicate sample() actually uses: preference AND a live SHT41 reading.
+ *  This is what /api/sensors' `source` must report, or the label can claim
+ *  sht41 for values the BME280 produced. */
+bool sht_driving();
+
 /** Cheap temperature-only refresh for the 30 s auto tick. */
 void refresh_inside();
 

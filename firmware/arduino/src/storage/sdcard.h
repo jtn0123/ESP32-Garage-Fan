@@ -52,13 +52,14 @@ void on_network_up();
 /**
  * Append one sample row to this month's CSV. Drops the mount on failure.
  *
- * Row format: epoch,temp_c,rh,hpa,out_f,speed,batt_v,chg
- * batt_v and chg were appended 1.14.23. Rows written before that carry six
- * fields; read_range parses both widths and reports the missing columns as
- * absent rather than as zero.
+ * Row format:
+ * epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh batt_v
+ * and chg were appended 1.14.23. Rows written before that carry six fields; read_range parses both
+ * widths and reports the missing columns as absent rather than as zero.
  */
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg);
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox,
+                float bme_t, float bme_rh);
 
 /**
  * Append one flight-recorder line (newline added) to /events.log, rotating
@@ -90,7 +91,14 @@ struct Samples {
   float* out_f;   // NAN when the row recorded no yard reading
   float* batt_v;  // NAN on pre-1.14.23 rows
   int8_t* spd;
-  int8_t* chg;  // 1 charging, 0 not, -1 unknown
+  int8_t* chg;       // 1 charging, 0 not, -1 unknown
+  float* watts;      // NAN on pre-1.14.47 rows
+  int32_t* voc_raw;  // -1 on pre-1.14.47 rows
+  int32_t* nox_raw;
+  int16_t* voc;
+  int16_t* nox;
+  float* bme_t;  // the second thermometer, for the comparison rows
+  float* bme_rh;
 };
 
 /**

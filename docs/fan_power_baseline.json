@@ -1,0 +1,25 @@
+{
+  "entity": "sensor.garage_garage_fan_tapo_p110m_plug_power",
+  "utc": "2026-08-14T20:05:00Z",
+  "settle_band_w": 1.0,
+  "watts_by_speed": {
+    "0": 1.4,
+    "1": 3.7,
+    "2": 4.8,
+    "3": 7.0,
+    "4": 7.6,
+    "5": 10.0,
+    "6": 12.5,
+    "7": 15.8,
+    "8": 19.7,
+    "9": 25.0,
+    "10": 30.2,
+    "11": 37.7,
+    "12": 44.2,
+    "0_return": 1.7
+  },
+  "notes": {
+    "method": "lag-hardened re-sweep: 60s blackout after each speed change, then five consecutive samples within 1.0 W. Supersedes the 2026-08-13 sweep, whose table was shifted one speed to the right because the plug's Matter sensor serves the previous speed's watts for ~a minute (each old value matched the prior speed: old 8=15.4 vs true 7=15.8, old 9=20.3 vs true 8=19.7, old 0_return=44.1 vs true 12=44.2).",
+    "cross_check": "speeds 7 and 8 were also measured standalone with independent long dwells (15.8 W and 19.8 W) before the sweep ran; the sweep reproduced both within 0.1 W."
+  }
+}

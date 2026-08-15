@@ -35,12 +35,12 @@ static void a_zeroed_ring_is_not_valid_and_renders_nothing() {
   TEST_ASSERT_EQUAL_STRING("", rendered());
 }
 
-static void drops_render_oldest_first_with_timestamps() {
+static void drops_render_newest_first_with_timestamps() {
   r.reset();
   r.drop("setup", 10);
   r.drop("mqtt", 20);
   r.drop("epd", 30);
-  TEST_ASSERT_EQUAL_STRING("setup@10 mqtt@20 epd@30", rendered());
+  TEST_ASSERT_EQUAL_STRING("epd@30 mqtt@20 setup@10", rendered());
 }
 
 static void the_first_drop_makes_the_ring_valid() {
@@ -69,10 +69,10 @@ static void a_full_ring_keeps_the_most_recent_slots() {
   r.drop("newest", 999);
   const char* out = rendered();
   TEST_ASSERT_NULL(strstr(out, "t0@0"));      // the oldest fell off
-  TEST_ASSERT_NOT_NULL(strstr(out, "t1@1"));  // and the next is now first
+  TEST_ASSERT_NOT_NULL(strstr(out, "t1@1"));  // the oldest survivor is now last
   TEST_ASSERT_NOT_NULL(strstr(out, "newest@999"));
-  // Oldest-first ordering survives the wrap.
-  TEST_ASSERT_TRUE(strstr(out, "t1@1") < strstr(out, "newest@999"));
+  // Newest-first ordering survives the wrap: the death-adjacent step leads.
+  TEST_ASSERT_TRUE(strstr(out, "newest@999") < strstr(out, "t1@1"));
 }
 
 // THE SHIPPED BUG: validity was gated on next <= 0xFFFF. The loop drops
@@ -153,7 +153,7 @@ static void a_realistic_trail_reads_as_a_sequence() {
   r.drop("sd_purge", 24000);
   r.drop("epd", 76000);
   r.drop("web", 91000);
-  TEST_ASSERT_EQUAL_STRING("setup@0 mqtt@3000 sd_purge@24000 epd@76000 web@91000", rendered());
+  TEST_ASSERT_EQUAL_STRING("web@91000 epd@76000 sd_purge@24000 mqtt@3000 setup@0", rendered());
 }
 
 // RTC memory can come back with the magic intact and the indexes garbage --
@@ -217,11 +217,12 @@ static void truncation_never_leaves_half_an_entry() {
   r.drop("sd_write", 222);
   char full[64];
   r.render(full, sizeof(full));
-  TEST_ASSERT_EQUAL_STRING("sd_mount@111 sd_write@222", full);
-  // Room for "sd_mount@111" plus a few bytes of the second pair, but not all.
+  TEST_ASSERT_EQUAL_STRING("sd_write@222 sd_mount@111", full);
+  // Room for "sd_write@222" plus a few bytes of the next pair, but not all --
+  // newest-first, so what survives the clip is the step nearest the death.
   char out[20];
   r.render(out, sizeof(out));
-  TEST_ASSERT_EQUAL_STRING("sd_mount@111", out);
+  TEST_ASSERT_EQUAL_STRING("sd_write@222", out);
 }
 
 int main() {
@@ -232,7 +233,7 @@ int main() {
   RUN_TEST(a_corrupt_ring_renders_nothing_rather_than_garbage);
   RUN_TEST(truncation_never_leaves_half_an_entry);
   RUN_TEST(a_zeroed_ring_is_not_valid_and_renders_nothing);
-  RUN_TEST(drops_render_oldest_first_with_timestamps);
+  RUN_TEST(drops_render_newest_first_with_timestamps);
   RUN_TEST(the_first_drop_makes_the_ring_valid);
   RUN_TEST(reset_clears_the_trail);
   RUN_TEST(a_full_ring_keeps_the_most_recent_slots);

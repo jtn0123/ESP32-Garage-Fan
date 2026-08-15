@@ -38,12 +38,14 @@
 // console whether the red plane actually appears on the glass, so its mirror
 // shows what this device displays rather than an idealised version.
 //
-// docs/HARDWARE.md records the mono part on this build. Everything drawn red is
-// an accent over information already legible in black (see the TRICOLOR RULE in
-// ui/display_layout.h), so flipping this is safe in either direction: the
-// panel keeps working, the mirror just stops lying about the colour.
+// The fitted glass showed the header rule in red (2026-08-12), which settles
+// it: this is the tricolor part, whatever docs/HARDWARE.md guessed. Everything
+// drawn red is an accent over information already legible in black (see the
+// TRICOLOR RULE in ui/display_layout.h), so flipping this is safe in either
+// direction: the panel keeps working, the mirror just stops lying about the
+// colour.
 #ifndef FAN_EPD_TRICOLOR
-#define FAN_EPD_TRICOLOR 0
+#define FAN_EPD_TRICOLOR 1
 #endif
 
 // ------------------------------------------------------------ identity
@@ -87,6 +89,17 @@ inline constexpr uint16_t kPeriodUs = 9934;
 // PROTOCOL.md). Off = solid LOW. /api/raw re-derives empirically if needed.
 inline constexpr uint16_t kHighUs[13] = {0,    3477, 4072, 4868, 5066, 5661, 6159,
                                          6754, 7251, 7847, 8344, 8940, 9437};
+
+// ------------------------------------------------------- plug watt meter
+// Home Assistant entity ids for the Tapo P110M on the fan's supply (see
+// net/plug.h). Overridable for a different plug; HA_URL/HA_TOKEN come from
+// .env via generated_config.h.
+#ifndef FAN_PLUG_POWER_ENTITY
+#define FAN_PLUG_POWER_ENTITY "sensor.garage_garage_fan_tapo_p110m_plug_power"
+#endif
+#ifndef FAN_PLUG_VOLT_ENTITY
+#define FAN_PLUG_VOLT_ENTITY "sensor.garage_garage_fan_tapo_p110m_plug_effective_voltage"
+#endif
 
 // ---------------------------------------------------------------- MQTT
 inline constexpr const char* kTopicSet = "garage/fan/set";

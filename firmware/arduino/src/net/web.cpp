@@ -22,10 +22,12 @@
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/origin_check.h"
+#include "net/plug.h"
 #include "net/sse.h"
 #include "net/web_debug.h"
 #include "net/web_ota.h"
 #include "net/wifi_link.h"
+#include "sensors/air.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
 #include "storage/history.h"
@@ -140,6 +142,18 @@ void state_json(char* out, size_t cap) {
   } else {
     snprintf(batt, sizeof(batt), "null");
   }
+  // The watt meter on the fan's supply, or null when the poller is disabled
+  // or has never read. verdict: 1 agree, -1 disagree, 0 cannot say.
+  char plugs[112];
+  if (plug::enabled() && plug::age_s() >= 0) {
+    char vs[16] = "null";
+    if (!isnan(plug::volts()))
+      snprintf(vs, sizeof(vs), "%.1f", plug::volts());
+    snprintf(plugs, sizeof(plugs), "{\"w\":%.1f,\"v\":%s,\"age_s\":%ld,\"verdict\":%d}",
+             plug::watts(), vs, (long)plug::age_s(), plug::verdict());
+  } else {
+    snprintf(plugs, sizeof(plugs), "null");
+  }
   snprintf(out, cap,
            "{\"speed\":%d,\"auto\":%s,\"auto_max\":%d,\"auto_min\":%d,"
            "\"on_f\":%.1f,\"off_f\":%.1f,\"outside_f\":%s,"
@@ -151,7 +165,7 @@ void state_json(char* out, size_t cap) {
            "\"sd_total_mb\":%lu,"
            "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
            "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\"}",
+           "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s,\"sht_pref\":%s}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
            climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
@@ -161,7 +175,8 @@ void state_json(char* out, size_t cap) {
            sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),
            (unsigned long)sdcard::used_mb(), (unsigned long)sdcard::free_mb(), batt, WiFi.RSSI(),
            (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
-           millis() / 1000UL, WiFi.localIP().toString().c_str());
+           millis() / 1000UL, WiFi.localIP().toString().c_str(), plugs,
+           climate::prefer_sht() ? "true" : "false");
 }
 
 void push_state() { sse::push(); }
@@ -203,7 +218,7 @@ static bool crash_auth_ok() {
 static void handle_crash() {
   if (!crash_auth_ok())
     return;
-  char buf[768];
+  char buf[896];
   const size_t n = coredump::to_json(buf, sizeof(buf));
   if (n == 0) {
     g_http.send(500, "application/json", "{\"error\":\"could not read the core dump\"}");
@@ -346,6 +361,34 @@ static void handle_stats() {
 // window; the default of 30 is the full retention the two-month path window
 // can address. Falls back to the ring only when there is no card, and says so
 // in the filename so the two are never confused.
+// The whole flight-recorder file, not the 2 KB tail. Exists because the
+// sample log showed overnight 15-minute gaps (reboot + slow SNTP skips CSV
+// rows) and the only record of WHY the board rebooted at 22:37 was sitting in
+// /events.log with no way to read more than its last twenty lines.
+static void handle_events_file() {
+  if (!sdcard::ok()) {
+    g_http.send(503, "application/json", "{\"error\":\"no card\"}");
+    return;
+  }
+  File f = SD.open("/events.log", FILE_READ);
+  if (!f) {
+    g_http.send(404, "application/json", "{\"error\":\"no events.log\"}");
+    return;
+  }
+  http_tx::Chunked tx(g_http.client(), "text/plain", "");
+  char buf[512];
+  while (true) {
+    const int got = f.read(reinterpret_cast<uint8_t*>(buf), sizeof(buf));
+    if (got <= 0)
+      break;
+    if (!tx.write(buf, static_cast<size_t>(got)))
+      break;
+    esp_task_wdt_reset();  // ~512 KB worst case through a slow peer
+  }
+  f.close();
+  tx.end();
+}
+
 static void handle_csv() {
   // Same rule as handle_history: a malformed question gets an error, not a
   // plausible answer. This used to clamp silently, so ?days=90 and ?days=abc
@@ -365,9 +408,12 @@ static void handle_csv() {
     snprintf(disp, sizeof(disp), "Content-Disposition: attachment; filename=garage-fan-%dd.csv\r\n",
              days);
     http_tx::Chunked tx(g_http.client(), "text/csv", disp);
-    // Header names the 1.14.23 column set; older rows in the same file carry
-    // six fields and are streamed exactly as stored rather than back-filled.
-    tx.print("epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n");
+    // Header names the full 1.14.48 column set; older rows in the same file
+    // carry 6, 8 or 13 fields and are streamed exactly as stored rather than
+    // back-filled -- a short row simply has no values under the later labels.
+    tx.print(
+        "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
+        "watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n");
     sdcard::stream_range(
         time(nullptr) - (time_t)days * 86400,
         [](const char* line, void* ctx) {
@@ -382,21 +428,29 @@ static void handle_csv() {
   const uint16_t n = history::count();
   http_tx::Chunked tx(g_http.client(), "text/csv",
                       "Content-Disposition: attachment; filename=garage-fan-ring.csv\r\n");
-  tx.print("epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n");
+  tx.print(
+      "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
+      "watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n");
   for (uint16_t i = 0; i < n && tx.ok(); i++) {
     const long ts =
         history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * (kSampleMs / 1000) : 0;
-    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d\n", ts, history::temp()[i], history::rh()[i],
-              history::hpa()[i], isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
+    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%.2f,%.1f\n", ts,
+              history::temp()[i], history::rh()[i], history::hpa()[i],
+              isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
               static_cast<int>(history::speed()[i]),
               isnan(history::batt_v()[i]) ? -999.0f : history::batt_v()[i],
-              static_cast<int>(history::chg()[i]));
+              static_cast<int>(history::chg()[i]),
+              isnan(history::watts()[i]) ? -999.0f : history::watts()[i],
+              (long)history::voc_raw()[i], (long)history::nox_raw()[i],
+              static_cast<int>(history::voc()[i]), static_cast<int>(history::nox()[i]),
+              isnan(history::bme_t()[i]) ? -999.0f : history::bme_t()[i],
+              isnan(history::bme_rh()[i]) ? -999.0f : history::bme_rh()[i]);
   }
   tx.end();
 }
 
 static void handle_state() {
-  char buf[768];
+  char buf[896];
   state_json(buf, sizeof(buf));
   g_http.send(200, "application/json", buf);
 }
@@ -450,6 +504,8 @@ static void handle_config() {
 
   if (g_http.hasArg("auto"))
     fan::set_auto(g_http.arg("auto").toInt() != 0);
+  if (g_http.hasArg("sht"))
+    climate::set_prefer_sht(g_http.arg("sht").toInt() != 0);
   if (g_http.hasArg("max")) {
     const int m = g_http.arg("max").toInt();
     if (m >= 1 && m <= 12)
@@ -511,8 +567,18 @@ static void handle_sensors() {
     g_http.send(200, "application/json", "{\"ok\":false}");
     return;
   }
-  char buf[128];
-  snprintf(buf, sizeof(buf), "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f}", t, h, p);
+  // The air chain rides along: which source produced temp/rh, and the gas
+  // readings with raws -- meaningful from the first second -- beside indices
+  // that stay 0 while Sensirion's algorithm warms up. The console labels the
+  // warm-up rather than hiding it.
+  char buf[256];
+  snprintf(buf, sizeof(buf),
+           "{\"ok\":true,\"temp_c\":%.2f,\"rh\":%.1f,\"hpa\":%.1f,"
+           "\"source\":\"%s\",\"voc_raw\":%ld,\"nox_raw\":%ld,\"voc\":%ld,\"nox\":%ld,"
+           "\"bme_t\":%.2f,\"bme_rh\":%.1f}",
+           t, h, p, climate::sht_driving() ? "sht41" : "bme280", (long)air::voc_raw(),
+           (long)air::nox_raw(), (long)air::voc_index(), (long)air::nox_index(),
+           climate::bme_temp_c(), climate::bme_rh());
   g_http.send(200, "application/json", buf);
 }
 
@@ -542,6 +608,20 @@ static void write_series(http_tx::Chunked& tx, const char* name, const float* v,
     }
     if (i + 1 < n)
       tx.print(",");
+  }
+  tx.print("]");
+}
+
+// Gas columns: -1 (no sensor / pre-sensor rows) serializes as null so the
+// chart shows absence, not a plausible -1. 0 (algorithm warming) is a VALUE.
+template <typename T>
+static void write_gas(http_tx::Chunked& tx, const char* name, const T* v, uint16_t n) {
+  tx.printf("\"%s\":[", name);
+  for (uint16_t i = 0; i < n && tx.ok(); i++) {
+    if (v[i] < 0)
+      tx.print(i + 1 < n ? "null," : "null");
+    else
+      tx.printf(i + 1 < n ? "%ld," : "%ld", static_cast<long>(v[i]));
   }
   tx.print("]");
 }
@@ -591,6 +671,13 @@ struct GraphScratch {
   float* p = nullptr;
   float* o = nullptr;
   float* b = nullptr;
+  float* w = nullptr;
+  float* bt = nullptr;
+  float* bh = nullptr;
+  int32_t* vr = nullptr;
+  int32_t* nr = nullptr;
+  int16_t* vi = nullptr;
+  int16_t* ni = nullptr;
   int8_t* sp = nullptr;
   int8_t* cg = nullptr;
   bool ready = false;
@@ -616,8 +703,16 @@ bool scratch_ready() {
   g_scratch.b = psram_array<float>(kGraphMaxPts);
   g_scratch.sp = psram_array<int8_t>(kGraphMaxPts);
   g_scratch.cg = psram_array<int8_t>(kGraphMaxPts);
+  g_scratch.w = psram_array<float>(kGraphMaxPts);
+  g_scratch.bt = psram_array<float>(kGraphMaxPts);
+  g_scratch.bh = psram_array<float>(kGraphMaxPts);
+  g_scratch.vr = psram_array<int32_t>(kGraphMaxPts);
+  g_scratch.nr = psram_array<int32_t>(kGraphMaxPts);
+  g_scratch.vi = psram_array<int16_t>(kGraphMaxPts);
+  g_scratch.ni = psram_array<int16_t>(kGraphMaxPts);
   g_scratch.ready = g_scratch.ts && g_scratch.t && g_scratch.h && g_scratch.p && g_scratch.o &&
-                    g_scratch.b && g_scratch.sp && g_scratch.cg;
+                    g_scratch.b && g_scratch.sp && g_scratch.cg && g_scratch.w && g_scratch.vr &&
+                    g_scratch.nr && g_scratch.vi && g_scratch.ni && g_scratch.bt && g_scratch.bh;
   if (!g_scratch.ready) {
     // Release the blocks that DID succeed. Without this a partial failure
     // leaked them and the next chart request allocated a fresh partial set --
@@ -631,6 +726,13 @@ bool scratch_ready() {
     free(g_scratch.b);
     free(g_scratch.sp);
     free(g_scratch.cg);
+    free(g_scratch.w);
+    free(g_scratch.bt);
+    free(g_scratch.bh);
+    free(g_scratch.vr);
+    free(g_scratch.nr);
+    free(g_scratch.vi);
+    free(g_scratch.ni);
     g_scratch = GraphScratch{};
     eventlog::log("web", "graph scratch alloc failed");
   }
@@ -685,7 +787,8 @@ static void handle_history() {
   http_tx::Chunked tx(g_http.client(), "application/json");
   if (have_card) {
     const GraphScratch& s = g_scratch;
-    const sdcard::Samples dst{s.ts, s.t, s.h, s.p, s.o, s.b, s.sp, s.cg};
+    const sdcard::Samples dst{s.ts, s.t,  s.h,  s.p,  s.o,  s.b,  s.sp, s.cg,
+                              s.w,  s.vr, s.nr, s.vi, s.ni, s.bt, s.bh};
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
     const uint16_t n = sdcard::read_range(cutoff, dst, kGraphMaxPts);
     // interval_s is now only a nominal hint for gap detection; ts[] carries
@@ -707,6 +810,20 @@ static void handle_history() {
     write_ints(tx, "spd", s.sp, n);
     tx.print(",");
     write_ints(tx, "chg", s.cg, n);
+    tx.print(",");
+    write_series(tx, "watts", s.w, n, 1);
+    tx.print(",");
+    write_gas(tx, "voc_raw", s.vr, n);
+    tx.print(",");
+    write_gas(tx, "nox_raw", s.nr, n);
+    tx.print(",");
+    write_gas(tx, "voc", s.vi, n);
+    tx.print(",");
+    write_gas(tx, "nox", s.ni, n);
+    tx.print(",");
+    write_series(tx, "bme_t", s.bt, n, 2);
+    tx.print(",");
+    write_series(tx, "bme_rh", s.bh, n, 0);
     tx.print("}");
   } else {
     // No card and days=1: the ring is all there is, and the response says so
@@ -728,6 +845,20 @@ static void handle_history() {
     write_ints(tx, "spd", history::speed(), rows);
     tx.print(",");
     write_ints(tx, "chg", history::chg(), rows);
+    tx.print(",");
+    write_series(tx, "watts", history::watts(), rows, 1);
+    tx.print(",");
+    write_gas(tx, "voc_raw", history::voc_raw(), rows);
+    tx.print(",");
+    write_gas(tx, "nox_raw", history::nox_raw(), rows);
+    tx.print(",");
+    write_gas(tx, "voc", history::voc(), rows);
+    tx.print(",");
+    write_gas(tx, "nox", history::nox(), rows);
+    tx.print(",");
+    write_series(tx, "bme_t", history::bme_t(), rows, 2);
+    tx.print(",");
+    write_series(tx, "bme_rh", history::bme_rh(), rows, 0);
     tx.print("}");
   }
   tx.end();
@@ -973,6 +1104,7 @@ void begin(Preferences* prefs) {
   g_http.on("/api/history", handle_history);
   g_http.on("/api/stats", handle_stats);
   g_http.on("/download.csv", handle_csv);
+  g_http.on("/events.log", handle_events_file);
   g_http.on("/manifest.json", []() {
     http_tx::send_big(g_http.client(), "application/json", kManifest, sizeof(kManifest) - 1);
   });

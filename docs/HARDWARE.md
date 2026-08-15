@@ -12,7 +12,7 @@ without re-deriving anything. Protocol internals live in
 | Fan | **iLiving ILG8SF12V-DC** 12" shutter exhaust fan | 12 V DC motor; ships with a wall controller; speeds 0–12 |
 | Controller link | USB-A **connectors**, not USB | 5 V power + PWM on D+; see below |
 | MCU | **Adafruit Feather ESP32-S2** (`featheresp32-s2`) | USB-C, onboard 1S LiPo charger |
-| Display | Adafruit **2.13" mono eInk FeatherWing**, SSD1680, 250×122 | stacked on the Feather; has microSD + SRAM slots |
+| Display | Adafruit **2.13" tricolor eInk FeatherWing**, SSD1680, 250×122 | stacked on the Feather; has microSD + SRAM slots. Confirmed tricolor 2026-08-12: the glass shows the red plane |
 | Climate sensor | **BME280** (I2C `0x77`, falls back `0x76`) | temp / RH / pressure |
 | Fuel gauge | **LC709203F variant** at I2C `0x0B` | IC version reads `0x2AFF`, which the Adafruit library **rejects** — firmware uses a raw I2C driver (CRC-8/ATM over the full frame, repeated-start reads mandatory) |
 | Battery | **2× 18650, 3200 mAh, in parallel = 6400 mAh (1S)** | gauge APA set to `0x55` for this capacity |
@@ -37,9 +37,9 @@ carries nothing. Full decode, captures, and the measured table:
 3. **The fan's 5 V alone cannot power the Feather** — it browns out in a
    0→1→0 boot loop. The battery is not optional; it buffers the weak rail and
    the fan's 5 V trickle-charges it (observed ~+66 mV/h, 29%→54% in a day).
-4. **The PWM pin stays RMT-owned forever.** `rmtDeinit()` parks the line at
+4. **The PWM pin stays LEDC-owned forever.** Detaching parks the line at
    its last level, which the fan interprets as a speed. "Off" is a flat wave
-   transmitted by RMT, not a released pin.
+   transmitted by LEDC, not a released pin.
 
 ## System diagram
 
@@ -64,7 +64,7 @@ flowchart LR
     subgraph FEATHER["Feather ESP32-S2 stack"]
         USBP["USB pin (5V in, charges battery)"]
         V3["3V"]
-        A0["A0 / GPIO18 (RMT PWM)"]
+        A0["A0 / GPIO18 (LEDC PWM)"]
         GND["GND"]
         EPD["eInk FeatherWing (SPI)"]
         BME["BME280 + LC709203F (I2C)"]
@@ -93,7 +93,7 @@ Feather GND.
 |---|---|---|
 | `3V` | `LV` | 3.3 V reference for the low side |
 | `GND` | `GND` | common ground |
-| `A0` (GPIO 18) | `LV1` | **the fan PWM**, driven by the RMT peripheral |
+| `A0` (GPIO 18) | `LV1` | **the fan PWM**, driven by the LEDC peripheral |
 | `A1` (GPIO 17) | `LV2` | spare; idles HIGH to mimic the real link's idle D− |
 
 ### Fan cable → breakout → shifter (HV, ~5 V side)
@@ -122,7 +122,7 @@ Fan cable        USB-A breakout      BSS138 shifter          Feather ESP32-S2
 =========        ==============      ==============          ================
  VBUS 5V  ────────  +  ──┬─────────── HV (ref)
                          └─────────────────────────────────── USB pin (charge in)
- D+  ─────────────  D+ ────────────── HV1 ◄──► LV1 ────────── A0 / GPIO18 (RMT)
+ D+  ─────────────  D+ ────────────── HV1 ◄──► LV1 ────────── A0 / GPIO18 (LEDC)
  D-  ─────────────  D- ────────────── HV2 ◄──► LV2 ────────── A1 / GPIO17 (idle HIGH)
  GND ─────────────  -  ──┬─────────── GND (both sides)
                          └─────────────────────────────────── GND
@@ -178,7 +178,7 @@ reflashing.
 | Thing | Value |
 |---|---|
 | Build env | `feather_esp32s2_fan_controller` (PlatformIO, Arduino core) |
-| PWM engine | ESP32 RMT: `rmtInit(18, RMT_TX_MODE, RMT_MEM_NUM_BLOCKS_1, 1000000)` + `rmtWriteLooping` — keeps transmitting through flash writes and reboots of the main loop |
+| PWM engine | ESP32 LEDC: `ledcAttach(18, 100, 12)` + `ledcWrite` — hardware-looped, keeps transmitting through flash writes. Replaced RMT 2026-08-13: `rmtWriteLooping` reported success while `/api/pinprobe` showed the pad stuck LOW; the waveform never left the chip |
 | Web UI / API | `http://garage-fan.local/` (port 80), SSE live-push on port 8081 |
 | MQTT | broker `10.27.27.27:1883` (Home Assistant box) — `garage/fan/set·state·availability`, `garage/climate` |
 | OTA | `POST /update?token=…` → inactive A/B slot (2×1408 K + TinyUF2 factory); image confirms on first broker connect, 3 broker-less boots auto-roll back |

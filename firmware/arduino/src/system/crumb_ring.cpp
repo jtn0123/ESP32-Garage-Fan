@@ -7,7 +7,11 @@
 
 namespace crumb_ring {
 
-RTC_DATA_ATTR Ring rtc_ring;
+// NOINIT: the DATA variant is re-initialised on every reset except deep-sleep
+// wake, which zeroed the ring at boot -- 17 boots on the flight recorder and
+// not one trail line (2026-08-13). The ring's magic already guards against
+// the power-on garbage NOINIT leaves behind.
+RTC_NOINIT_ATTR Ring rtc_ring;
 
 bool valid() { return rtc_ring.valid(); }
 void reset() { rtc_ring.reset(); }
