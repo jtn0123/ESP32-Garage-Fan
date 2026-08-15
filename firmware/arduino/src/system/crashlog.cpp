@@ -7,8 +7,27 @@
 
 namespace crashlog {
 
-RTC_DATA_ATTR uint32_t rtc_sd_sentinel = 0;
-RTC_DATA_ATTR char rtc_crumb[16] = {0};
+// NOINIT, not DATA: RTC .data is re-initialised on every reset except a
+// deep-sleep wake, so the DATA variant erased both of these at the exact
+// moment they were to be read (2026-08-13). The sentinel self-guards with its
+// magic; the crumb is validated below before anyone prints it.
+RTC_NOINIT_ATTR uint32_t rtc_sd_sentinel;
+RTC_NOINIT_ATTR char rtc_crumb[16];
+
+// Power-on noise is not a breadcrumb: require a NUL-terminated string of
+// printable ASCII, else treat as empty.
+static void sanitize_crumb() {
+  for (size_t i = 0; i < sizeof(rtc_crumb); i++) {
+    const char c = rtc_crumb[i];
+    if (c == '\0')
+      return;
+    if (c < 0x20 || c > 0x7E) {
+      rtc_crumb[0] = '\0';
+      return;
+    }
+  }
+  rtc_crumb[0] = '\0';  // no terminator inside the buffer: garbage
+}
 
 namespace {
 char g_last_death[48] = "none";
@@ -17,6 +36,7 @@ uint32_t g_boots = 0;            // lifetime boot count, NVS
 }  // namespace
 
 bool examine_boot(Preferences* prefs) {
+  sanitize_crumb();
   const esp_reset_reason_t rr = esp_reset_reason();
   const bool abnormal = rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT || rr == ESP_RST_TASK_WDT ||
                         rr == ESP_RST_WDT || rr == ESP_RST_BROWNOUT;

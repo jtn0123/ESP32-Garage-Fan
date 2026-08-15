@@ -51,6 +51,27 @@ export interface DeviceState {
   mqtt: boolean;
   uptime_s: number;
   ip: string;
+  /**
+   * The Tapo watt meter on the fan's supply, polled out of Home Assistant by
+   * the firmware (net/plug) -- the fan link's only feedback. Null when the
+   * poller is disabled (no HA credentials baked) or has never read.
+   */
+  plug: PlugState | null;
+  /** True (default): the off-board SHT41 drives temp/RH when it answers. */
+  sht_pref: boolean;
+}
+
+export interface PlugState {
+  w: number; // measured draw, watts
+  v: number | null; // mains voltage; null if HA has no voltage entity
+  age_s: number; // seconds since the reading
+  /**
+   * Does the measured draw agree with the commanded speed?
+   * 1 agree, -1 sustained disagreement (the "commanded 0 W but the meter says
+   * 40 W" failure that ran the fan for a day, 2026-08-13), 0 cannot say
+   * (stale reading, speed changed too recently).
+   */
+  verdict: -1 | 0 | 1;
 }
 
 export interface BatteryState {
@@ -92,7 +113,25 @@ export interface Stats {
 }
 
 /** GET /api/sensors -- `ok:false` when the BME280 is missing or the ring is empty. */
-export type Sensors = { ok: false } | { ok: true; temp_c: number; rh: number; hpa: number };
+export type Sensors =
+  | { ok: false }
+  | {
+      ok: true;
+      temp_c: number;
+      rh: number;
+      hpa: number;
+      /** Which sensor produced temp/rh: the off-board SHT41 or the BME280 fallback. */
+      source: 'sht41' | 'bme280';
+      /** SGP41 raw ticks, meaningful from the first second; -1 = no sensor. */
+      voc_raw: number;
+      nox_raw: number;
+      /** Sensirion gas indices 1..500; 0 = still warming up, -1 = no sensor. */
+      voc: number;
+      nox: number;
+      /** The BME280's own estimate, always present, for the live comparison. */
+      bme_t: number;
+      bme_rh: number;
+    };
 
 /**
  * The 4xx body every endpoint sends for a malformed request. api.ts throws
@@ -139,6 +178,17 @@ export interface History {
   spd: number[];
   batt_v: (number | null)[];
   chg: number[]; // 1 charging, 0 not, -1 no battery
+  /** Fan draw measured at the plug; null before the meter existed (pre-1.14.47 rows). */
+  watts: (number | null)[];
+  /** SGP41 raw ticks -- meaningful from the first sample; null = no sensor / old row. */
+  voc_raw: (number | null)[];
+  nox_raw: (number | null)[];
+  /** Sensirion gas indices 1..500. 0 = the algorithm was still warming up. */
+  voc: (number | null)[];
+  nox: (number | null)[];
+  /** The BME280 logged beside the SHT41, for the dual-sensor overlays. */
+  bme_t: (number | null)[];
+  bme_rh: (number | null)[];
 }
 
 /**

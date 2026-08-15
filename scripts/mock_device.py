@@ -76,6 +76,11 @@ STATE = {
     "mqtt": True,
     "uptime_s": 1837,
     "ip": "127.0.0.1",
+    # The Tapo watt meter on the fan's supply, as net/plug reports it. The
+    # SCEN plug knob swaps in the disagreement case; "none" serves null, the
+    # no-meter build.
+    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
+    "sht_pref": True,
 }
 DEVICE = {
     "id": "garage-fan-d69dbe",
@@ -114,6 +119,8 @@ SCEN = {
     # The panel before its first refresh: the firmware answers ready:false
     # until then, and the console has a branch for it that nothing could reach.
     "panel_ready": True,
+    # "ok" agree, "bad" sustained disagreement, "none" no meter at all
+    "plug": "ok",
 }
 
 
@@ -129,12 +136,17 @@ SCEN_SPEC = {
     "flat_rh": bool,
     "down": bool,
     "panel_ready": bool,
+    "plug": ("choice", "ok", "bad", "none"),
 }
 
 
 def coerce_scen(key: str, raw: str):
     """Whitelisted parse of one knob. Raises ValueError on anything else."""
     spec = SCEN_SPEC[key]
+    if isinstance(spec, tuple) and spec[0] == "choice":
+        if raw not in spec[1:]:
+            raise ValueError(f"{key} takes one of {'|'.join(spec[1:])}")
+        return raw
     if spec is bool:
         if raw not in ("true", "false"):
             raise ValueError(f"{key} takes true|false")
@@ -206,13 +218,47 @@ def _history_uncached():
         batt.append(round(4.20 - (i % 40) * 0.005, 2))
         spd.append(i % 10)
         chg.append(1 if i % 3 else 0)
+    # The watt meter and the air chain: watts follows the logged fan speed
+    # through the baseline table; the SGP41 columns model a sensor that was
+    # plugged in mid-history -- nulls (absent), then raws with index 0
+    # (warming), then indices -- so the console's warm-up handling is
+    # exercised by the default data set.
+    base_w = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
+    watts = [round(base_w[min(sp, 12)] + (i % 3) * 0.2, 1) for i, sp in enumerate(spd)]
+    vocr, noxr, voc, nox = [], [], [], []
+    third = max(1, n // 3)
+    for i in range(n):
+        if i < third:
+            vocr.append(None)
+            noxr.append(None)
+            voc.append(None)
+            nox.append(None)
+        elif i < 2 * third:
+            vocr.append(29000 + (i % 40) * 20)
+            noxr.append(15600 + (i % 25) * 8)
+            voc.append(0)
+            nox.append(0)
+        else:
+            vocr.append(30000 + (i % 40) * 20)
+            noxr.append(15800 + (i % 25) * 8)
+            voc.append(80 + (i % 30))
+            nox.append(1 + (i % 3))
     if SCEN["corrupt"]:  # what a bad CSV row must become
-        temp[5] = None
-        hpa[7] = None
+        if len(temp) > 5:
+            temp[5] = None
+        if len(hpa) > 7:
+            hpa[7] = None
     return {
         "source": "sd" if SCEN["card"] else "ring",
         "interval_s": STEP,
         "ts": ts,
+        "watts": watts,
+        "bme_t": [None if t is None else round(t + 1.8, 2) for t in temp],
+        "bme_rh": [None if r is None else r - 3 for r in rh],
+        "voc_raw": vocr,
+        "nox_raw": noxr,
+        "voc": voc,
+        "nox": nox,
         "temp_c": temp,
         "rh": rh,
         "hpa": hpa,
@@ -242,6 +288,14 @@ DISP_STRIDE = (DISP_W + 7) // 8
 # 3x5 digits, one string per glyph, row-major. Enough to read a speed off the
 # mock's panel; the real panel uses the Adafruit GFX font.
 _FONT3X5 = {
+    # Letters for the banner knockout ("GARAGE FAN").
+    "G": ("111", "100", "101", "101", "111"),
+    "A": ("010", "101", "111", "101", "101"),
+    "R": ("110", "101", "110", "101", "101"),
+    "E": ("111", "100", "110", "100", "111"),
+    "F": ("111", "100", "110", "100", "100"),
+    "N": ("101", "111", "111", "101", "101"),
+    " ": ("000", "000", "000", "000", "000"),
     "0": ("111", "101", "101", "101", "111"),
     "1": ("010", "110", "010", "010", "111"),
     "2": ("111", "001", "111", "100", "111"),
@@ -263,14 +317,17 @@ class _Plane:
     def __init__(self):
         self.buf = bytearray(DISP_STRIDE * DISP_H)
 
-    def px(self, x, y):
+    def px(self, x, y, on=True):
         if 0 <= x < DISP_W and 0 <= y < DISP_H:
-            self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
+            if on:
+                self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
+            else:
+                self.buf[y * DISP_STRIDE + (x >> 3)] &= ~(0x80 >> (x & 7)) & 0xFF
 
-    def rect(self, x, y, w, h):
+    def rect(self, x, y, w, h, on=True):
         for yy in range(y, y + h):
             for xx in range(x, x + w):
-                self.px(xx, yy)
+                self.px(xx, yy, on)
 
     def frame(self, x, y, w, h):
         for xx in range(x, x + w):
@@ -280,15 +337,136 @@ class _Plane:
             self.px(x, yy)
             self.px(x + w - 1, yy)
 
-    def text(self, x, y, s, scale=1):
+    def text(self, x, y, s, scale=1, on=True):
         for ch in s:
             glyph = _FONT3X5.get(ch)
             if glyph:
                 for gy, row in enumerate(glyph):
                     for gx, bit in enumerate(row):
                         if bit == "1":
-                            self.rect(x + gx * scale, y + gy * scale, scale, scale)
+                            self.rect(x + gx * scale, y + gy * scale, scale, scale, on)
             x += 4 * scale
+
+
+# ---- V1-L alphanumeric QR, mask 0: the same fixed encoder the firmware
+# carries in ui/qr_v1.h, ported line for line. tests/test_qr_v1.py pins this
+# against a matrix from the `segno` reference library; if you change one port,
+# change both and re-pin.
+_QR_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
+QR_SIZE = 21
+_QR_DATA_CW, _QR_ECC_CW = 19, 7
+
+
+def _gf_mul(a, b):
+    r = 0
+    while b:
+        if b & 1:
+            r ^= a
+        a <<= 1
+        if a & 0x100:
+            a ^= 0x11D
+        b >>= 1
+    return r
+
+
+def qr_v1_encode(text):
+    """21x21 matrix of 0/1 for `text`, or None if it does not fit V1-L."""
+    if not text or len(text) > 25 or any(c not in _QR_ALNUM for c in text):
+        return None
+    bits = []
+
+    def put(val, n):
+        bits.extend((val >> i) & 1 for i in range(n - 1, -1, -1))
+
+    put(0b0010, 4)
+    put(len(text), 9)
+    for i in range(0, len(text) - 1, 2):
+        put(_QR_ALNUM.index(text[i]) * 45 + _QR_ALNUM.index(text[i + 1]), 11)
+    if len(text) % 2:
+        put(_QR_ALNUM.index(text[-1]), 6)
+    put(0, min(4, _QR_DATA_CW * 8 - len(bits)))
+    while len(bits) % 8:
+        bits.append(0)
+    data = bytearray(int("".join(map(str, bits[i : i + 8])), 2) for i in range(0, len(bits), 8))
+    while len(data) < _QR_DATA_CW:
+        data.append(0xEC if (len(data) - len(bits) // 8) % 2 == 0 else 0x11)
+
+    gen = [1]
+    root = 1
+    for _ in range(_QR_ECC_CW):
+        nxt = [0] * (len(gen) + 1)
+        for i, g in enumerate(gen):
+            nxt[i] ^= _gf_mul(g, root)
+            nxt[i + 1] ^= g
+        gen, root = nxt, _gf_mul(root, 2)
+    gen = gen[::-1]
+    rem = bytearray(_QR_ECC_CW)
+    for b in data:
+        factor = b ^ rem[0]
+        rem = rem[1:] + bytearray(1)
+        for i in range(_QR_ECC_CW):
+            rem[i] ^= _gf_mul(gen[i + 1], factor)
+    codewords = bytes(data) + bytes(rem)
+
+    mod = [[0] * QR_SIZE for _ in range(QR_SIZE)]
+    isf = [[False] * QR_SIZE for _ in range(QR_SIZE)]
+
+    def setf(x, y, v):
+        mod[y][x] = int(bool(v))
+        isf[y][x] = True
+
+    for cx, cy in ((3, 3), (QR_SIZE - 4, 3), (3, QR_SIZE - 4)):
+        for dy in range(-4, 5):
+            for dx in range(-4, 5):
+                x, y = cx + dx, cy + dy
+                if 0 <= x < QR_SIZE and 0 <= y < QR_SIZE:
+                    d = max(abs(dx), abs(dy))
+                    setf(x, y, d != 2 and d != 4)
+    for t in range(8, QR_SIZE - 8):
+        setf(t, 6, t % 2 == 0)
+        setf(6, t, t % 2 == 0)
+    fdata = 1 << 3  # ECC L, mask 0
+    frem = fdata
+    for _ in range(10):
+        frem = (frem << 1) ^ ((frem >> 9) * 0x537)
+    fbits = (fdata << 10 | frem) ^ 0x5412
+
+    def fb(i):
+        return (fbits >> i) & 1
+
+    for i in range(6):
+        setf(8, i, fb(i))
+    setf(8, 7, fb(6))
+    setf(8, 8, fb(7))
+    setf(7, 8, fb(8))
+    for i in range(9, 15):
+        setf(14 - i, 8, fb(i))
+    for i in range(8):
+        setf(QR_SIZE - 1 - i, 8, fb(i))
+    for i in range(8, 15):
+        setf(8, QR_SIZE - 15 + i, fb(i))
+    setf(8, QR_SIZE - 8, 1)
+
+    bit = 0
+    total = len(codewords) * 8
+    right = QR_SIZE - 1
+    while right >= 1:
+        if right == 6:
+            right = 5
+        for vert in range(QR_SIZE):
+            for j in range(2):
+                x = right - j
+                upward = ((right + 1) & 2) == 0
+                y = QR_SIZE - 1 - vert if upward else vert
+                if not isf[y][x] and bit < total:
+                    mod[y][x] = (codewords[bit >> 3] >> (7 - (bit & 7))) & 1
+                    bit += 1
+        right -= 2
+    for y in range(QR_SIZE):
+        for x in range(QR_SIZE):
+            if not isf[y][x] and (x + y) % 2 == 0:
+                mod[y][x] ^= 1
+    return mod
 
 
 def display_frame():
@@ -297,8 +475,11 @@ def display_frame():
     speed = max(0, int(STATE["speed"]))
 
     black.frame(0, 0, DISP_W, DISP_H)
-    red.rect(0, 14, DISP_W, 2)  # the header rule, red like the firmware's
-    black.rect(0, 15, DISP_W, 1)
+    # The banner, like the firmware's tricolor path: a solid red band with the
+    # title knocked out to paper. One plane -- pixels are never set in both,
+    # because that speckles on the glass.
+    red.rect(0, 0, DISP_W, 20)
+    red.text(5, 4, "GARAGE FAN", scale=2, on=False)
 
     # Left: the two temperatures, which must DIFFER. Drawing the same value in
     # both slots would let a console that swapped or duplicated them pass.
@@ -306,16 +487,21 @@ def display_frame():
     black.text(6, 26, f"{inside_f:.0f}", scale=4)
     black.text(6, 76, f"{STATE['outside_f']:.0f}", scale=3)
 
-    # Right: the fan, with a red bar whose fill follows the speed.
+    # Right: the fan, with a red bar whose fill follows the speed, and the
+    # console link as a QR in the same spot the firmware draws it.
     black.rect(126, 20, 1, 82)
     black.text(136, 30, str(speed), scale=6)
+    qr = qr_v1_encode(f"HTTP://{STATE['ip']}".upper())
+    if qr:
+        for qy in range(QR_SIZE):
+            for qx in range(QR_SIZE):
+                if qr[qy][qx]:
+                    black.rect(204 + qx * 2, 25 + qy * 2, 2, 2)
     bar_w = DISP_W - 132 - 6
     black.frame(132, 72, bar_w, 10)
     fill = int(round(speed / 12 * (bar_w - 2)))
     if fill > 0:
-        red.rect(133, 73, fill, 8)
-        for x in range(133, 133 + fill, 3):
-            black.rect(x, 73, 1, 8)
+        red.rect(133, 73, fill, 8)  # red-only, matching the tricolor firmware
 
     black.rect(0, 104, DISP_W, 1)
     return black, red
@@ -431,6 +617,16 @@ class H(BaseHTTPRequestHandler):
         return self._send(200, console_bytes(), "text/html")
 
     def _state(self, _query):
+        mode = SCEN["plug"]
+        if mode == "none":
+            STATE["plug"] = None
+        elif mode == "bad":
+            # The failure this exists to catch: commanded off, meter says full.
+            STATE["plug"] = {"w": 43.5, "v": 120.9, "age_s": 3, "verdict": -1}
+        else:
+            speed = max(0, int(STATE["speed"]))
+            base = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
+            STATE["plug"] = {"w": base[min(speed, 12)], "v": 120.9, "age_s": 3, "verdict": 1}
         return self._json(200, STATE)
 
     def _device(self, _query):
@@ -440,7 +636,24 @@ class H(BaseHTTPRequestHandler):
         return self._json(200, STATS)
 
     def _sensors(self, _query):
-        return self._json(200, {"ok": True, "temp_c": 23.86, "rh": 38.9, "hpa": 999.9})
+        return self._json(
+            200,
+            {
+                "ok": True,
+                "temp_c": 23.86,
+                "rh": 38.9,
+                "hpa": 999.9,
+                # The off-board chain, warmed up: raws plus live indices.
+                "source": "sht41",
+                "voc_raw": 30125,
+                "nox_raw": 15810,
+                "voc": 93,
+                "nox": 1,
+                # The on-board sensor reads warm and dry next to the regulator.
+                "bme_t": 25.7,
+                "bme_rh": 35.9,
+            },
+        )
 
     def _events(self, _query):
         now = int(time.time())
@@ -485,6 +698,7 @@ class H(BaseHTTPRequestHandler):
     # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
     # in step with the firmware.
     CONFIG_KEYS = {
+        "sht": ("sht_pref", lambda v: v not in ("0", "false")),
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),
@@ -529,10 +743,10 @@ class H(BaseHTTPRequestHandler):
                 "w": DISP_W,
                 "h": DISP_H,
                 "stride": DISP_STRIDE,
-                # The mock stands in for the MONO part recorded in
-                # docs/HARDWARE.md, so the console renders accents grey and the
-                # "mono panel" note is what a test sees by default.
-                "tricolor": False,
+                # The fitted glass showed red (2026-08-12), so the mock stands
+                # in for the TRICOLOR part and the console renders the red
+                # accents by default, matching the device.
+                "tricolor": True,
                 "age_s": 42,
                 "black": base64.b64encode(bytes(black.buf)).decode(),
                 "red": base64.b64encode(bytes(red.buf)).decode(),

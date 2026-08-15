@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "config.h"
+#include "soc/gpio_periph.h"
 #include "sensors/battery.h"
 #include "storage/sdcard.h"
 
@@ -165,6 +166,56 @@ void register_routes(WebServer& http, const char* token) {
   g_http = &http;
   g_token = token;
   http.on("/api/sdtest", handle_sd_test);
+  // Read the fan pin's own pad while RMT drives it. Exists because on
+  // 2026-08-13 the fan ignored a whole calibration sweep, rmtWriteLooping
+  // reported success, and nothing could say whether the waveform physically
+  // left the chip. Samples ~30 ms (three wave periods), counts transitions
+  // and the high fraction; INPUT_OUTPUT keeps the RMT matrix routing intact
+  // while enabling the input buffer.
+  // Every device answering on the I2C bus. Exists for sensor bring-up: the
+  // SHT41 (0x44) and SGP41 (0x59) arrived on a STEMMA chain 2026-08-13 and
+  // the first question is always "does the bus even see them".
+  http.on("/api/i2cscan", []() {
+    if (!authorized())
+      return;
+    char out[256];
+    size_t n = snprintf(out, sizeof(out), "{\"found\":[");
+    bool first = true;
+    for (uint8_t a = 0x08; a < 0x78; ++a) {
+      Wire.beginTransmission(a);
+      if (Wire.endTransmission() == 0 && n < sizeof(out) - 12)
+        n += snprintf(out + n, sizeof(out) - n, "%s\"0x%02x\"", first ? "" : ",", a), first = false;
+    }
+    snprintf(out + n, sizeof(out) - n, "]}");
+    g_http->send(200, "application/json", out);
+  });
+  http.on("/api/pinprobe", []() {
+    if (!authorized())
+      return;
+    // Input buffer ONLY, straight at the IO_MUX. gpio_set_direction() looked
+    // right and was a trap: it reroutes the pad's output select to simple
+    // GPIO, silently disconnecting LEDC/RMT -- the probe then reports the
+    // stuck-low line the probe itself just created.
+    REG_SET_BIT(GPIO_PIN_MUX_REG[FAN_PWM_PIN], FUN_IE);
+    uint32_t transitions = 0;
+    uint32_t highs = 0;
+    uint32_t n = 0;
+    int last = digitalRead(FAN_PWM_PIN);
+    const uint32_t t0 = micros();
+    while (micros() - t0 < 30000) {
+      const int v = digitalRead(FAN_PWM_PIN);
+      highs += v;
+      ++n;
+      if (v != last) {
+        ++transitions;
+        last = v;
+      }
+    }
+    char out[128];
+    snprintf(out, sizeof(out), "{\"samples\":%lu,\"high_pct\":%.1f,\"transitions\":%lu}",
+             (unsigned long)n, n ? 100.0 * highs / n : 0.0, (unsigned long)transitions);
+    g_http->send(200, "application/json", out);
+  });
   http.on("/api/battdebug", []() {
     if (!authorized())
       return;
@@ -202,25 +253,6 @@ void register_routes(WebServer& http, const char* token) {
     snprintf(out, sizeof(out), "{\"read_only\":true,\"reads\":[");
     String full = String(out) + r.substring(0, r.length() - 1) + "]}";
     g_http->send(200, "application/json", full);
-  });
-  http.on("/api/i2cscan", []() {
-    if (!authorized())
-      return;
-    String out = "{\"found\":[";
-    bool first = true;
-    for (uint8_t a = 1; a < 127; a++) {
-      Wire.beginTransmission(a);
-      if (Wire.endTransmission() == 0) {
-        if (!first)
-          out += ',';
-        char b[8];
-        snprintf(b, sizeof(b), "\"0x%02X\"", a);
-        out += b;
-        first = false;
-      }
-    }
-    out += "]}";
-    g_http->send(200, "application/json", out);
   });
 }
 

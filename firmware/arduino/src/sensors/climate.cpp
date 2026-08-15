@@ -9,11 +9,21 @@
 #include <cmath>
 
 #include "config.h"
+#include "sensors/air.h"
 #include "sensors/battery.h"
 #include "system/timeutil.h"
 
 namespace climate {
 namespace {
+
+float g_bme_t = NAN;  // the BME280's own corrected estimate, kept for comparison
+float g_bme_rh = NAN;
+// Which thermometer drives auto and the displays. True (default) prefers the
+// off-board SHT41 whenever it answers; false forces the BME280 + offsets --
+// the escape hatch if the new sensor ever reads wrong.
+bool g_prefer_sht = true;
+
+bool use_sht() { return g_prefer_sht && air::sht_ok() && !isnan(air::temp_c()); }
 
 Adafruit_BME280 g_bme;
 Preferences* g_prefs = nullptr;
@@ -68,6 +78,7 @@ void restore(Preferences* prefs) {
   if (prefs) {
     g_off_chg = prefs->getFloat("offc", -3.0f);
     g_off_idle = prefs->getFloat("offi", -1.0f);
+    g_prefer_sht = prefs->getBool("sht", true);
   }
 }
 
@@ -96,15 +107,48 @@ bool sample(float* t, float* h, float* p) {
     g_ok = false;  // sensor wedged or unplugged; re-probe next sample
     return false;
   }
-  *t = corrected(t_raw);
-  *h = hv;
+  // Keep the BME280's own estimate (offset-corrected) regardless of which
+  // sensor wins below: both get logged side by side so the two thermometers
+  // can be compared on the charts instead of argued about.
+  g_bme_t = corrected(t_raw);
+  g_bme_rh = hv;
+  // The SHT41 hangs 18 inches off the board precisely so its reading needs no
+  // self-heating correction; when it answers, it IS the garage temperature
+  // and humidity, and the offset knobs only matter for this BME280 fallback.
+  // Pressure always comes from the BME280 -- the SHT41 has no barometer.
+  if (use_sht()) {
+    *t = air::temp_c();
+    *h = air::rh();
+  } else {
+    *t = g_bme_t;
+    *h = hv;
+  }
   *p = pv;
   g_inside_c = *t;
   g_inside_ms = millis();
   return true;
 }
 
+float bme_temp_c() { return g_bme_t; }
+float bme_rh() { return g_bme_rh; }
+
+bool prefer_sht() { return g_prefer_sht; }
+
+bool sht_driving() { return use_sht(); }
+
+void set_prefer_sht(bool on) {
+  g_prefer_sht = on;
+  if (g_prefs)
+    g_prefs->putBool("sht", on);
+}
+
 void refresh_inside() {
+  // SHT41 first, same preference as sample() -- and the same reason.
+  if (use_sht()) {
+    g_inside_c = air::temp_c();
+    g_inside_ms = millis();
+    return;
+  }
   if (!g_ok)
     return;
   const float t = g_bme.readTemperature();

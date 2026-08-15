@@ -7,7 +7,7 @@ import type { DeviceInfo, DeviceState, History, Sensors, Stats } from './types.j
 import type { Series } from './series.js';
 import type { UpdateStatus } from './update.js';
 
-export type RowKey = 'fan' | 'humidity' | 'pressure' | 'battery';
+export type RowKey = 'fan' | 'humidity' | 'pressure' | 'battery' | 'power' | 'voc' | 'nox';
 
 export interface View {
   state: DeviceState | null;
@@ -56,7 +56,7 @@ export const view: View = {
   scopeOpen: false,
   previewOpen: false,
   tip: -1,
-  rows: { fan: true, humidity: false, pressure: false, battery: false },
+  rows: { fan: true, humidity: false, pressure: false, battery: false, power: false, voc: false, nox: false },
   phase: 0,
   raf: null,
   lastOk: 0,
@@ -68,6 +68,9 @@ export const ROW_IDS: Record<RowKey, { sub: string; canvas: string; readout: str
   humidity: { sub: 'sub_h', canvas: 'cv_h', readout: 'roH' },
   pressure: { sub: 'sub_p', canvas: 'cv_p', readout: 'roP' },
   battery: { sub: 'sub_b', canvas: 'cv_b', readout: 'roB' },
+  power: { sub: 'sub_w', canvas: 'cv_w', readout: 'roW' },
+  voc: { sub: 'sub_v', canvas: 'cv_v', readout: 'roV' },
+  nox: { sub: 'sub_n', canvas: 'cv_n', readout: 'roN' },
 };
 
 export const STATUS_BITS = [
@@ -85,6 +88,11 @@ export const STATUS_BITS = [
     key: 'VBAT',
     title: 'BATTERY VOLTAGE',
     body: 'Live cell voltage of the backup pack — the same series plotted in the BATTERY row. Roughly 4.10 V is full and 3.3 V is empty. The pack keeps the controller logging when the USB supply drops out; the fan itself runs from its own 12 V brick.',
+  },
+  {
+    key: 'PLUG',
+    title: 'MEASURED DRAW',
+    body: 'What the Tapo watt meter on the fan’s supply actually measures, polled out of Home Assistant by the controller. This is the fan link’s only feedback — the control wire has no tach — so a draw that disagrees with the commanded speed is the one signal that catches a fan not obeying.',
   },
   {
     key: 'T-OFFSET',

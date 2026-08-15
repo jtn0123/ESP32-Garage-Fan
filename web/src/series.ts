@@ -39,6 +39,13 @@ export interface Series {
   spd: number[];
   bv: (number | null)[];
   chg: number[];
+  w: (number | null)[];    // fan draw at the plug, watts
+  vocr: (number | null)[]; // SGP41 raw ticks
+  noxr: (number | null)[];
+  voc: (number | null)[];  // gas indices; 0 = warming
+  nox: (number | null)[];
+  bt: (number | null)[];   // the BME280 thermometer, F, beside tf
+  bh: (number | null)[];   // the BME280 hygrometer, %RH, beside rh
 }
 
 /**
@@ -111,6 +118,13 @@ export function build(h: History): Series {
     spd: pad<number>(h.spd, n, 0),
     bv: pad<number | null>(h.batt_v, n, null),
     chg: pad<number>(h.chg, n, -1),
+    w: pad<number | null>(h.watts, n, null),
+    vocr: pad<number | null>(h.voc_raw, n, null),
+    noxr: pad<number | null>(h.nox_raw, n, null),
+    voc: pad<number | null>(h.voc, n, null),
+    nox: pad<number | null>(h.nox, n, null),
+    bt: pad<number | null>(h.bme_t, n, null).map((v) => (v === null ? null : (v * 9) / 5 + 32)),
+    bh: pad<number | null>(h.bme_rh, n, null),
   };
 }
 
