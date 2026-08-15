@@ -93,10 +93,13 @@ def wire_fields(types_ts: str) -> list[str]:
     seen: list[str] = []
     for name in INTERFACES:
         block = ts_block(types_ts, name)
+        # `?:` (optional fields) is normalised to `:` BEFORE the regex runs:
+        # the `\??` spelling made the quantifier pair backtrack super-linearly
+        # on pathological input (Sonar S5852), and a plain `(\w+):` cannot.
         if block.startswith("export type"):
-            fields = re.findall(r"(\w+)\??:", block.split("=", 1)[1])
+            fields = re.findall(r"(\w+):", block.split("=", 1)[1].replace("?:", ":"))
         else:
-            fields = re.findall(r"^\s*(\w+)\??:", block, re.MULTILINE)
+            fields = re.findall(r"^\s*(\w+):", block.replace("?:", ":"), re.MULTILINE)
         for f in fields:
             if f not in seen:
                 seen.append(f)
