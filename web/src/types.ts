@@ -158,9 +158,9 @@ export interface ApiError {
 }
 
 /**
- * GET /api/history?days=1|7|30
+ * GET /api/history?days=1|7|30|60
  *
- * `days` is REQUIRED and must be exactly 1, 7 or 30; anything else is a 400
+ * `days` is REQUIRED and must be exactly 1, 7, 30 or 60; anything else is a 400
  * ApiError. (It used to default to 1, which served RAM-ring data to typo'd
  * queries as if it were the card's -- 2026-08-10.)
  *

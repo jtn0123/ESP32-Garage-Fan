@@ -154,22 +154,32 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed, f
 
 // Stream the month files covering [cutoff, now], decimating by stride into
 // the caller's arrays. Two passes: count, then collect every (count/max)th.
-// The month files spanning [cutoff, now]. At most two, which covers every
-// supported range (days <= 30 touches at most two calendar months).
-static int month_paths(time_t cutoff, char paths[2][36]) {
+// The month files spanning [cutoff, now]. At most three: the 60-day range
+// can touch three calendar months (Aug 14 back to Jun 15 is Jun, Jul, Aug),
+// and the old two-slot version silently dropped the OLDEST month -- a 60-day
+// chart that quietly started a month late, which is the same class of
+// confident falsehood handle_history's validation exists to prevent.
+static int month_paths(time_t cutoff, char paths[3][36]) {
   const time_t now = time(nullptr);
   int npaths = 0;
-  for (time_t at = cutoff; npaths < 2; at = now) {
+  for (time_t at = cutoff; npaths < 3;) {
     struct tm tmv;
     gmtime_r(&at, &tmv);
     char path[36];
     snprintf(path, sizeof(path), "/climate-%04d%02d.csv", tmv.tm_year + 1900, tmv.tm_mon + 1);
-    if (npaths == 0 || strcmp(path, paths[0]) != 0) {
+    if (npaths == 0 || strcmp(path, paths[npaths - 1]) != 0) {
       snprintf(paths[npaths], sizeof(paths[npaths]), "%s", path);
       npaths++;
     }
-    if (at == now)
+    if (at >= now)
       break;
+    // 28-day hops visit every month in order without needing timegm (absent
+    // on this libc; mktime would apply the local TZ): no month is shorter,
+    // so a hop cannot skip one, and the adjacent-name dedupe above absorbs
+    // landing in the same month twice.
+    at += 28L * 86400;
+    if (at > now)
+      at = now;
   }
   return npaths;
 }
@@ -178,7 +188,7 @@ uint32_t stream_range(time_t cutoff, LineSink sink, void* ctx) {
   if (!g_ok || !sink)
     return 0;
   CRUMB("sd_stream");
-  char paths[2][36];
+  char paths[3][36];
   const int npaths = month_paths(cutoff, paths);
   uint32_t sent = 0;
   for (int i = 0; i < npaths; i++) {
@@ -208,7 +218,7 @@ uint32_t stream_range(time_t cutoff, LineSink sink, void* ctx) {
 
 uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
   CRUMB("sd_read");
-  char paths[2][36];
+  char paths[3][36];
   const int npaths = month_paths(cutoff, paths);
   uint32_t rows = 0;
   for (int pass = 0; pass < 2; pass++) {

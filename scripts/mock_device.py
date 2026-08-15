@@ -672,8 +672,8 @@ class H(BaseHTTPRequestHandler):
 
     def _history(self, query):
         days = query.get("days", [None])[0]
-        if days not in ("1", "7", "30"):
-            return self._json(400, {"error": "days must be 1, 7 or 30"})
+        if days not in ("1", "7", "30", "60"):
+            return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
         if days != "1" and not (SCEN["card"] and SCEN["synced"]):
             return self._json(503, {"error": "sd card not mounted"})
         return self._json(200, history())

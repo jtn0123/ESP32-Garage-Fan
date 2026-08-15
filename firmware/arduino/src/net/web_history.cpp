@@ -193,8 +193,8 @@ void handle_history() {
   // data as if it were the card's. The console always sends days= explicitly.
   const String days_arg = g_http->hasArg("days") ? g_http->arg("days") : "";
   const int days = days_arg.toInt();
-  if (days_arg != "1" && days_arg != "7" && days_arg != "30") {
-    g_http->send(400, "application/json", "{\"error\":\"days must be 1, 7 or 30\"}");
+  if (days_arg != "1" && days_arg != "7" && days_arg != "30" && days_arg != "60") {
+    g_http->send(400, "application/json", "{\"error\":\"days must be 1, 7, 30 or 60\"}");
     return;
   }
   // The card is the record for EVERY range, not just 7 and 30.
@@ -311,8 +311,8 @@ void handle_csv() {
   if (g_http->hasArg("days")) {
     const String raw = g_http->arg("days");
     days = raw.toInt();
-    if (days < 1 || days > 30 || String(days) != raw) {
-      g_http->send(400, "application/json", "{\"error\":\"days must be 1-30\"}");
+    if (days < 1 || days > 60 || String(days) != raw) {
+      g_http->send(400, "application/json", "{\"error\":\"days must be 1-60\"}");
       return;
     }
   }

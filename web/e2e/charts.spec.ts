@@ -8,9 +8,9 @@
  */
 import { expect, openConsole, recordRequests, test } from './harness';
 
-test('the three ranges are offered and 24H starts selected', async ({ page }) => {
+test('the four ranges are offered and 24H starts selected', async ({ page }) => {
   await openConsole(page);
-  await expect(page.locator('#ranges button')).toHaveCount(3);
+  await expect(page.locator('#ranges button')).toHaveCount(4);
   await expect(page.locator('#ranges button[data-d="1"]')).toHaveClass(/on/);
   await expect(page.locator('#chtitle')).toHaveText(/24 HOURS/i);
 });
@@ -18,6 +18,7 @@ test('the three ranges are offered and 24H starts selected', async ({ page }) =>
 for (const [days, title] of [
   ['7', /7 DAYS/i],
   ['30', /30 DAYS/i],
+  ['60', /60 DAYS/i],
   ['1', /24 HOURS/i],
 ] as const) {
   test(`selecting ${days}d refetches that range and relabels the chart`, async ({ page }) => {
