@@ -181,8 +181,7 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
     placeholder(surf, 'waiting for data — one sample every 5 minutes');
     return;
   }
-  const dual = hasData(s.bt);  // both thermometers logged: draw the comparison
-  const sc = limits(dual ? [...s.tf, ...s.of, ...s.bt] : [...s.tf, ...s.of]);
+  const sc = limits([...s.tf, ...s.of]);
   if (!sc) {
     placeholder(surf, 'no data');
     return;
@@ -210,9 +209,6 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
   }
 
   line(surf, s, sc, s.of, OUT, true, 2);
-  // The second thermometer, dashed amber under the primary: where the two
-  // diverge is the BME280's self-heating error, visible instead of argued.
-  if (dual) line(surf, s, sc, s.bt, BME_C, true, 1.8);
   line(surf, s, sc, s.tf, OR, false, 2.2);
 
   if (index >= 0) {
@@ -292,9 +288,6 @@ export function drawSimple(
   index: number,
   /** Smallest range to auto-scale to, in this series' own units. */
   minSpan = MIN_SPAN,
-  /** A second series in the same units, drawn dashed -- the dual-sensor
-   *  comparison overlays. Scaling covers both so neither clips. */
-  second?: readonly (number | null)[],
 ): void {
   const surf = surface(canvas);
   if (!surf) return;
@@ -302,14 +295,12 @@ export function drawSimple(
     placeholder(surf, emptyMessage);
     return;
   }
-  const both = second && hasData(second) ? [...values, ...second] : values;
-  const sc = limits(both, minSpan);
+  const sc = limits(values, minSpan);
   if (!sc) {
     placeholder(surf, emptyMessage);
     return;
   }
   frame(surf, s, sc, fmt, false);
-  if (second && hasData(second)) line(surf, s, sc, second, BME_C, true, 1.8);
   line(surf, s, sc, values, colour, false, 2);
   crosshair(surf, s, index);
 }
@@ -386,8 +377,6 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
   }
 }
 
-/** The BME280's trace in the dual-sensor overlays -- amber, dashed. */
-export const BME_C = '#d4a72c';
 
 export const SERIES_COLOURS = {
   fan: AC,

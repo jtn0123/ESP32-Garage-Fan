@@ -24,9 +24,6 @@ STATE: Json = {
     "on_f": 2.5,
     "off_f": 1.5,
     "outside_f": 73.2,
-    "toff": -8.0,
-    "offc": -8.0,
-    "offi": -8.0,
     "fw": "1.14.23",
     "slot": "ota_0",
     "confirmed": True,
@@ -49,7 +46,6 @@ STATE: Json = {
     # SCEN plug knob swaps in the disagreement case; "none" serves null, the
     # no-meter build.
     "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
-    "sht_pref": True,
     # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
     "gas_on": True,
     "gas_spd": 6,

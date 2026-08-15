@@ -118,8 +118,6 @@ def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario kno
         "interval_s": STEP,
         "ts": ts,
         "watts": watts,
-        "bme_t": [None if t is None else round(t + 1.8, 2) for t in temp],
-        "bme_rh": [None if r is None else r - 3 for r in rh],
         "voc_raw": vocr,
         "nox_raw": noxr,
         "voc": voc,

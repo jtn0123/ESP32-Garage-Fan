@@ -19,8 +19,7 @@
 namespace sdcard {
 
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox,
-                float bme_t, float bme_rh) {
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox) {
   if (!ok())
     return;
   struct tm tm_now;
@@ -36,15 +35,15 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed, f
   }
   char line[144];
   // batt_v/chg appended 1.14.23; watts + the four SGP41 columns appended
-  // 1.14.47 (plug meter and the air chain); bme_t/bme_rh appended 1.14.48
-  // (the second thermometer, for the dual-sensor overlays). read_range parses
-  // the 6-, 8- and 13-field rows written before each change. -999 is the "no
-  // reading" sentinel for float columns, -1 for the gas columns.
-  int n = snprintf(line, sizeof(line),
-                   "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%.2f,%.1f\n", (long)now,
-                   t, h, p, isnan(out_f) ? -999.0f : out_f, speed, isnan(batt_v) ? -999.0f : batt_v,
-                   chg, isnan(watts) ? -999.0f : watts, (long)voc_raw, (long)nox_raw, voc, nox,
-                   isnan(bme_t) ? -999.0f : bme_t, isnan(bme_rh) ? -999.0f : bme_rh);
+  // 1.14.47 (plug meter and the air chain). bme_t/bme_rh columns existed
+  // 1.14.48-1.15.1 (the dual-thermometer comparison that CONVICTED the
+  // BME280's thermometer of self-heating); rows are back to 13 fields now
+  // that it is barometer-only. read_range parses every historical width.
+  // -999 is the "no reading" sentinel for float columns, -1 for gas.
+  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d\n",
+                   (long)now, t, h, isnan(p) ? -999.0f : p, isnan(out_f) ? -999.0f : out_f, speed,
+                   isnan(batt_v) ? -999.0f : batt_v, chg, isnan(watts) ? -999.0f : watts,
+                   (long)voc_raw, (long)nox_raw, voc, nox);
   if (n < 0 || n >= static_cast<int>(sizeof(line))) {
     f.close();  // a truncated row would corrupt the CSV for every later reader
     CRUMB_CLEAR();
@@ -173,8 +172,6 @@ uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
         out.nox_raw[kept] = row.nox_raw;
         out.voc[kept] = row.voc;
         out.nox[kept] = row.nox;
-        out.bme_t[kept] = row.bme_t;
-        out.bme_rh[kept] = row.bme_rh;
         kept++;
       }
       f.close();

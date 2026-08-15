@@ -182,7 +182,7 @@ def test_history_branches_agree():
     emitter = find_function("write_all_series")
     series = [
         "temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg",
-        "watts", "voc_raw", "nox_raw", "voc", "nox", "bme_t", "bme_rh",
+        "watts", "voc_raw", "nox_raw", "voc", "nox",
     ]  # fmt: skip
     for name in series:
         # WN_<NAME>, since the emitter spells keys via the generated macros.

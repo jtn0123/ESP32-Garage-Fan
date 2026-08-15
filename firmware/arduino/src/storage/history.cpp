@@ -52,8 +52,6 @@ const float* hpa() { return ring().p; }
 const float* out_f() { return ring().o; }
 const float* batt_v() { return ring().bv; }
 const float* watts() { return ring().w; }
-const float* bme_t() { return ring().bt; }
-const float* bme_rh() { return ring().bh; }
 const int32_t* voc_raw() { return ring().vr; }
 const int32_t* nox_raw() { return ring().nr; }
 const int16_t* voc() { return ring().vi; }

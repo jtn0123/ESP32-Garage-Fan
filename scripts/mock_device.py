@@ -205,14 +205,11 @@ class H(BaseHTTPRequestHandler):
                 "rh": 38.9,
                 "hpa": 999.9,
                 # The off-board chain, warmed up: raws plus live indices.
-                "source": "sht41",
                 "voc_raw": 30125,
                 "nox_raw": 15810,
                 "voc": 93,
                 "nox": 1,
                 # The on-board sensor reads warm and dry next to the regulator.
-                "bme_t": 25.7,
-                "bme_rh": 35.9,
             },
         )
 
@@ -259,7 +256,6 @@ class H(BaseHTTPRequestHandler):
     # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
     # in step with the firmware.
     CONFIG_KEYS: dict[str, tuple[str, Callable[[str], object]]] = {
-        "sht": ("sht_pref", lambda v: v not in ("0", "false")),
         "gason": ("gas_on", lambda v: v not in ("0", "false")),
         "gasspd": ("gas_spd", int),
         "gasvoc": ("gas_voc", int),
@@ -267,8 +263,6 @@ class H(BaseHTTPRequestHandler):
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),
-        "offc": ("offc", float),
-        "offi": ("offi", float),
         "onf": ("on_f", float),
         "offf": ("off_f", float),
     }

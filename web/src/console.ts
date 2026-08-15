@@ -8,7 +8,6 @@
 // way.
 
 import {
-  BME_C,
   SERIES_COLOURS,
   drawAxis,
   drawBattery,
@@ -240,7 +239,6 @@ function bitValues(): { value: string; colour: string }[] {
       colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
     },
     gasBit(s),
-    { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
     {
       value: `${s.slot} · ${s.confirmed ? 'confirmed' : 'unconfirmed'}`,
@@ -296,18 +294,12 @@ function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement
 }
 
 /** Which line is which sensor, on the rows that carry more than one. */
-function paintLegends(s: Series): void {
-  const dual = s.bt.some((v) => v !== null);
+function paintLegends(_s: Series): void {
   $('tleg').replaceChildren(
-    legendEntry(dual ? 'SHT41' : 'GARAGE', OR, false),
-    ...(dual ? [legendEntry('BME280', BME_C, true)] : []),
+    legendEntry('GARAGE', OR, false),
     legendEntry('OUTSIDE', OUT, true),
   );
-  const dualH = s.bh.some((v) => v !== null);
-  $('hleg').replaceChildren(
-    legendEntry(dualH ? 'SHT41' : 'GARAGE', SERIES_COLOURS.humidity, false),
-    ...(dualH ? [legendEntry('BME280', BME_C, true)] : []),
-  );
+  $('hleg').replaceChildren(legendEntry('GARAGE', SERIES_COLOURS.humidity, false));
 }
 
 /** "index 93 · raw 30125" / "warming up · raw 29850" / '' -- one gas row. */
@@ -317,27 +309,18 @@ function gasReadout(idx: number | null, raw: number | null): string {
   return idx !== null && idx > 0 ? `index ${idx.toFixed(0)}${rawPart}` : `warming up${rawPart}`;
 }
 
-/** "sht 51% · bme 35%", or the bare value when only one sensor logged. */
-function dualReadout(primary: number | null, secondary: number | null, unit: string): string {
-  if (primary === null) return '';
-  if (secondary === null) return `${primary.toFixed(0)}${unit}`;
-  return `sht ${primary.toFixed(0)}${unit} · bme ${secondary.toFixed(0)}${unit}`;
-}
-
 function paintReadouts(): void {
   const s = view.series;
   const i = sampleIndex();
   if (!s || i < 0) return;
   const tf = at(s.tf, i);
   const of = at(s.of, i);
-  const bt = at(s.bt, i);
   $('roT').textContent =
-    (tf === null ? '–' : `${bt === null ? '' : 'sht '}${tf.toFixed(1)}°`) +
-    (bt === null ? '' : ` · bme ${bt.toFixed(1)}°`) +
-    (of === null ? '' : ` · out ${of.toFixed(1)}°`);
+    (tf === null ? '–' : `${tf.toFixed(1)}°`) + (of === null ? '' : ` · out ${of.toFixed(1)}°`);
   const spd = s.spd.length ? s.spd[i] : undefined;
   $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
-  $('roH').textContent = dualReadout(at(s.rh, i), at(s.bh, i), '%');
+  const rhNow = at(s.rh, i);
+  $('roH').textContent = rhNow === null ? '' : `${rhNow.toFixed(0)}%`;
   const hpa = at(s.hpa, i);
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   const bv = at(s.bv, i);
@@ -377,7 +360,7 @@ export function drawAll(): void {
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub, undefined, s.bh);
+      (v) => v.toFixed(0), 'no humidity data', view.scrub);
   }
   if (view.rows.pressure) {
     // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still

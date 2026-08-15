@@ -137,36 +137,19 @@ export function buildGroups(d: SettingsDeps): Group[] {
     },
     {
       title: 'SENSORS',
-      blurb:
-        'Calibration and sampling. Every stored reading is corrected before it is written, so changes here do not rewrite history.',
+      blurb: 'What is measuring the garage, and how often it is logged.',
       rows: [
-        {
-          kind: 'toggle',
-          label: 'Off-board SHT41 drives readings',
-          hint: 'On (default): the SHT41 on the sensor cable is the garage temperature and humidity — no self-heating offset needed. Off: fall back to the on-board BME280 with the offsets below. Both sensors are logged either way, for the comparison overlays in the charts.',
-          on: s.sht_pref,
-          toggle: () => d.setConfig(`sht=${s.sht_pref ? 0 : 1}`),
-        },
-        step(
-          'Probe offset · charging',
-          'BME280 fallback only: correction added while the pack is charging, when the board runs warmest. Ignored while the SHT41 drives.',
-          `${s.offc > 0 ? '+' : ''}${s.offc.toFixed(1)} °C`,
-          () => set(`offc=${clamp(s.offc - 0.1, -15, 15)}`),
-          () => set(`offc=${clamp(s.offc + 0.1, -15, 15)}`),
-        ),
-        step(
-          'Probe offset · idle',
-          'BME280 fallback only: correction added the rest of the time. Ignored while the SHT41 drives.',
-          `${s.offi > 0 ? '+' : ''}${s.offi.toFixed(1)} °C`,
-          () => set(`offi=${clamp(s.offi - 0.1, -15, 15)}`),
-          () => set(`offi=${clamp(s.offi + 0.1, -15, 15)}`),
-        ),
         text(
           'Garage probe',
+          'Off-board SHT41 on the sensor cable — the sole temperature and humidity source. It hangs away from the board precisely so it needs no self-heating correction; the offsets that existed to patch the old on-board reading died with it.',
+          'SHT41',
+        ),
+        text(
+          'Barometer',
           s.sensor
-            ? 'On-board BME280 — temperature, humidity and pressure.'
-            : 'The on-board BME280 did not answer at boot; garage readings are unavailable.',
-          s.sensor ? 'BME280 OK' : 'NOT FOUND',
+            ? 'On-board BME280, pressure only — its thermometer read +5 °C high whenever the fan rested, so everything but the barometer is switched off.'
+            : 'The on-board BME280 barometer has not answered; pressure is blank until it does.',
+          s.sensor ? 'BME280 OK' : 'NO ANSWER',
         ),
         text(
           'Outside temperature',
