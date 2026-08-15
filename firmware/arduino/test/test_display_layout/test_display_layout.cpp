@@ -198,6 +198,40 @@ static void a_null_or_zero_buffer_is_survivable() {
   TEST_ASSERT_TRUE(true);  // reaching here without a fault is the assertion
 }
 
+
+static void the_fault_banner_outranks_the_mode() {
+  char b[16];
+  display_layout::banner_status_text(true, 1, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("AUTO", b);
+  display_layout::banner_status_text(false, 0, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("MANUAL", b);
+  // The watt meter calling the fan a liar outranks whoever is driving.
+  display_layout::banner_status_text(true, -1, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("FAN FAULT", b);
+  display_layout::banner_status_text(false, -1, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("FAN FAULT", b);
+}
+
+static void power_only_speaks_with_a_fresh_reading() {
+  char b[12];
+  display_layout::power_text(20.3f, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("20W", b);
+  display_layout::power_text(NAN, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("", b);
+  display_layout::power_text(-1.0f, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("", b);
+}
+
+static void voc_names_the_warmup_instead_of_blanking() {
+  char b[16];
+  display_layout::voc_text(156, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("VOC 156", b);
+  display_layout::voc_text(0, b, sizeof(b));  // warming: a blank would read as no sensor
+  TEST_ASSERT_EQUAL_STRING("VOC WARM", b);
+  display_layout::voc_text(-1, b, sizeof(b));  // truly no sensor: silence
+  TEST_ASSERT_EQUAL_STRING("", b);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(a_stopped_fan_reads_off_not_zero);
@@ -212,6 +246,9 @@ int main() {
   RUN_TEST(a_missing_side_makes_the_differential_unknown_not_zero);
   RUN_TEST(the_hot_flag_follows_the_engage_threshold);
   RUN_TEST(mode_names_who_is_driving);
+  RUN_TEST(the_fault_banner_outranks_the_mode);
+  RUN_TEST(power_only_speaks_with_a_fresh_reading);
+  RUN_TEST(voc_names_the_warmup_instead_of_blanking);
   RUN_TEST(runtime_keeps_a_stable_width);
   RUN_TEST(battery_drops_the_percent_when_the_gauge_has_none);
   RUN_TEST(the_first_boot_paints_immediately);

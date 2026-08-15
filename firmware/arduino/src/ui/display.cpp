@@ -18,6 +18,8 @@
 
 #include "config.h"
 #include "fan/control.h"
+#include "net/plug.h"
+#include "sensors/air.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
 #include "storage/history.h"
@@ -30,12 +32,13 @@
 namespace display {
 namespace {
 
+using display_layout::banner_status_text;
 using display_layout::battery_text;
 using display_layout::differential_is_hot;
 using display_layout::differential_text;
 using display_layout::kHeight;
 using display_layout::kWidth;
-using display_layout::mode_text;
+using display_layout::power_text;
 using display_layout::refresh_due;
 using display_layout::rh_text;
 using display_layout::runtime_text;
@@ -43,6 +46,7 @@ using display_layout::speed_fraction;
 using display_layout::speed_scale_text;
 using display_layout::speed_text;
 using display_layout::temp_f_text;
+using display_layout::voc_text;
 
 // 2.13" SSD1680 FeatherWing, landscape; no busy/rst pins wired. Driven through
 // Adafruit's own panel class for the tricolor MFGNR part: the raw SSD1680
@@ -133,7 +137,9 @@ void compose() {
   const int speed = fan::speed();
 
   // ---- banner ---------------------------------------------------------------
-  mode_text(fan::auto_on(), buf, sizeof(buf));
+  // "FAN FAULT" outranks the mode: it is the watt meter catching the fan not
+  // obeying (plug verdict -1), the one condition this panel exists to shout.
+  banner_status_text(fan::auto_on(), plug::verdict(), buf, sizeof(buf));
   if (tricolor()) {
     g_red->fillRect(0, 0, kWidth, 20, 1);
     draw_ftext(g_red, &FreeSansBold9pt7b, 5, 15, "GARAGE FAN", 0);
@@ -227,10 +233,19 @@ void compose() {
   // error, correctly, because a silently clipped footer is a real defect.
   char rt[16];
   char batt[24];
-  char line[64];
+  char pw[12];
+  char voc[16];
+  char line[80];
   runtime_text(odometer::run_today_s(), rt, sizeof(rt));
   battery_text(battery::volts(), battery::percent(), batt, sizeof(batt));
-  snprintf(line, sizeof(line), "%s  %s", rt, batt);
+  // Measured draw and air quality earn footer space only when they have
+  // something true to say: power_text is empty without a fresh reading,
+  // voc_text is empty without a sensor (and says WARM while warming).
+  const bool plug_fresh = plug::age_s() >= 0 && plug::age_s() < 60;
+  power_text(plug_fresh ? plug::watts() : NAN, pw, sizeof(pw));
+  voc_text(static_cast<int>(air::voc_index()), voc, sizeof(voc));
+  snprintf(line, sizeof(line), "%s  %s%s%s%s%s", rt, batt, pw[0] ? "  " : "", pw,
+           voc[0] ? "  " : "", voc);
   draw_text(g_black, 4, 108, 1, line);
   snprintf(line, sizeof(line), "%s v%s", WiFi.localIP().toString().c_str(), kFwVersion);
   draw_text(g_black, kWidth - 4 - static_cast<int>(strlen(line)) * 6, 108, 1, line);

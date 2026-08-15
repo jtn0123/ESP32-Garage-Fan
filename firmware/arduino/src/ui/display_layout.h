@@ -138,6 +138,49 @@ inline void mode_text(bool auto_on, char* out, size_t cap) {
 }
 
 /**
+ * The banner's right-hand slot: the mode, unless the watt meter is calling
+ * the fan a liar (plug verdict -1), which outranks everything else the
+ * panel could say -- it is the panel's whole reason to be glanced at.
+ * Mono-safe by the tricolor rule: the banner text is black-plane on mono.
+ */
+inline void banner_status_text(bool auto_on, int plug_verdict, char* out, size_t cap) {
+  if (!out || cap == 0)
+    return;
+  if (plug_verdict == -1)
+    snprintf(out, cap, "FAN FAULT");
+  else
+    mode_text(auto_on, out, cap);
+}
+
+/**
+ * Measured draw for the footer. Empty when there is no fresh reading -- the
+ * footer simply omits it rather than showing a stale number as current.
+ */
+inline void power_text(float watts, char* out, size_t cap) {
+  if (!out || cap == 0)
+    return;
+  if (isnan(watts) || watts < 0)
+    out[0] = '\0';
+  else
+    snprintf(out, cap, "%.0fW", (double)watts);
+}
+
+/**
+ * VOC index for the footer. 0 = Sensirion's algorithm still warming (worth
+ * saying: a blank looks like a missing sensor); negative = no sensor, empty.
+ */
+inline void voc_text(int voc_index, char* out, size_t cap) {
+  if (!out || cap == 0)
+    return;
+  if (voc_index < 0)
+    out[0] = '\0';
+  else if (voc_index == 0)
+    snprintf(out, cap, "VOC WARM");
+  else
+    snprintf(out, cap, "VOC %d", voc_index);
+}
+
+/**
  * Runtime today as h/m, for the footer.
  *
  * Minutes stay two digits so the string does not change width every time the
