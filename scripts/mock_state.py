@@ -3,12 +3,20 @@ the scenario knobs. Split from mock_device.py at the 500-line ceiling; every
 sibling module mutates these same dicts, which is the point -- the mock IS
 one process-wide state machine."""
 
+from __future__ import annotations
+
 import time
+from typing import Any, Tuple, Union
+
+# The wire payloads are heterogeneous by design (ints, floats, bools, nested
+# dicts, None), so per-key typing here would be dishonest; the real contract
+# lives in web/src/types.ts, pinned by tests/test_web_contract.py.
+Json = dict[str, Any]
 
 STEP = 300
 BOOT = time.time()
 
-STATE = {
+STATE: Json = {
     "speed": 9,
     "auto": True,
     "auto_max": 9,
@@ -50,7 +58,7 @@ STATE = {
     "wh_today": 412.5,
     "cost_kwh": 0.15,
 }
-DEVICE = {
+DEVICE: Json = {
     "id": "garage-fan-d69dbe",
     "host": "garage-fan",
     "repo": "jtn0123/ESP32-Garage-Fan",
@@ -64,7 +72,7 @@ DEVICE = {
     "sample_s": STEP,
     "high_us": [0, 3477, 4072, 4868, 5066, 5661, 6159, 6754, 7251, 7847, 8344, 8940, 9437],
 }
-STATS = {
+STATS: Json = {
     "run_today_s": 16501,
     "run_total_s": 410634,
     "energy_wh": 5183,
@@ -77,7 +85,7 @@ STATS = {
 }
 
 # Harness knobs.
-SCEN = {
+SCEN: Json = {
     "card": True,
     "synced": True,
     "rows": 288,
@@ -96,7 +104,14 @@ SCEN = {
 # Type and bounds for every scenario knob. /_scen coerces through this rather
 # than storing whatever arrived, so nothing a caller sends survives as a string
 # anywhere in this process.
-SCEN_SPEC = {
+# A knob is either a bare bool, an ("choice", *values) enum, or an
+# (int, lo, hi) range.
+# A runtime alias, so spelled with Union: the e2e harness runs this mock on
+# the system /usr/bin/python3 (3.9 on macOS), where `type | tuple[...]` is a
+# TypeError at import time even though mypy reads it fine.
+ScenSpec = Union[type, Tuple[str, ...], Tuple[type, int, int]]
+
+SCEN_SPEC: dict[str, ScenSpec] = {
     "card": bool,
     "synced": bool,
     "rows": (int, 0, 8640),
@@ -109,18 +124,23 @@ SCEN_SPEC = {
 }
 
 
-def coerce_scen(key: str, raw: str):
+def coerce_scen(key: str, raw: str) -> bool | int | str | None:
     """Whitelisted parse of one knob. Raises ValueError on anything else."""
     spec = SCEN_SPEC[key]
     if isinstance(spec, tuple) and spec[0] == "choice":
-        if raw not in spec[1:]:
-            raise ValueError(f"{key} takes one of {'|'.join(spec[1:])}")
+        choices = tuple(str(c) for c in spec[1:])
+        if raw not in choices:
+            raise ValueError(f"{key} takes one of {'|'.join(choices)}")
         return raw
     if spec is bool:
         if raw not in ("true", "false"):
             raise ValueError(f"{key} takes true|false")
         return raw == "true"
-    _, lo, hi = spec
+    if not isinstance(spec, tuple):
+        raise ValueError(f"{key} has a malformed spec")  # unreachable with the table above
+    lo, hi = spec[1], spec[2]
+    if not isinstance(lo, int) or not isinstance(hi, int):
+        raise ValueError(f"{key} has a malformed spec")  # unreachable with the table above
     if raw == "none":
         return None
     if not raw.isdigit() or not (lo <= int(raw) <= hi):

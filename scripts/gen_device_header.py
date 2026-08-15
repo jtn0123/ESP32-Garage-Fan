@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+from collections.abc import Mapping
 import os
 from pathlib import Path
 import subprocess
+from typing import Any
 
 try:
     import yaml  # type: ignore
@@ -101,7 +103,7 @@ MAX_SAMPLE_INTERVAL_SEC = 3600
 DEFAULT_SAMPLE_INTERVAL_SEC = 300
 
 
-def resolve_sample_interval(data, env=None):
+def resolve_sample_interval(data: Mapping[str, Any], env: Mapping[str, str] | None = None) -> int:
     """Resolve the ALWAYS_ON sampling cadence, rejecting out-of-range values.
 
     Distinct from wake_interval, which is how long the device deep sleeps
@@ -145,14 +147,14 @@ def read_version_file() -> str:
         return ""
 
 
-def main():
+def main() -> None:
     _load_dotenv_once()
     prj = str(ROOT)
     cfg_dir = os.path.join(prj, "config")
     y_path = os.path.join(cfg_dir, "device.yaml")
     if not os.path.exists(y_path):
         y_path = os.path.join(cfg_dir, "device.sample.yaml")
-    data = {}
+    data: dict[str, Any] = {}
     if yaml is not None and os.path.exists(y_path):
         with open(y_path, "r") as f:
             data = yaml.safe_load(f) or {}
@@ -330,12 +332,13 @@ def main():
         # Optional BSSID/channel fast-connect
         if wifi_bssid:
             f.write(f"#define WIFI_BSSID {c_string(wifi_bssid)}\n")
-        try:
-            ch = int(wifi_channel)
-            if ch > 0:
-                f.write(f"#define WIFI_CHANNEL {ch}\n")
-        except Exception:
-            pass
+        if wifi_channel is not None:
+            try:
+                ch = int(wifi_channel)
+                if ch > 0:
+                    f.write(f"#define WIFI_CHANNEL {ch}\n")
+            except Exception:
+                pass
         # Optional country code to constrain scan band and speeds join
         if wifi_country:
             f.write(f"#define WIFI_COUNTRY {c_string(wifi_country)}\n")

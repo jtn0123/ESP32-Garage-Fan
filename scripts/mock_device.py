@@ -22,10 +22,12 @@ Scenario knobs are flipped at runtime:
     curl "http://127.0.0.1:8099/_die"                 # controller goes away
 """
 
+from __future__ import annotations
+
 import base64
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import math
 import os
 from pathlib import Path
 import time
@@ -44,7 +46,7 @@ PORT = int(os.environ.get("MOCK_PORT", "8099"))
 # scripts/deploy.sh for the same rule.
 SELF_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
 
-import sys as _sys
+import sys as _sys  # noqa: E402  (the SELF_ORIGINS block above is config, not code)
 
 # Path bootstrap: this file is run as a script (pytest spawns it by path,
 # Playwright's harness too) AND loaded via importlib by tests/test_qr_v1.py,
@@ -52,19 +54,29 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mock_data import console_bytes, history  # noqa: E402
-from mock_panel import DISP_H, DISP_STRIDE, DISP_W, display_frame, qr_v1_encode  # noqa: E402,F401  (qr_v1_encode re-exported for tests/test_qr_v1.py)
-from mock_state import BOOT, DEVICE, SCEN, SCEN_SPEC, STATE, STEP, coerce_scen  # noqa: E402
+from mock_panel import (  # noqa: E402
+    DISP_H,
+    DISP_STRIDE,
+    DISP_W,
+    display_frame,
+    qr_v1_encode,  # noqa: F401  (re-exported for tests/test_qr_v1.py)
+)
+from mock_state import BOOT, DEVICE, SCEN, SCEN_SPEC, STATE, STATS, coerce_scen  # noqa: E402
+
+# What parse_qs hands every handler: each query key to its list of values.
+Query = dict[str, list[str]]
+
 
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *args):
+    def log_message(self, *args: object) -> None:
         # Silence BaseHTTPRequestHandler's per-request stderr line. The console
         # polls every 15 s and redraws on every frame, so the default access
         # log buries the tracebacks this harness exists to surface.
         pass
 
-    def _send(self, code, body, ctype="application/json"):
+    def _send(self, code: int, body: bytes | str, ctype: str = "application/json") -> None:
         raw = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -84,15 +96,15 @@ class H(BaseHTTPRequestHandler):
         # comparison before it is stored.
         self.wfile.write(raw)  # NOSONAR
 
-    def _json(self, code, obj):
+    def _json(self, code: int, obj: object) -> None:
         self._send(code, json.dumps(obj))
 
     # --- the guards the firmware now enforces -----------------------------
-    def _origin_ok(self):
+    def _origin_ok(self) -> bool:
         o = self.headers.get("Origin")
         return o is None or o in SELF_ORIGINS
 
-    def _write_guard(self):
+    def _write_guard(self) -> bool:
         """POST-only + Origin, matching web.cpp. Returns True if refused."""
         if self.command != "POST":
             self._json(404, {"error": "404"})
@@ -102,10 +114,10 @@ class H(BaseHTTPRequestHandler):
             return True
         return False
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         self.route()
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         self.route()
 
     # --- routing ----------------------------------------------------------
@@ -113,7 +125,7 @@ class H(BaseHTTPRequestHandler):
     # to a cognitive complexity of 67, which is exactly the shape that hides a
     # missing guard.
 
-    def route(self):
+    def route(self) -> None:
         STATE["uptime_s"] = int(time.time() - BOOT) + 1837
         u = urlparse(self.path)
         path, query = u.path, parse_qs(u.query)
@@ -131,7 +143,7 @@ class H(BaseHTTPRequestHandler):
         return handler(self, query)
 
     # --- harness ----------------------------------------------------------
-    def _harness(self, path, query):
+    def _harness(self, path: str, query: Query) -> None:
         if path == "/_die":
             SCEN["down"] = True
             return self._json(200, {"ok": True})
@@ -159,12 +171,12 @@ class H(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "applied": applied})
 
     # --- reads ------------------------------------------------------------
-    def _page(self, _query):
+    def _page(self, _query: Query) -> None:
         # Sonar's S5131 flow names this read as its source; the suppression and
         # the reasoning live at the sink in _send, where the rule reports.
         return self._send(200, console_bytes(), "text/html")
 
-    def _state(self, _query):
+    def _state(self, _query: Query) -> None:
         mode = SCEN["plug"]
         if mode == "none":
             STATE["plug"] = None
@@ -177,13 +189,13 @@ class H(BaseHTTPRequestHandler):
             STATE["plug"] = {"w": base[min(speed, 12)], "v": 120.9, "age_s": 3, "verdict": 1}
         return self._json(200, STATE)
 
-    def _device(self, _query):
+    def _device(self, _query: Query) -> None:
         return self._json(200, DEVICE)
 
-    def _stats(self, _query):
+    def _stats(self, _query: Query) -> None:
         return self._json(200, STATS)
 
-    def _sensors(self, _query):
+    def _sensors(self, _query: Query) -> None:
         return self._json(
             200,
             {
@@ -203,14 +215,14 @@ class H(BaseHTTPRequestHandler):
             },
         )
 
-    def _events(self, _query):
+    def _events(self, _query: Query) -> None:
         now = int(time.time())
         body = "\n".join(
             f"{now - i * 30} {1000 - i * 30} health rssi=-63 heap=46724 drops=0" for i in range(30)
         )
         return self._send(200, body, "text/plain")
 
-    def _history(self, query):
+    def _history(self, query: Query) -> None:
         days = query.get("days", [None])[0]
         if days not in ("1", "7", "30", "60"):
             return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
@@ -218,7 +230,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(503, {"error": "sd card not mounted"})
         return self._json(200, history())
 
-    def _csv(self, query):
+    def _csv(self, query: Query) -> None:
         if "days" in query:
             raw = query["days"][0]
             if not raw.isdigit() or not (1 <= int(raw) <= 30):
@@ -230,7 +242,7 @@ class H(BaseHTTPRequestHandler):
         return self._send(200, body, "text/csv")
 
     # --- writes -----------------------------------------------------------
-    def _set(self, query):
+    def _set(self, query: Query) -> None:
         raw = query.get("speed", [None])[0]
         if raw is None or not raw.isdigit() or not (0 <= int(raw) <= 12):
             return self._json(400, {"error": "0-12 only"})
@@ -245,7 +257,7 @@ class H(BaseHTTPRequestHandler):
     # differential steppers had never been exercised end to end by anything.
     # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
     # in step with the firmware.
-    CONFIG_KEYS = {
+    CONFIG_KEYS: dict[str, tuple[str, Callable[[str], object]]] = {
         "sht": ("sht_pref", lambda v: v not in ("0", "false")),
         "gason": ("gas_on", lambda v: v not in ("0", "false")),
         "gasspd": ("gas_spd", int),
@@ -260,7 +272,7 @@ class H(BaseHTTPRequestHandler):
         "offf": ("off_f", float),
     }
 
-    def _config(self, query):
+    def _config(self, query: Query) -> None:
         for arg, (key, cast) in self.CONFIG_KEYS.items():
             if arg not in query:
                 continue
@@ -271,7 +283,7 @@ class H(BaseHTTPRequestHandler):
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
 
-    def _display(self, _query):
+    def _display(self, _query: Query) -> None:
         if not SCEN["panel_ready"]:
             # Exactly what handle_display() answers before the first render.
             return self._json(
@@ -305,10 +317,10 @@ class H(BaseHTTPRequestHandler):
             },
         )
 
-    def _display_refresh(self, _query):
+    def _display_refresh(self, _query: Query) -> None:
         return self._json(200, {"ok": True})
 
-    def _needs_token(self, _query):
+    def _needs_token(self, _query: Query) -> None:
         # Token-guarded on the real device; the mock always refuses, which is
         # what the console's error path should be exercised against.
         return self._json(403, {"error": "bad token"})

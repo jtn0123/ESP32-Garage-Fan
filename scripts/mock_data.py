@@ -2,12 +2,13 @@
 history that exercises gaps, flat lines and near-empty cards. Split from
 mock_device.py at the 500-line ceiling."""
 
+from __future__ import annotations
+
 import math
+from pathlib import Path
 import time
 
-from mock_state import BOOT, SCEN, STATE, STEP
-
-from pathlib import Path
+from mock_state import SCEN, STEP, Json
 
 # Serve the console straight out of the build tree, so dogfooding always
 # exercises the bundle that would actually ship.
@@ -39,10 +40,10 @@ def console_bytes() -> bytes:
     return cached[1]
 
 
-_hist_cache: "tuple[tuple, dict] | None" = None
+_hist_cache: "tuple[object, Json] | None" = None
 
 
-def history():
+def history() -> Json:
     # Keyed on the knobs AND the current second: the rows carry timestamps, so a
     # cache that ignored the clock would freeze the chart's right-hand edge.
     global _hist_cache
@@ -55,10 +56,17 @@ def history():
     return value
 
 
-def _history_uncached():
-    n = SCEN["rows"]
+def _history_uncached() -> Json:
+    n = int(SCEN["rows"])
     end = int(time.time())
-    ts, temp, rh, hpa, out, batt, spd, chg = [], [], [], [], [], [], [], []
+    ts: list[int] = []
+    temp: list[float | None] = []
+    rh: list[int] = []
+    hpa: list[float | None] = []
+    out: list[float | None] = []
+    batt: list[float] = []
+    spd: list[int] = []
+    chg: list[int] = []
     t = end - (n - 1) * STEP
     for i in range(n):
         if SCEN["gap_at"] is not None and i == SCEN["gap_at"]:
@@ -79,7 +87,10 @@ def _history_uncached():
     # exercised by the default data set.
     base_w = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
     watts = [round(base_w[min(sp, 12)] + (i % 3) * 0.2, 1) for i, sp in enumerate(spd)]
-    vocr, noxr, voc, nox = [], [], [], []
+    vocr: list[int | None] = []
+    noxr: list[int | None] = []
+    voc: list[int | None] = []
+    nox: list[int | None] = []
     third = max(1, n // 3)
     for i in range(n):
         if i < third:
@@ -121,5 +132,3 @@ def _history_uncached():
         "spd": spd,
         "chg": chg,
     }
-
-

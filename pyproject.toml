@@ -24,7 +24,9 @@ python_version = "3.11"
 namespace_packages = true
 warn_redundant_casts = true
 warn_unused_ignores = true
-disallow_untyped_defs = false
+# Every def in scripts/ carries annotations as of the quality round; new
+# untyped code is a CI failure (the mypy entry in the lint matrix).
+disallow_untyped_defs = true
 no_implicit_optional = true
 strict_optional = true
 

@@ -295,7 +295,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [ruff, black, clang-format, cpplint]
+        tool: [ruff, black, clang-format, cpplint, mypy]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -319,6 +319,9 @@ jobs:
               ;;
             cpplint)
               pip install cpplint
+              ;;
+            mypy)
+              pip install mypy
               ;;
             clang-format)
               sudo apt-get update
@@ -347,6 +350,12 @@ jobs:
                 clang-format --version | tee clang-format-version.txt
                 clang-format -n --Werror $FILES 2>&1 | tee clang-format.txt
               fi
+              ;;
+            mypy)
+              # Strictness lives in pyproject.toml ([tool.mypy] has
+              # disallow_untyped_defs); this stays a bare invocation so local
+              # runs and CI cannot drift.
+              mypy scripts/ 2>&1 | tee mypy.txt
               ;;
             cpplint)
               FILES=$(find firmware/arduino/src -type f \( -name "*.cpp" -o -name "*.h" \))

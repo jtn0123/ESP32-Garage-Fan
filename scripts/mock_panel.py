@@ -4,7 +4,7 @@ format, including the Python twin of the firmware's fixed V1-L QR encoder
 tests/test_qr_v1.py and test_qr_v1.cpp -- never refactor one side alone.
 Split from mock_device.py at the 500-line ceiling."""
 
-import base64
+from __future__ import annotations
 
 from mock_state import STATE
 
@@ -53,22 +53,22 @@ _FONT3X5 = {
 class _Plane:
     """A 1-bit, row-major, MSB-first plane -- the firmware's format."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.buf = bytearray(DISP_STRIDE * DISP_H)
 
-    def px(self, x, y, on=True):
+    def px(self, x: int, y: int, on: bool = True) -> None:
         if 0 <= x < DISP_W and 0 <= y < DISP_H:
             if on:
                 self.buf[y * DISP_STRIDE + (x >> 3)] |= 0x80 >> (x & 7)
             else:
                 self.buf[y * DISP_STRIDE + (x >> 3)] &= ~(0x80 >> (x & 7)) & 0xFF
 
-    def rect(self, x, y, w, h, on=True):
+    def rect(self, x: int, y: int, w: int, h: int, on: bool = True) -> None:
         for yy in range(y, y + h):
             for xx in range(x, x + w):
                 self.px(xx, yy, on)
 
-    def frame(self, x, y, w, h):
+    def frame(self, x: int, y: int, w: int, h: int) -> None:
         for xx in range(x, x + w):
             self.px(xx, y)
             self.px(xx, y + h - 1)
@@ -76,7 +76,7 @@ class _Plane:
             self.px(x, yy)
             self.px(x + w - 1, yy)
 
-    def text(self, x, y, s, scale=1, on=True):
+    def text(self, x: int, y: int, s: str, scale: int = 1, on: bool = True) -> None:
         for ch in s:
             glyph = _FONT3X5.get(ch)
             if glyph:
@@ -96,7 +96,7 @@ QR_SIZE = 21
 _QR_DATA_CW, _QR_ECC_CW = 19, 7
 
 
-def _gf_mul(a, b):
+def _gf_mul(a: int, b: int) -> int:
     r = 0
     while b:
         if b & 1:
@@ -108,13 +108,13 @@ def _gf_mul(a, b):
     return r
 
 
-def qr_v1_encode(text):
+def qr_v1_encode(text: str) -> list[list[int]] | None:
     """21x21 matrix of 0/1 for `text`, or None if it does not fit V1-L."""
     if not text or len(text) > 25 or any(c not in _QR_ALNUM for c in text):
         return None
-    bits = []
+    bits: list[int] = []
 
-    def put(val, n):
+    def put(val: int, n: int) -> None:
         bits.extend((val >> i) & 1 for i in range(n - 1, -1, -1))
 
     put(0b0010, 4)
@@ -150,7 +150,7 @@ def qr_v1_encode(text):
     mod = [[0] * QR_SIZE for _ in range(QR_SIZE)]
     isf = [[False] * QR_SIZE for _ in range(QR_SIZE)]
 
-    def setf(x, y, v):
+    def setf(x: int, y: int, v: int) -> None:
         mod[y][x] = int(bool(v))
         isf[y][x] = True
 
@@ -170,7 +170,7 @@ def qr_v1_encode(text):
         frem = (frem << 1) ^ ((frem >> 9) * 0x537)
     fbits = (fdata << 10 | frem) ^ 0x5412
 
-    def fb(i):
+    def fb(i: int) -> int:
         return (fbits >> i) & 1
 
     for i in range(6):
@@ -208,7 +208,7 @@ def qr_v1_encode(text):
     return mod
 
 
-def display_frame():
+def display_frame() -> "tuple[_Plane, _Plane]":
     """Compose the mock's panel image: the black plane and the red plane."""
     black, red = _Plane(), _Plane()
     speed = max(0, int(STATE["speed"]))
@@ -244,5 +244,3 @@ def display_frame():
 
     black.rect(0, 104, DISP_W, 1)
     return black, red
-
-

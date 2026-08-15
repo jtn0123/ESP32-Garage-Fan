@@ -261,7 +261,7 @@ def test_mock_accepts_every_config_arg_the_firmware_does():
     assert firmware_args, "handle_config() parses no arguments; the regex is stale"
 
     mock = (ROOT / "scripts" / "mock_device.py").read_text()
-    keys = re.search(r"CONFIG_KEYS = \{(.*?)\n    \}", mock, re.S)
+    keys = re.search(r"CONFIG_KEYS(?::[^=]*)? = \{(.*?)\n    \}", mock, re.S)
     assert keys, "CONFIG_KEYS not found in mock_device.py"
     mock_args = set(re.findall(r'"(\w+)":', keys.group(1)))
 
