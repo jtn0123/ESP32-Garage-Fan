@@ -102,33 +102,32 @@ export function xAtTime(s: Series, t: number, W: number): number | null {
 const yAt = (v: number, H: number, s: Scale): number =>
   H - 6 - ((v - s.min) * (H - 16)) / (s.max - s.min);
 
-/** Gridlines, y-axis labels, and the overnight shading on the temperature chart. */
-function frame(
-  { c, W, H }: Surface,
-  s: Series,
-  sc: Scale,
-  fmt: (v: number) => string,
-  shadeNight: boolean,
-): void {
-  if (shadeNight) {
-    c.fillStyle = 'rgba(255,255,255,.035)';
-    let i = 0;
-    while (i < s.n) {
-      if (s.night[i]) {
-        let j = i;
-        while (j < s.n && s.night[j]) j++;
-        const x0 = xAt(s, i, W);
-        c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
-        i = j;
-      } else {
-        i++;
-      }
+/** The dim overnight stripes behind the temperature trace. */
+function shadeNights({ c, W, H }: Surface, s: Series): void {
+  c.fillStyle = 'rgba(255,255,255,.035)';
+  let i = 0;
+  while (i < s.n) {
+    if (!s.night[i]) {
+      i++;
+      continue;
     }
+    let j = i;
+    while (j < s.n && s.night[j]) j++;
+    const x0 = xAt(s, i, W);
+    c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
+    i = j;
   }
-  // Outage bands: every row that draws a frame gets them, so a hole in the
-  // fan row and a hole in the temperature row are visibly the SAME event.
-  // s.gap[i] means row i's predecessor is more than 1.5 intervals behind --
-  // the line already breaks there; this says why the break is there.
+}
+
+/**
+ * The span where no samples exist, shaded and ruled at both edges.
+ *
+ * Drawn for EVERY row that frames itself, so a hole in the fan row and a
+ * hole in the temperature row read as the same event rather than as two
+ * coincidences. s.gap[i] means row i's predecessor is more than 1.5 nominal
+ * intervals behind -- the lines already break there; this says why.
+ */
+function shadeOutages({ c, W, H }: Surface, s: Series): void {
   for (let i = 1; i < s.n; i++) {
     if (!s.gap[i]) continue;
     const x0 = xAt(s, i - 1, W);
@@ -144,7 +143,19 @@ function frame(
       c.stroke();
     }
   }
+}
 
+/** Gridlines, y-axis labels, and the shading behind them. */
+function frame(
+  surf: Surface,
+  s: Series,
+  sc: Scale,
+  fmt: (v: number) => string,
+  shadeNight: boolean,
+): void {
+  const { c, W, H } = surf;
+  if (shadeNight) shadeNights(surf, s);
+  shadeOutages(surf, s);
   c.strokeStyle = '#161c24';
   c.lineWidth = 1;
   c.fillStyle = DIM;
@@ -210,6 +221,39 @@ function placeholder({ c, W, H }: Surface, message: string): void {
   c.fillText(message, W / 2, H / 2);
 }
 
+/**
+ * Restart stems, drawn last so nothing hides them.
+ *
+ * This is the half the outage band cannot supply: the band says "no data
+ * here", the mark says "because it rebooted, and this is how the last life
+ * ended". Restarts happen BETWEEN rows, hence xAtTime rather than a row index.
+ */
+function drawBootMarks({ c, W, H }: Surface, s: Series, boots: readonly BootMark[]): void {
+  for (const b of boots) {
+    const x = xAtTime(s, b.ts, W);
+    if (x === null) continue;
+    const flip = x > W - 70;  // near the right edge, label leftwards
+    c.strokeStyle = RESTART_C;
+    c.lineWidth = 1.4;
+    c.setLineDash([3, 3]);
+    c.beginPath();
+    c.moveTo(x + 0.5, 0);
+    c.lineTo(x + 0.5, H - 2);
+    c.stroke();
+    c.setLineDash([]);
+    c.fillStyle = RESTART_C;
+    c.beginPath();  // a small dropped flag, so the stem reads as an event
+    c.moveTo(x, 1);
+    c.lineTo(x + 7, 4.5);
+    c.lineTo(x, 8);
+    c.closePath();
+    c.fill();
+    c.font = '9px "JetBrains Mono",monospace';
+    c.textAlign = flip ? 'right' : 'left';
+    c.fillText(b.cause === 'unknown' ? 'restart' : `restart · ${b.cause}`, x + (flip ? -9 : 9), 9);
+  }
+}
+
 export function drawTemperature(
   canvas: HTMLCanvasElement,
   s: Series,
@@ -254,33 +298,7 @@ export function drawTemperature(
   line(surf, s, sc, s.of, OUT, true, 2);
   line(surf, s, sc, s.tf, OR, false, 2.2);
 
-  // Restart marks, on top of everything: a dropped stem at the instant the
-  // controller came back, labelled with how the previous life ended. This is
-  // the half the outage band cannot supply -- the band says "no data here",
-  // the mark says "because it rebooted, and this is why".
-  for (const b of boots) {
-    const x = xAtTime(s, b.ts, W);
-    if (x === null) continue;
-    c.strokeStyle = RESTART_C;
-    c.lineWidth = 1.4;
-    c.setLineDash([3, 3]);
-    c.beginPath();
-    c.moveTo(x + 0.5, 0);
-    c.lineTo(x + 0.5, H - 2);
-    c.stroke();
-    c.setLineDash([]);
-    c.fillStyle = RESTART_C;
-    c.beginPath();  // a small dropped flag, so the stem reads as an event
-    c.moveTo(x, 1);
-    c.lineTo(x + 7, 4.5);
-    c.lineTo(x, 8);
-    c.closePath();
-    c.fill();
-    c.font = '9px "JetBrains Mono",monospace';
-    c.textAlign = x > W - 70 ? 'right' : 'left';
-    c.fillText(b.cause === 'unknown' ? 'restart' : `restart · ${b.cause}`,
-      x + (x > W - 70 ? -9 : 9), 9);
-  }
+  drawBootMarks(surf, s, boots);
 
   if (index >= 0) {
     crosshair(surf, s, index);

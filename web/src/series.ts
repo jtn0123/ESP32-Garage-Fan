@@ -68,6 +68,54 @@ function pad<T>(a: readonly T[] | undefined, n: number, fill: T): T[] {
   return out;
 }
 
+/**
+ * Where each row sits along the x axis, and which rows follow an outage.
+ *
+ * Positions are proportional to real elapsed time, so a 15-minute hole is
+ * 15 minutes wide rather than one row wide. When the window carries no usable
+ * span -- every stamp unsynced, a single row, or a clock that ran backwards --
+ * it falls back to even spacing, which is honest about ordering and makes no
+ * claim about duration.
+ */
+function timeline(
+  ts: (i: number) => number | null,
+  n: number,
+  step: number,
+): { frac: number[]; gap: boolean[] } {
+  const t0 = ts(0);
+  const tn = ts(n - 1);
+  const span = t0 !== null && tn !== null ? tn - t0 : 0;
+  const even = (i: number): number => (n > 1 ? i / (n - 1) : 0);
+  const frac: number[] = [];
+  const gap: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = ts(i);
+    const timed = span > 0 && t0 !== null && t !== null;
+    frac.push(timed ? (t - t0) / span : even(i));
+    const prev = i > 0 ? ts(i - 1) : null;
+    // `step` is already sanitised by the caller: at interval_s <= 0 this
+    // comparison would read "any spacing at all" and flag EVERY row, which
+    // (since the outage bands landed) would shade the whole chart red.
+    gap.push(prev !== null && t !== null && t - prev > step * 1.5);
+  }
+  return { frac, gap };
+}
+
+/** Which rows fall in the overnight band the temperature chart shades. */
+function nights(ts: (i: number) => number | null, n: number): boolean[] {
+  const out: boolean[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = ts(i);
+    if (t === null) {
+      out.push(false);
+      continue;
+    }
+    const hr = new Date(t * 1000).getHours();
+    out.push(hr >= 20 || hr < 6);
+  }
+  return out;
+}
+
 export function build(h: History): Series {
   const n = h.temp_c?.length ?? 0;
   // Real per-row epochs from the device. A 0 means SNTP had not synced when
@@ -77,34 +125,8 @@ export function build(h: History): Series {
   // A 0 means SNTP had not synced when that row was taken -- unknown, not 1970.
   const ts = (i: number): number | null => stamps[i] || null;
 
-  const t0 = ts(0);
-  const tn = ts(n - 1);
-  const span = t0 !== null && tn !== null ? tn - t0 : 0;
-  const frac: number[] = [];
-  const gap: boolean[] = [];
-  for (let i = 0; i < n; i++) {
-    const t = ts(i);
-    frac.push(
-      span > 0 && t0 !== null && t !== null ? (t - t0) / span : n > 1 ? i / (n - 1) : 0,
-    );
-    const prev = i > 0 ? ts(i - 1) : null;
-    // A nonsense interval must not turn every row into an outage: at
-    // interval_s <= 0 the comparison below is "any spacing at all", which
-    // flagged EVERY row and (since the outage bands landed) would shade the
-    // whole chart red. Fall back to the firmware's real cadence.
-    gap.push(prev !== null && t !== null && t - prev > step * 1.5);
-  }
-
-  const night: boolean[] = [];
-  for (let i = 0; i < n; i++) {
-    const t = ts(i);
-    if (t === null) {
-      night.push(false);
-      continue;
-    }
-    const hr = new Date(t * 1000).getHours();
-    night.push(hr >= 20 || hr < 6);
-  }
+  const { frac, gap } = timeline(ts, n, step);
+  const night = nights(ts, n);
 
   return {
     n,
