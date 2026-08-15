@@ -81,6 +81,11 @@ STATE = {
     # no-meter build.
     "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
     "sht_pref": True,
+    # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
+    "gas_on": True,
+    "gas_spd": 6,
+    "gas_voc": 250,
+    "gas_active": False,
 }
 DEVICE = {
     "id": "garage-fan-d69dbe",
@@ -699,6 +704,9 @@ class H(BaseHTTPRequestHandler):
     # in step with the firmware.
     CONFIG_KEYS = {
         "sht": ("sht_pref", lambda v: v not in ("0", "false")),
+        "gason": ("gas_on", lambda v: v not in ("0", "false")),
+        "gasspd": ("gas_spd", int),
+        "gasvoc": ("gas_voc", int),
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),

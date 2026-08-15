@@ -107,6 +107,71 @@ static void test_full_cycle_hot_afternoon_to_cool_evening() {
   TEST_ASSERT_EQUAL(kCfg.min_speed, s);
 }
 
+
+// ---------------------------------------------------------------- gas boost
+
+static const FanGasCfg kGas{true, 6, 250, 200};
+
+static void test_gas_floor_latches_and_releases_with_hysteresis() {
+  bool gh = false;
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(100, &gh, kGas));  // ordinary air
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(249, &gh, kGas));  // just under: no latch
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(250, &gh, kGas));  // latch at the edge
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(225, &gh, kGas));  // holds between bands
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(201, &gh, kGas));  // still above release
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(200, &gh, kGas));  // releases at the edge
+  TEST_ASSERT_FALSE(gh);
+}
+
+static void test_gas_floor_clears_when_sensor_goes_away() {
+  // A latched boost must not survive the sensor: index 0 (warming) and -1
+  // (absent) both clear it, or a dead SGP41 pins the fan at boost forever.
+  bool gh = false;
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(400, &gh, kGas));
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(0, &gh, kGas));
+  TEST_ASSERT_FALSE(gh);
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(400, &gh, kGas));
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(-1, &gh, kGas));
+  TEST_ASSERT_FALSE(gh);
+}
+
+static void test_gas_floor_disabled_clears_latch() {
+  bool gh = true;  // latched when the user flips it off mid-boost
+  FanGasCfg off = kGas;
+  off.enabled = false;
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(400, &gh, off));
+  TEST_ASSERT_FALSE(gh);
+}
+
+static void test_gas_floor_merges_under_thermostat() {
+  // Below the floor: one step per tick toward it, then hold.
+  TEST_ASSERT_EQUAL(3, fan_apply_gas_floor(/*next=*/2, /*prev=*/2, /*floor=*/6));
+  TEST_ASSERT_EQUAL(6, fan_apply_gas_floor(5, 6, 6));   // thermostat wants down: floor holds
+  TEST_ASSERT_EQUAL(9, fan_apply_gas_floor(9, 9, 6));   // above the floor: untouched
+  TEST_ASSERT_EQUAL(2, fan_apply_gas_floor(2, 2, 0));   // no floor: untouched
+  TEST_ASSERT_EQUAL(6, fan_apply_gas_floor(0, 7, 6));   // drop from above lands ON the floor
+}
+
+static void test_gas_boost_full_story() {
+  // Cool garage (thermostat rests at 0), car starts inside: VOC spikes, the
+  // fan climbs to the boost floor one step at a time, holds while the air is
+  // bad, and ramps back down only after the index falls through the release.
+  bool high = false, gh = false;
+  int s = 0;
+  auto tick = [&](float in_c, float out_c, int voc) {
+    const int floor_speed = fan_gas_floor(voc, &gh, kGas);
+    s = fan_apply_gas_floor(fan_auto_decide(in_c, out_c, s, &high, kCfg), s, floor_speed);
+  };
+  tick(20, 20, 120);
+  TEST_ASSERT_EQUAL(0, s);
+  for (int i = 0; i < 6; i++) tick(20, 20, 400);  // exhaust fills the garage
+  TEST_ASSERT_EQUAL(6, s);
+  for (int i = 0; i < 5; i++) tick(20, 20, 230);  // clearing, still latched
+  TEST_ASSERT_EQUAL(6, s);
+  for (int i = 0; i < 10; i++) tick(20, 20, 150);  // clean again
+  TEST_ASSERT_EQUAL(0, s);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_hot_garage_ramps_to_max_one_step_per_tick);
@@ -118,5 +183,10 @@ int main(int, char**) {
   RUN_TEST(test_user_max_speed_is_respected);
   RUN_TEST(test_missing_data_holds_speed_and_latch);
   RUN_TEST(test_full_cycle_hot_afternoon_to_cool_evening);
+  RUN_TEST(test_gas_floor_latches_and_releases_with_hysteresis);
+  RUN_TEST(test_gas_floor_clears_when_sensor_goes_away);
+  RUN_TEST(test_gas_floor_disabled_clears_latch);
+  RUN_TEST(test_gas_floor_merges_under_thermostat);
+  RUN_TEST(test_gas_boost_full_story);
   return UNITY_END();
 }

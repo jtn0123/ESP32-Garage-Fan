@@ -95,6 +95,11 @@ export const STATUS_BITS = [
     body: 'What the Tapo watt meter on the fan’s supply actually measures, polled out of Home Assistant by the controller. This is the fan link’s only feedback — the control wire has no tach — so a draw that disagrees with the commanded speed is the one signal that catches a fan not obeying.',
   },
   {
+    key: 'GAS',
+    title: 'GAS BOOST',
+    body: 'Bad air overrides a resting thermostat: while the SGP41’s VOC index is above the trigger, auto mode holds at least the boost speed — a car started in the garage spins the fan up even when the temperature says rest. Trigger, speed and the on/off switch live in Settings › Auto mode.',
+  },
+  {
     key: 'T-OFFSET',
     title: 'PROBE CALIBRATION',
     body: 'A fixed correction added to every garage temperature reading to cancel heat the board adds to its own sensor. Charging warms the board much more than idle does, so there are two values — set both in Settings › Sensors after comparing against a reference thermometer.',

@@ -59,6 +59,14 @@ export interface DeviceState {
   plug: PlugState | null;
   /** True (default): the off-board SHT41 drives temp/RH when it answers. */
   sht_pref: boolean;
+  /** Gas boost: in auto mode a high VOC index forces a minimum speed. */
+  gas_on: boolean;
+  /** The floor speed enforced while the VOC latch holds (1-12). */
+  gas_spd: number;
+  /** VOC index that latches the boost (release is 50 below, floor 100). */
+  gas_voc: number;
+  /** True while the latch is holding the floor right now. */
+  gas_active: boolean;
 }
 
 export interface PlugState {

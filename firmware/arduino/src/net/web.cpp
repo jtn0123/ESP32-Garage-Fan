@@ -116,7 +116,8 @@ void state_json(char* out, size_t cap) {
            "\"sd_total_mb\":%lu,"
            "\"sd_used_mb\":%lu,\"sd_free_mb\":%lu,"
            "\"batt\":%s,\"rssi\":%d,\"drops\":%lu,\"mqtt\":%s,"
-           "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s,\"sht_pref\":%s}",
+           "\"uptime_s\":%lu,\"ip\":\"%s\",\"plug\":%s,\"sht_pref\":%s,"
+           "\"gas_on\":%s,\"gas_spd\":%d,\"gas_voc\":%d,\"gas_active\":%s}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, climate::offset_active(),
            climate::offset_charging(), climate::offset_idle(), kFwVersion, run ? run->label : "?",
@@ -127,7 +128,8 @@ void state_json(char* out, size_t cap) {
            (unsigned long)sdcard::used_mb(), (unsigned long)sdcard::free_mb(), batt, WiFi.RSSI(),
            (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
            millis() / 1000UL, WiFi.localIP().toString().c_str(), plugs,
-           climate::prefer_sht() ? "true" : "false");
+           climate::prefer_sht() ? "true" : "false", fan::gas_boost_on() ? "true" : "false",
+           fan::gas_speed(), fan::gas_voc_on(), fan::gas_active() ? "true" : "false");
 }
 
 void push_state() { sse::push(); }
@@ -187,6 +189,20 @@ static void handle_config() {
     fan::set_auto(g_http.arg("auto").toInt() != 0);
   if (g_http.hasArg("sht"))
     climate::set_prefer_sht(g_http.arg("sht").toInt() != 0);
+  if (g_http.hasArg("gason"))
+    fan::set_gas_boost(g_http.arg("gason").toInt() != 0);
+  if (g_http.hasArg("gasspd")) {
+    const int v = g_http.arg("gasspd").toInt();
+    if (v >= 1 && v <= 12)
+      fan::set_gas_speed(v);
+  }
+  if (g_http.hasArg("gasvoc")) {
+    // Floor of 100: the index recenters on 100 by construction, so a lower
+    // trigger would hold the boost latched on ordinary air.
+    const int v = g_http.arg("gasvoc").toInt();
+    if (v >= 100 && v <= 500)
+      fan::set_gas_voc_on(v);
+  }
   if (g_http.hasArg("max")) {
     const int m = g_http.arg("max").toInt();
     if (m >= 1 && m <= 12)

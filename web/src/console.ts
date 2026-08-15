@@ -232,6 +232,14 @@ function bitValues(): { value: string; colour: string }[] {
         : 'no meter',
       colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
     },
+    {
+      value: !s.gas_on
+        ? 'off'
+        : s.gas_active
+          ? `BOOSTING ≥${s.gas_spd}`
+          : `armed · trig ${s.gas_voc}`,
+      colour: !s.gas_on ? DIM : s.gas_active ? OR : OUT,
+    },
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
     {
