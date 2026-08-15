@@ -106,6 +106,11 @@ inline constexpr const char* kTopicSet = "garage/fan/set";
 inline constexpr const char* kTopicState = "garage/fan/state";
 inline constexpr const char* kTopicAvail = "garage/fan/availability";
 inline constexpr const char* kTopicClimate = "garage/climate";
+// Retained standing alert: {"kind":"plug_disagree",...} while the watt meter
+// contradicts the commanded speed, {"kind":"ok"} otherwise. Retained so a HA
+// automation sees the state on subscribe, not only on the edge; republished
+// on every broker connect so a reboot cannot leave a stale alarm standing.
+inline constexpr const char* kTopicAlert = "garage/fan/alert";
 inline constexpr const char* kTopicOutdoor = MQTT_SUB_BASE "/temp_f";
 
 // ------------------------------------------------------------- cadences

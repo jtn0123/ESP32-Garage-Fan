@@ -14,6 +14,7 @@
 #include "config.h"
 #include "fan/control.h"
 #include "generated_config.h"
+#include "net/mqtt_link.h"
 #include "system/eventlog.h"
 
 namespace plug {
@@ -125,10 +126,24 @@ void judge() {
   // can straddle an auto-mode speed change this module has not seen yet.
   g_bad_streak = in_band ? 0 : g_bad_streak + 1;
   const int next = in_band ? 1 : (g_bad_streak >= 2 ? -1 : g_verdict);
-  if (next == -1 && g_verdict != -1)
+  // Both transition edges go out as a retained MQTT alert as well as to the
+  // flight recorder: the disagree case is "the belt broke" or "the connector
+  // fell out" -- exactly the failure that ran the fan unnoticed for a day on
+  // 2026-08-13 -- and a Home Assistant automation can only act on it if the
+  // device says it out loud.
+  if (next == -1 && g_verdict != -1) {
     eventlog::log("plug", "DISAGREE speed=%d expect=%.1fW measured=%.1fW", speed, e, g_watts);
-  if (next == 1 && g_verdict == -1)
+    char alert[128];
+    g_verdict = next;
+    alert_json(alert, sizeof(alert));
+    mqtt_link::publish_alert(alert);
+  } else if (next == 1 && g_verdict == -1) {
     eventlog::log("plug", "agree again speed=%d measured=%.1fW", speed, g_watts);
+    char alert[128];
+    g_verdict = next;
+    alert_json(alert, sizeof(alert));
+    mqtt_link::publish_alert(alert);
+  }
   g_verdict = next;
 }
 
@@ -173,5 +188,17 @@ int32_t age_s() {
 int verdict() { return g_verdict; }
 
 float expected_w(int speed) { return (speed >= 0 && speed <= 12) ? kBaselineW[speed] : NAN; }
+
+void alert_json(char* out, size_t cap) {
+  const int speed = fan::speed();
+  if (g_verdict == -1 && speed >= 0 && speed <= 12) {
+    snprintf(out, cap,
+             "{\"kind\":\"plug_disagree\",\"speed\":%d,\"expect_w\":%.1f,"
+             "\"measured_w\":%.1f}",
+             speed, kBaselineW[speed], g_ever_read ? g_watts : -1.0f);
+  } else {
+    snprintf(out, cap, "{\"kind\":\"ok\"}");
+  }
+}
 
 }  // namespace plug

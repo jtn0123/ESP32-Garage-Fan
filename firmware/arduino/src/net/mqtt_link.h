@@ -26,4 +26,7 @@ void echo_set(int speed);
 /** Retained climate sample for anything else on the bus. */
 void publish_climate(float t, float h, float p);
 
+/** Retained standing alert on kTopicAlert; see plug::alert_json. */
+void publish_alert(const char* payload);
+
 }  // namespace mqtt_link

@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "fan/control.h"
+#include "net/plug.h"
 #include "sensors/climate.h"
 #include "system/eventlog.h"
 #include "system/ota_rollback.h"
@@ -91,6 +92,12 @@ void echo_set(int speed) {
   g_mqtt.publish(kTopicSet, buf, true);
 }
 
+void publish_alert(const char* payload) {
+  if (!g_mqtt.connected())
+    return;
+  g_mqtt.publish(kTopicAlert, payload, true);
+}
+
 void publish_climate(float t, float h, float p) {
   if (!g_mqtt.connected())
     return;
@@ -133,6 +140,14 @@ static void ensure_connected() {
     ota_rollback_mark_healthy();
     g_mqtt.publish(kTopicAvail, "online", true);
     publish_state(fan::speed());
+    // Re-assert the standing alert (or the all-clear): the topic is retained,
+    // and a reboot mid-alarm must not leave yesterday's alarm -- or worse,
+    // yesterday's all-clear -- speaking for today's fan.
+    {
+      char alert[128];
+      plug::alert_json(alert, sizeof(alert));
+      g_mqtt.publish(kTopicAlert, alert, true);
+    }
     g_mqtt.subscribe(kTopicSet);
     g_mqtt.subscribe(kTopicOutdoor);
     g_mqtt.subscribe(MQTT_SUB_BASE "/ts");
