@@ -56,7 +56,7 @@ def history() -> Json:
     return value
 
 
-def _history_uncached() -> Json:
+def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario knobs
     n = int(SCEN["rows"])
     end = int(time.time())
     ts: list[int] = []

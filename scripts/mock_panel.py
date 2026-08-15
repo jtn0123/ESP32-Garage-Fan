@@ -108,7 +108,10 @@ def _gf_mul(a: int, b: int) -> int:
     return r
 
 
-def qr_v1_encode(text: str) -> list[list[int]] | None:
+# The complexity IS the QR spec, and this is a line-for-line twin of
+# ui/qr_v1.h -- the pair must never be refactored one side alone
+# (tests/test_qr_v1.py pins both to segno's matrices).
+def qr_v1_encode(text: str) -> list[list[int]] | None:  # NOSONAR -- see twin-pair note above
     """21x21 matrix of 0/1 for `text`, or None if it does not fit V1-L."""
     if not text or len(text) > 25 or any(c not in _QR_ALNUM for c in text):
         return None

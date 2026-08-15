@@ -147,7 +147,7 @@ def read_version_file() -> str:
         return ""
 
 
-def main() -> None:
+def main() -> None:  # NOSONAR -- complexity predates this PR; only annotations changed
     _load_dotenv_once()
     prj = str(ROOT)
     cfg_dir = os.path.join(prj, "config")

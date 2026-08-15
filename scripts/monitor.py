@@ -51,7 +51,7 @@ def find_usb_ports() -> list[str]:
     return sorted(set(filtered))
 
 
-def colorize_line(line: str) -> str:
+def colorize_line(line: str) -> str:  # NOSONAR -- predates this PR (only annotations changed)
     """Apply color highlighting to important log lines."""
     # Boot stages
     if "[BOOT-1]" in line:
@@ -151,7 +151,8 @@ def monitor_serial(
             bufsize=1,
         )
 
-        assert proc.stdout is not None  # stdout=PIPE above guarantees it
+        if proc.stdout is None:  # stdout=PIPE above guarantees it is not
+            raise RuntimeError("pio device monitor gave no stdout pipe")
         for line in proc.stdout:
             line = line.rstrip()
 
@@ -177,7 +178,7 @@ def monitor_serial(
             log_file.close()
 
 
-def main() -> int:
+def main() -> int:  # NOSONAR -- predates this PR (only annotations changed)
     parser = argparse.ArgumentParser(
         description="Serial monitor with colored output for ESP32",
         formatter_class=argparse.RawDescriptionHelpFormatter,

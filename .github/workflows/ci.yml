@@ -321,7 +321,7 @@ jobs:
               pip install cpplint
               ;;
             mypy)
-              pip install mypy
+              pip install --only-binary :all: mypy==1.20.0
               ;;
             clang-format)
               sudo apt-get update

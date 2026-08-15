@@ -46,7 +46,8 @@ PORT = int(os.environ.get("MOCK_PORT", "8099"))
 # scripts/deploy.sh for the same rule.
 SELF_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
 
-import sys as _sys  # noqa: E402  (the SELF_ORIGINS block above is config, not code)
+# The SELF_ORIGINS block above is config, not code, hence the late import.
+import sys as _sys  # noqa: E402
 
 # Path bootstrap: this file is run as a script (pytest spawns it by path,
 # Playwright's harness too) AND loaded via importlib by tests/test_qr_v1.py,

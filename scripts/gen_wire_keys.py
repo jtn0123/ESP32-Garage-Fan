@@ -94,7 +94,7 @@ def wire_fields(types_ts: str) -> list[str]:
     for name in INTERFACES:
         block = ts_block(types_ts, name)
         if block.startswith("export type"):
-            fields = re.findall(r"(\w+)\??\s*:", block.split("=", 1)[1])
+            fields = re.findall(r"(\w+)\??:", block.split("=", 1)[1])
         else:
             fields = re.findall(r"^\s*(\w+)\??:", block, re.MULTILINE)
         for f in fields:
