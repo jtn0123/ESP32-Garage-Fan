@@ -356,7 +356,7 @@ export function drawAll(): void {
     return;
   }
   paintLegends(s);
-  drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub);
+  drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots);
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,

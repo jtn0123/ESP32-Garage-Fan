@@ -54,7 +54,7 @@ import sys as _sys  # noqa: E402
 # so the sibling modules are found relative to THIS file, not the cwd.
 _sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mock_data import console_bytes, history  # noqa: E402
+from mock_data import boots, console_bytes, history  # noqa: E402
 from mock_panel import (  # noqa: E402
     DISP_H,
     DISP_STRIDE,
@@ -228,14 +228,26 @@ class H(BaseHTTPRequestHandler):
             return self._json(503, {"error": "sd card not mounted"})
         return self._json(200, history())
 
+    def _boots(self, query: Query) -> None:
+        days = query.get("days", [None])[0]
+        if days not in ("1", "7", "30", "60"):
+            return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
+        if not (SCEN["card"] and SCEN["synced"]):
+            return self._json(503, {"error": "sd card not mounted"})
+        return self._json(200, {"boots": boots(int(days))})
+
     def _csv(self, query: Query) -> None:
+        # Range and columns both mirror web_history.cpp exactly. They had
+        # drifted -- 8 columns and a 30-day cap against the firmware's 13 and
+        # 60 -- so the mock was certifying an export the device never emits.
         if "days" in query:
             raw = query["days"][0]
-            if not raw.isdigit() or not (1 <= int(raw) <= 30):
-                return self._json(400, {"error": "days must be 1-30"})
+            if not raw.isdigit() or not (1 <= int(raw) <= 60):
+                return self._json(400, {"error": "days must be 1-60"})
         body = (
-            "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg\n"
-            "1786425931,24.00,40.0,999.9,73.2,9,4.20,1\n"
+            "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
+            "watts,voc_raw,nox_raw,voc,nox\n"
+            "1786425931,24.00,40.0,999.9,73.2,9,4.20,1,20.3,30125,17004,93,1\n"
         )
         return self._send(200, body, "text/csv")
 
@@ -267,14 +279,36 @@ class H(BaseHTTPRequestHandler):
         "offf": ("off_f", float),
     }
 
+    # The ranges handle_config() enforces. Without these the mock happily
+    # stored auto_max=99 and gas_voc=99999 and echoed them back, so the
+    # console could be dogfooded into states the device would never produce.
+    CONFIG_RANGE = {
+        "max": (1, 12),
+        "min": (0, 12),
+        "gasspd": (1, 12),
+        "gasvoc": (100, 500),
+        "ckwh": (0.01, 2.0),
+        "onf": (0.5, 20.0),
+        "offf": (0.0, 20.0),
+    }
+
     def _config(self, query: Query) -> None:
         for arg, (key, cast) in self.CONFIG_KEYS.items():
             if arg not in query:
                 continue
             try:
-                STATE[key] = cast(query[arg][0])
+                value = cast(query[arg][0])
             except ValueError:
                 return self._json(400, {"error": f"bad {arg}"})
+            span = self.CONFIG_RANGE.get(arg)
+            if span is not None and isinstance(value, (int, float)):
+                lo, hi = span
+                if not (lo <= value <= hi):
+                    # Same shape as the firmware: out of range is ignored, not
+                    # an error. See the report -- both sides should arguably
+                    # 400 here, but the mock's job is to match what ships.
+                    continue
+            STATE[key] = value
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
 
@@ -329,6 +363,7 @@ class H(BaseHTTPRequestHandler):
         "/api/sensors": _sensors,
         "/api/events": _events,
         "/api/history": _history,
+        "/api/boots": _boots,
         "/api/display": _display,
         "/download.csv": _csv,
         # Reads, but token-guarded: a core dump is a RAM snapshot and RAM holds

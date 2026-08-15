@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -24,7 +25,22 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 MOCK = ROOT / "scripts" / "mock_device.py"
 CONSOLE = ROOT / "web" / "dist" / "console.html"
-PORT = 8099
+
+
+def _pick_port() -> int:
+    """A free port, chosen at import time.
+
+    This used to be a hardcoded 8099, and the fixture SKIPPED when something
+    already held it -- so a stray dogfooding mock (or a parallel run) turned
+    the whole HTTP contract suite green without executing a single request.
+    A suite that silently does not run is worse than one that fails.
+    """
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+PORT = _pick_port()
 BASE = f"http://127.0.0.1:{PORT}"
 
 
@@ -37,10 +53,11 @@ def _free(port: int) -> bool:
 def mock():
     if not CONSOLE.exists():
         pytest.skip("web/dist/console.html not built")
-    if not _free(PORT):
-        pytest.skip(f"port {PORT} already in use")
     proc = subprocess.Popen(
-        [sys.executable, str(MOCK)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+        [sys.executable, str(MOCK)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "MOCK_PORT": str(PORT)},
     )
     for _ in range(50):
         time.sleep(0.1)
@@ -205,13 +222,25 @@ def test_an_outage_is_visible_as_a_gap_in_the_timestamps(mock):
 
 
 def test_download_csv_has_the_full_column_set(mock):
+    # The firmware's kCsvHeader, verbatim. This pinned the pre-1.14.47 set of
+    # eight for weeks without anyone noticing, because the whole module was
+    # being SKIPPED whenever port 8099 was busy -- which is why the port is
+    # now chosen dynamically.
     status, body = req("/download.csv?days=30")
     assert status == 200
     header = body.decode().splitlines()[0]
-    assert header == "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg"
+    assert header == (
+        "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox"
+    )
 
 
-@pytest.mark.parametrize("days", ["0", "31", "abc"])
+def test_download_csv_spans_the_same_range_the_charts_offer(mock):
+    """60 days is a chart range, so it must also be an export range."""
+    status, _ = req("/download.csv?days=60")
+    assert status == 200
+
+
+@pytest.mark.parametrize("days", ["0", "61", "abc"])
 def test_download_csv_rejects_a_bad_range(mock, days):
     """It used to clamp silently and label the file with the wrong span."""
     status, _ = req(f"/download.csv?days={days}")

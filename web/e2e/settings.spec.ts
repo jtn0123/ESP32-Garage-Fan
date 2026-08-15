@@ -140,10 +140,16 @@ test('the electricity price stepper reaches the controller as ckwh', async ({ pa
   await row.locator('button').first().click(); // leave the price as found
 });
 
-test('the CSV download points at 30 days off the card', async ({ page }) => {
-  await openSettings(page);
+test('the CSV download exports the range the chart is showing', async ({ page }) => {
+  // It used to be hardcoded at 30 days while the chart offered 60, so the
+  // data you could SEE was not the data you could TAKE.
+  await openConsole(page);
+  await page.locator('#ranges button[data-d="60"]').click();
+  await page.locator('#nav').click();
+  await expect(page.locator('#settings')).not.toHaveClass(/hide/);
   const link = page.locator('#groups a', { hasText: /Download CSV/i });
-  await expect(link).toHaveAttribute('href', /\/download\.csv\?days=30/);
+  await expect(link).toHaveAttribute('href', /\/download\.csv\?days=60/);
+  await expect(link).toHaveText(/60 d/);
 });
 
 // ------------------------------------------------------- the dangerous pair

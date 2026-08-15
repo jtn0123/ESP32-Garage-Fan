@@ -195,3 +195,23 @@ test('the power row plots the plug watts', async ({ page }) => {
   await expect(page.locator('#sub_w')).not.toHaveClass(/hide/);
   await expect(page.locator('#roW')).toContainText(/W$/, { timeout: 15_000 });
 });
+
+test('an outage is explained, not just left as a hole', async ({ page }) => {
+  // The chart already breaks its lines across a gap. What this pins is the
+  // half that was missing: the console asks WHY, and keeps drawing when the
+  // answer is unavailable.
+  const boots = recordRequests(page, /\/api\/boots/);
+  await openConsole(page);
+  await expect.poll(() => boots.length).toBeGreaterThan(0);
+  await expect(boots[0]!.url()).toMatch(/days=\d+/);
+});
+
+test('a controller with no restart marks still draws its charts', async ({ page }) => {
+  // /api/boots is a separate request precisely so it can fail alone: an older
+  // firmware has no such route, and a missing explanation must never withhold
+  // the data it would have explained.
+  await page.route('**/api/boots*', (r) => r.fulfill({ status: 404, body: '{"error":"nope"}' }));
+  await openConsole(page);
+  await expect(page.locator('#cv_t')).toBeVisible();
+  await expect(page.locator('#tcap')).not.toContainText(/could not load/i);
+});

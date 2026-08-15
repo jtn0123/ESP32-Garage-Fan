@@ -17,7 +17,8 @@ a silent "-" in the UI. tests/test_web_contract.py remains the net for fields
 added on one side only.
 
 Fields come from every interface the firmware writes: DeviceState, PlugState,
-BatteryState, DeviceInfo, Stats, Sensors, History (plus ApiError's `error`).
+BatteryState, DeviceInfo, Stats, Sensors, History, BootMark/Boots (plus
+ApiError's `error`).
 Names are deduped -- `voc` in Sensors and History is the same wire key.
 """
 
@@ -35,6 +36,8 @@ INTERFACES = [
     "Stats",
     "Sensors",
     "History",
+    "BootMark",
+    "Boots",
     "ApiError",
 ]
 

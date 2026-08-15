@@ -153,6 +153,12 @@ def test_handle_history_matches_history():
     )
 
 
+def test_handle_boots_matches_boots():
+    # The restart marks the charts hang their outage labels on. BootMark is
+    # nested inside Boots (the `boots` array), so one writer mirrors both.
+    check("handle_boots", "Boots", "BootMark", "ApiError")
+
+
 def test_duty_table_matches_protocol():
     """kHighUs is measured off the wall controller; the console renders it via
     /api/device. Pin the values so neither side can be 'tidied' silently."""

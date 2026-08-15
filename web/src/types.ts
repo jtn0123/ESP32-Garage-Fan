@@ -144,6 +144,28 @@ export type Sensors =
     };
 
 /**
+ * GET /api/boots?days=N -- when the controller restarted, and how the
+ * previous life ended.
+ *
+ * The climate log records samples and therefore cannot record its own
+ * absence: a reboot costs 12-16 minutes of rows (mount, SNTP, first sample)
+ * and the chart drew an honest gap with no way to say WHY. These marks are
+ * what turn that hole into "restarted here (brownout)".
+ */
+export interface BootMark {
+  /** Epoch of the boot itself, reconstructed as sync time minus uptime. */
+  ts: number;
+  /** The device's lifetime boot counter at that boot. */
+  n: number;
+  /** How the PREVIOUS life ended: "brownout", "panic", "sw_reset", ... */
+  cause: string;
+}
+
+export interface Boots {
+  boots: BootMark[];
+}
+
+/**
  * The 4xx body every endpoint sends for a malformed request. api.ts throws
  * on non-2xx before parsing, so the console never sees this shape -- it is
  * declared for the wire contract (the firmware emits it) and for anyone

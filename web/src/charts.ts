@@ -6,8 +6,12 @@
 
 import { at } from './dom.js';
 import type { Series } from './series.js';
+import type { BootMark } from './types.js';
 import { hasData } from './series.js';
 import { AC, DIM, OK, OR, OUT, PAD_LEFT as L, PAD_RIGHT as R, PU, RH } from './theme.js';
+
+/** Restart stems and their labels -- the same red family as the outage band. */
+const RESTART_C = '#e0a9a9';
 
 export interface Surface {
   c: CanvasRenderingContext2D;
@@ -82,32 +86,76 @@ function scale(min: number, max: number): Scale {
 // missing stretch and every slope around it would lie.
 const xAt = (s: Series, i: number, W: number): number => L + (s.frac[i] ?? 0) * (W - L - R);
 
+/**
+ * A wall-clock instant's x position. Restarts happen INSIDE an outage, i.e.
+ * between two rows, so they cannot be placed by row index like everything
+ * else. Returns null when the instant is outside the plotted window.
+ */
+export function xAtTime(s: Series, t: number, W: number): number | null {
+  const t0 = s.ts(0);
+  const tn = s.ts(s.n - 1);
+  if (t0 === null || tn === null || tn <= t0) return null;
+  if (t < t0 || t > tn) return null;
+  return L + ((t - t0) / (tn - t0)) * (W - L - R);
+}
+
 const yAt = (v: number, H: number, s: Scale): number =>
   H - 6 - ((v - s.min) * (H - 16)) / (s.max - s.min);
 
-/** Gridlines, y-axis labels, and the overnight shading on the temperature chart. */
+/** The dim overnight stripes behind the temperature trace. */
+function shadeNights({ c, W, H }: Surface, s: Series): void {
+  c.fillStyle = 'rgba(255,255,255,.035)';
+  let i = 0;
+  while (i < s.n) {
+    if (!s.night[i]) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < s.n && s.night[j]) j++;
+    const x0 = xAt(s, i, W);
+    c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
+    i = j;
+  }
+}
+
+/**
+ * The span where no samples exist, shaded and ruled at both edges.
+ *
+ * Drawn for EVERY row that frames itself, so a hole in the fan row and a
+ * hole in the temperature row read as the same event rather than as two
+ * coincidences. s.gap[i] means row i's predecessor is more than 1.5 nominal
+ * intervals behind -- the lines already break there; this says why.
+ */
+function shadeOutages({ c, W, H }: Surface, s: Series): void {
+  for (let i = 1; i < s.n; i++) {
+    if (!s.gap[i]) continue;
+    const x0 = xAt(s, i - 1, W);
+    const x1 = xAt(s, i, W);
+    c.fillStyle = 'rgba(224,169,169,.10)';
+    c.fillRect(x0, 0, Math.max(x1 - x0, 1.5), H - 2);
+    c.strokeStyle = 'rgba(224,169,169,.45)';
+    c.lineWidth = 1;
+    for (const x of [x0, x1]) {
+      c.beginPath();
+      c.moveTo(x + 0.5, 0);
+      c.lineTo(x + 0.5, H - 2);
+      c.stroke();
+    }
+  }
+}
+
+/** Gridlines, y-axis labels, and the shading behind them. */
 function frame(
-  { c, W, H }: Surface,
+  surf: Surface,
   s: Series,
   sc: Scale,
   fmt: (v: number) => string,
   shadeNight: boolean,
 ): void {
-  if (shadeNight) {
-    c.fillStyle = 'rgba(255,255,255,.035)';
-    let i = 0;
-    while (i < s.n) {
-      if (s.night[i]) {
-        let j = i;
-        while (j < s.n && s.night[j]) j++;
-        const x0 = xAt(s, i, W);
-        c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
-        i = j;
-      } else {
-        i++;
-      }
-    }
-  }
+  const { c, W, H } = surf;
+  if (shadeNight) shadeNights(surf, s);
+  shadeOutages(surf, s);
   c.strokeStyle = '#161c24';
   c.lineWidth = 1;
   c.fillStyle = DIM;
@@ -173,7 +221,71 @@ function placeholder({ c, W, H }: Surface, message: string): void {
   c.fillText(message, W / 2, H / 2);
 }
 
-export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: number): void {
+/**
+ * The band between the two traces, tinted by which one is on top: orange
+ * where the garage is hotter than the yard (the fan can help), blue where it
+ * is cooler (running the fan would import heat).
+ */
+function fillDifferential({ c, W, H }: Surface, s: Series, sc: Scale): void {
+  for (let i = 0; i + 1 < s.n; i++) {
+    const a = at(s.tf, i);
+    const b = at(s.tf, i + 1);
+    const oa = at(s.of, i);
+    const ob = at(s.of, i + 1);
+    // s.gap[i+1]: the pair straddles an outage, so there is nothing between
+    // them to tint -- filling it would invent a differential across the hole.
+    if (a === null || b === null || oa === null || ob === null || s.gap[i + 1]) continue;
+    c.beginPath();
+    c.moveTo(xAt(s, i, W), yAt(a, H, sc));
+    c.lineTo(xAt(s, i + 1, W), yAt(b, H, sc));
+    c.lineTo(xAt(s, i + 1, W), yAt(ob, H, sc));
+    c.lineTo(xAt(s, i, W), yAt(oa, H, sc));
+    c.closePath();
+    c.fillStyle = (a + b) / 2 >= (oa + ob) / 2 ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
+    c.fill();
+  }
+}
+
+/**
+ * Restart stems, drawn last so nothing hides them.
+ *
+ * This is the half the outage band cannot supply: the band says "no data
+ * here", the mark says "because it rebooted, and this is how the last life
+ * ended". Restarts happen BETWEEN rows, hence xAtTime rather than a row index.
+ */
+function drawBootMarks({ c, W, H }: Surface, s: Series, boots: readonly BootMark[]): void {
+  for (const b of boots) {
+    const x = xAtTime(s, b.ts, W);
+    if (x === null) continue;
+    const flip = x > W - 70;  // near the right edge, label leftwards
+    c.strokeStyle = RESTART_C;
+    c.lineWidth = 1.4;
+    c.setLineDash([3, 3]);
+    c.beginPath();
+    c.moveTo(x + 0.5, 0);
+    c.lineTo(x + 0.5, H - 2);
+    c.stroke();
+    c.setLineDash([]);
+    c.fillStyle = RESTART_C;
+    c.beginPath();  // a small dropped flag, so the stem reads as an event
+    c.moveTo(x, 1);
+    c.lineTo(x + 7, 4.5);
+    c.lineTo(x, 8);
+    c.closePath();
+    c.fill();
+    c.font = '9px "JetBrains Mono",monospace';
+    c.textAlign = flip ? 'right' : 'left';
+    c.fillText(b.cause === 'unknown' ? 'restart' : `restart · ${b.cause}`, x + (flip ? -9 : 9), 9);
+  }
+}
+
+export function drawTemperature(
+  canvas: HTMLCanvasElement,
+  s: Series,
+  index: number,
+  /** Restart marks inside this window; drawn last so nothing hides them. */
+  boots: readonly BootMark[] = [],
+): void {
   const surf = surface(canvas);
   if (!surf) return;
   const { c, W, H } = surf;
@@ -188,28 +300,12 @@ export function drawTemperature(canvas: HTMLCanvasElement, s: Series, index: num
   }
   frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, true);
 
-  // The band between the two traces, tinted by which one is on top: orange
-  // where the garage is hotter than the yard (the fan can help), blue where it
-  // is cooler (running the fan would import heat).
-  for (let i = 0; i + 1 < s.n; i++) {
-    const a = at(s.tf, i);
-    const b = at(s.tf, i + 1);
-    const oa = at(s.of, i);
-    const ob = at(s.of, i + 1);
-    if (a === null || b === null || oa === null || ob === null) continue;
-    if (s.gap[i + 1]) continue; // the pair straddles an outage; nothing to tint
-    c.beginPath();
-    c.moveTo(xAt(s, i, W), yAt(a, H, sc));
-    c.lineTo(xAt(s, i + 1, W), yAt(b, H, sc));
-    c.lineTo(xAt(s, i + 1, W), yAt(ob, H, sc));
-    c.lineTo(xAt(s, i, W), yAt(oa, H, sc));
-    c.closePath();
-    c.fillStyle = (a + b) / 2 >= (oa + ob) / 2 ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
-    c.fill();
-  }
+  fillDifferential(surf, s, sc);
 
   line(surf, s, sc, s.of, OUT, true, 2);
   line(surf, s, sc, s.tf, OR, false, 2.2);
+
+  drawBootMarks(surf, s, boots);
 
   if (index >= 0) {
     crosshair(surf, s, index);

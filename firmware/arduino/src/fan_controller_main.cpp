@@ -38,6 +38,7 @@
 #include "net/wifi_link.h"
 #include "sensors/battery.h"
 #include "sensors/climate.h"
+#include "storage/bootlog.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
 #include "system/coredump.h"
@@ -270,6 +271,7 @@ void loop() {
     sdcard::retry_tick();
     eventlog::flush_tick();
     weather::tick();       // internally rate-limited to one fetch per 10 min
+    bootlog::tick();       // one line per boot, once the clock is trustworthy
     plug::tick();          // watt-meter poll, rate-limited to one per 15 s
     esp_task_wdt_reset();  // a blackholed resolver makes those fetches long ones
   }
