@@ -162,7 +162,7 @@ inline void power_text(float watts, char* out, size_t cap) {
   if (isnan(watts) || watts < 0)
     out[0] = '\0';
   else
-    snprintf(out, cap, "%.0fW", (double)watts);
+    snprintf(out, cap, "%.0fW", static_cast<double>(watts));
 }
 
 /**

@@ -16,7 +16,7 @@ Preferences* g_prefs = nullptr;
 uint32_t g_run_total_s = 0, g_run_today_s = 0;
 uint32_t g_today_ymd = 0;
 float g_energy_wh = 0;
-float g_wh_today = 0;  // rolls with the daily counter; measured watts when available
+float g_wh_today = 0;      // rolls with the daily counter; measured watts when available
 float g_cost_kwh = 0.15f;  // $/kWh; display math only, never billing
 uint32_t g_last_count_ms = 0;
 uint32_t g_last_nvs_ms = 0;

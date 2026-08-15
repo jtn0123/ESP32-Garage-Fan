@@ -372,9 +372,10 @@ void handle_stats() {
            "\"watts_now\":%.0f,\"t_min_f\":%.1f,\"t_max_f\":%.1f,"
            "\"t_avg_f\":%.1f,\"samples\":%u}",
            (unsigned long)odometer::run_today_s(), (unsigned long)odometer::run_total_s(),
-           odometer::energy_wh(), odometer::wh_today(), fan::watts(fan::speed() < 0 ? 0 : fan::speed()),
-           isnan(tmin) ? 0 : tmin * 9 / 5 + 32, isnan(tmax) ? 0 : tmax * 9 / 5 + 32,
-           isnan(tavg) ? 0 : tavg * 9 / 5 + 32, history::count());
+           odometer::energy_wh(), odometer::wh_today(),
+           fan::watts(fan::speed() < 0 ? 0 : fan::speed()), isnan(tmin) ? 0 : tmin * 9 / 5 + 32,
+           isnan(tmax) ? 0 : tmax * 9 / 5 + 32, isnan(tavg) ? 0 : tavg * 9 / 5 + 32,
+           history::count());
   g_http->send(200, "application/json", buf);
 }
 

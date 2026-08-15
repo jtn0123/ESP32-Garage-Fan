@@ -131,8 +131,8 @@ void tick_auto() {
   cfg.on_delta_c = g_auto_onf * 5 / 9;  // user thinks in F; logic runs in C
   cfg.off_delta_c = g_auto_offf * 5 / 9;
   const int prev = g_speed < 0 ? 0 : g_speed;
-  int next = fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(), prev, &g_auto_high,
-                             cfg);
+  int next =
+      fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(), prev, &g_auto_high, cfg);
   // The gas floor layers under the thermostat: bad air forces a minimum
   // speed, it never lowers what the thermostat wanted. The release edge of
   // the latch goes to the flight recorder so "why did the fan spin up at

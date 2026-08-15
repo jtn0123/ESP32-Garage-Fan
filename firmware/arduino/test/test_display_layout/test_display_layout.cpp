@@ -198,7 +198,6 @@ static void a_null_or_zero_buffer_is_survivable() {
   TEST_ASSERT_TRUE(true);  // reaching here without a fault is the assertion
 }
 
-
 static void the_fault_banner_outranks_the_mode() {
   char b[16];
   display_layout::banner_status_text(true, 1, b, sizeof(b));

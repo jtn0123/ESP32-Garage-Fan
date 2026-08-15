@@ -107,7 +107,6 @@ static void test_full_cycle_hot_afternoon_to_cool_evening() {
   TEST_ASSERT_EQUAL(kCfg.min_speed, s);
 }
 
-
 // ---------------------------------------------------------------- gas boost
 
 static const FanGasCfg kGas{true, 6, 250, 200};
@@ -146,10 +145,10 @@ static void test_gas_floor_disabled_clears_latch() {
 static void test_gas_floor_merges_under_thermostat() {
   // Below the floor: one step per tick toward it, then hold.
   TEST_ASSERT_EQUAL(3, fan_apply_gas_floor(/*next=*/2, /*prev=*/2, /*floor=*/6));
-  TEST_ASSERT_EQUAL(6, fan_apply_gas_floor(5, 6, 6));   // thermostat wants down: floor holds
-  TEST_ASSERT_EQUAL(9, fan_apply_gas_floor(9, 9, 6));   // above the floor: untouched
-  TEST_ASSERT_EQUAL(2, fan_apply_gas_floor(2, 2, 0));   // no floor: untouched
-  TEST_ASSERT_EQUAL(6, fan_apply_gas_floor(0, 7, 6));   // drop from above lands ON the floor
+  TEST_ASSERT_EQUAL(6, fan_apply_gas_floor(5, 6, 6));  // thermostat wants down: floor holds
+  TEST_ASSERT_EQUAL(9, fan_apply_gas_floor(9, 9, 6));  // above the floor: untouched
+  TEST_ASSERT_EQUAL(2, fan_apply_gas_floor(2, 2, 0));  // no floor: untouched
+  TEST_ASSERT_EQUAL(6, fan_apply_gas_floor(0, 7, 6));  // drop from above lands ON the floor
 }
 
 static void test_gas_boost_full_story() {
