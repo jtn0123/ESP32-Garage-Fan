@@ -88,18 +88,38 @@ def ts_block(text: str, name: str) -> str:
     raise SystemExit(f"gen_wire_keys: unterminated type alias {name}")
 
 
+def _field_names(text: str, line_anchored: bool) -> list[str]:
+    r"""`name:` / `name?:` occurrences, found without trailing-context regex.
+
+    A regex spelled `(\w+):` scans super-linearly (S5852: every start
+    position walks the whole word before the `:` check fails), so the word
+    match and the colon check are separated: `\w+` alone is linear, and the
+    lookahead is one string comparison in code. `line_anchored` keeps the
+    interface branch from harvesting `word:` out of comment prose -- fields
+    are the only thing that starts a line inside an interface block.
+    """
+    out: list[str] = []
+    for m in re.finditer(r"\w+", text):
+        after = text[m.end() : m.end() + 2]
+        if not (after.startswith(":") or after == "?:"):
+            continue
+        if line_anchored:
+            line_start = text.rfind("\n", 0, m.start()) + 1
+            if text[line_start : m.start()].strip():
+                continue
+        out.append(m.group())
+    return out
+
+
 def wire_fields(types_ts: str) -> list[str]:
     """Every wire key the listed interfaces declare, deduped, source order."""
     seen: list[str] = []
     for name in INTERFACES:
         block = ts_block(types_ts, name)
-        # `?:` (optional fields) is normalised to `:` BEFORE the regex runs:
-        # the `\??` spelling made the quantifier pair backtrack super-linearly
-        # on pathological input (Sonar S5852), and a plain `(\w+):` cannot.
         if block.startswith("export type"):
-            fields = re.findall(r"(\w+):", block.split("=", 1)[1].replace("?:", ":"))
+            fields = _field_names(block.split("=", 1)[1], line_anchored=False)
         else:
-            fields = re.findall(r"^\s*(\w+):", block.replace("?:", ":"), re.MULTILINE)
+            fields = _field_names(block, line_anchored=True)
         for f in fields:
             if f not in seen:
                 seen.append(f)
