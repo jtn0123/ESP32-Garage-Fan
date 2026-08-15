@@ -81,6 +81,13 @@ STATE = {
     # no-meter build.
     "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
     "sht_pref": True,
+    # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
+    "gas_on": True,
+    "gas_spd": 6,
+    "gas_voc": 250,
+    "gas_active": False,
+    "wh_today": 412.5,
+    "cost_kwh": 0.15,
 }
 DEVICE = {
     "id": "garage-fan-d69dbe",
@@ -100,6 +107,7 @@ STATS = {
     "run_today_s": 16501,
     "run_total_s": 410634,
     "energy_wh": 5183,
+    "wh_today": 412.5,
     "watts_now": 47,
     "t_min_f": 75.1,
     "t_max_f": 77.1,
@@ -664,8 +672,8 @@ class H(BaseHTTPRequestHandler):
 
     def _history(self, query):
         days = query.get("days", [None])[0]
-        if days not in ("1", "7", "30"):
-            return self._json(400, {"error": "days must be 1, 7 or 30"})
+        if days not in ("1", "7", "30", "60"):
+            return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
         if days != "1" and not (SCEN["card"] and SCEN["synced"]):
             return self._json(503, {"error": "sd card not mounted"})
         return self._json(200, history())
@@ -699,6 +707,10 @@ class H(BaseHTTPRequestHandler):
     # in step with the firmware.
     CONFIG_KEYS = {
         "sht": ("sht_pref", lambda v: v not in ("0", "false")),
+        "gason": ("gas_on", lambda v: v not in ("0", "false")),
+        "gasspd": ("gas_spd", int),
+        "gasvoc": ("gas_voc", int),
+        "ckwh": ("cost_kwh", float),
         "auto": ("auto", lambda v: v != "0"),
         "max": ("auto_max", int),
         "min": ("auto_min", int),

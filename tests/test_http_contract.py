@@ -140,7 +140,7 @@ def test_out_of_range_speed_is_refused(mock):
 # ------------------------------------------------------------------ history
 
 
-@pytest.mark.parametrize("days", ["1", "7", "30"])
+@pytest.mark.parametrize("days", ["1", "7", "30", "60"])
 def test_history_returns_one_shape_for_every_range(mock, days):
     """The 7/30-day path used to omit ts and four of the seven series."""
     scen(card=True, synced=True)
@@ -182,7 +182,7 @@ def test_a_range_the_card_cannot_answer_is_503_not_substituted_data(mock):
     """Serving 24 h of RAM under a 30-day request is the failure this prevents."""
     scen(card=False)
     try:
-        for days in ("7", "30"):
+        for days in ("7", "30", "60"):
             status, body = req(f"/api/history?days={days}")
             assert status == 503, f"days={days} with no card should be 503, got {status}"
             assert b"error" in body

@@ -16,6 +16,8 @@ Preferences* g_prefs = nullptr;
 uint32_t g_run_total_s = 0, g_run_today_s = 0;
 uint32_t g_today_ymd = 0;
 float g_energy_wh = 0;
+float g_wh_today = 0;      // rolls with the daily counter; measured watts when available
+float g_cost_kwh = 0.15f;  // $/kWh; display math only, never billing
 uint32_t g_last_count_ms = 0;
 uint32_t g_last_nvs_ms = 0;
 
@@ -29,6 +31,8 @@ void restore(Preferences* prefs) {
   g_run_today_s = prefs->getUInt("runt", 0);
   g_today_ymd = prefs->getUInt("ymd", 0);
   g_energy_wh = prefs->getFloat("ewh", 0);
+  g_wh_today = prefs->getFloat("ewhd", 0);
+  g_cost_kwh = prefs->getFloat("ckwh", 0.15f);
 }
 
 void tick(int speed, float watts) {
@@ -54,12 +58,19 @@ void tick(int speed, float watts) {
     }
     const auto c =
         odometer_logic::credit(elapsed_s, speed > 0, clock_valid, ymd, g_today_ymd, since_midnight);
-    if (c.reset_today)
+    if (c.reset_today) {
       g_run_today_s = 0;
+      g_wh_today = 0;
+    }
     g_run_total_s += c.total_s;
     g_run_today_s += c.today_s;
-    if (speed > 0)
+    if (speed > 0) {
       g_energy_wh += watts * elapsed_s / 3600.0f;
+      // c.today_s, not elapsed_s: a tick that spans local midnight credits
+      // only its post-midnight seconds to the new day -- same rule the
+      // runtime counter already follows (odometer_logic::credit).
+      g_wh_today += watts * c.today_s / 3600.0f;
+    }
     if (clock_valid)
       g_today_ymd = ymd;
   }
@@ -69,11 +80,21 @@ void tick(int speed, float watts) {
     g_prefs->putUInt("runt", g_run_today_s);
     g_prefs->putUInt("ymd", g_today_ymd);
     g_prefs->putFloat("ewh", g_energy_wh);
+    g_prefs->putFloat("ewhd", g_wh_today);
   }
 }
 
 uint32_t run_today_s() { return g_run_today_s; }
 uint32_t run_total_s() { return g_run_total_s; }
 float energy_wh() { return g_energy_wh; }
+float wh_today() { return g_wh_today; }
+
+float cost_per_kwh() { return g_cost_kwh; }
+
+void set_cost_per_kwh(float v) {
+  g_cost_kwh = v;
+  if (g_prefs)
+    g_prefs->putFloat("ckwh", v);
+}
 
 }  // namespace odometer

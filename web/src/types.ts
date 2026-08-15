@@ -59,6 +59,18 @@ export interface DeviceState {
   plug: PlugState | null;
   /** True (default): the off-board SHT41 drives temp/RH when it answers. */
   sht_pref: boolean;
+  /** Gas boost: in auto mode a high VOC index forces a minimum speed. */
+  gas_on: boolean;
+  /** The floor speed enforced while the VOC latch holds (1-12). */
+  gas_spd: number;
+  /** VOC index that latches the boost (release is 50 below, floor 100). */
+  gas_voc: number;
+  /** True while the latch is holding the floor right now. */
+  gas_active: boolean;
+  /** Fan watt-hours since local midnight (measured watts when available). */
+  wh_today: number;
+  /** Electricity price, $/kWh — display math for the cost readouts. */
+  cost_kwh: number;
 }
 
 export interface PlugState {
@@ -105,6 +117,8 @@ export interface Stats {
   run_today_s: number;
   run_total_s: number;
   energy_wh: number;
+  /** Watt-hours since local midnight — the day slice of energy_wh. */
+  wh_today: number;
   watts_now: number;
   t_min_f: number;
   t_max_f: number;
@@ -144,9 +158,9 @@ export interface ApiError {
 }
 
 /**
- * GET /api/history?days=1|7|30
+ * GET /api/history?days=1|7|30|60
  *
- * `days` is REQUIRED and must be exactly 1, 7 or 30; anything else is a 400
+ * `days` is REQUIRED and must be exactly 1, 7, 30 or 60; anything else is a 400
  * ApiError. (It used to default to 1, which served RAM-ring data to typo'd
  * queries as if it were the card's -- 2026-08-10.)
  *

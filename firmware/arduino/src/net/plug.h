@@ -13,6 +13,7 @@
 // credentials; a clone without HA_URL/HA_TOKEN builds with this module
 // disabled. Transport is plain HTTP on the LAN for the same measured mbedtls
 // reason as net/weather.h.
+#include <stddef.h>
 #include <stdint.h>
 
 namespace plug {
@@ -45,5 +46,13 @@ int verdict();
 
 /** Expected draw for a speed, from the measured baseline table. */
 float expected_w(int speed);
+
+/**
+ * The retained kTopicAlert payload for the CURRENT verdict:
+ * {"kind":"plug_disagree","speed":N,"expect_w":X,"measured_w":Y} or
+ * {"kind":"ok"}. Published on both verdict edges and re-asserted on every
+ * broker connect, so the retained value never outlives the condition.
+ */
+void alert_json(char* out, size_t cap);
 
 }  // namespace plug

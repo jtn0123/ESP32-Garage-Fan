@@ -49,7 +49,17 @@ int auto_min();
 float engage_f();
 float release_f();
 
+/** Gas boost: VOC index >= gas_voc_on() forces at least gas_speed() in auto. */
+bool gas_boost_on();
+int gas_speed();
+int gas_voc_on();
+/** True while the VOC latch is holding the floor (for the console pill). */
+bool gas_active();
+
 void set_auto(bool on);
+void set_gas_boost(bool on);
+void set_gas_speed(int v);
+void set_gas_voc_on(int v);
 void set_auto_max(int v);
 void set_auto_min(int v);
 void set_engage_f(float v);

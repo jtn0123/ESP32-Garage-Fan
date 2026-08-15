@@ -112,6 +112,27 @@ export function buildGroups(d: SettingsDeps): Group[] {
           on: s.auto,
           toggle: d.toggleAuto,
         },
+        {
+          kind: 'toggle',
+          label: 'Gas boost',
+          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger. Needs the SGP41 warmed up — the boost simply stays off without it.',
+          on: s.gas_on,
+          toggle: () => d.setConfig(`gason=${s.gas_on ? 0 : 1}`),
+        },
+        step(
+          'Gas boost · trigger',
+          'VOC index that engages the boost. 100 is this sensor’s own 24 h average, so 250 means "clearly worse than normal for this garage".',
+          `${s.gas_voc}`,
+          () => set(`gasvoc=${Math.max(100, s.gas_voc - 25)}`),
+          () => set(`gasvoc=${Math.min(500, s.gas_voc + 25)}`),
+        ),
+        step(
+          'Gas boost · speed',
+          'The minimum speed auto holds while the boost is engaged. The thermostat can still run faster; it cannot run slower.',
+          `${s.gas_spd} / 12`,
+          () => set(`gasspd=${Math.max(1, s.gas_spd - 1)}`),
+          () => set(`gasspd=${Math.min(12, s.gas_spd + 1)}`),
+        ),
       ],
     },
     {
@@ -192,6 +213,18 @@ export function buildGroups(d: SettingsDeps): Group[] {
         ),
         text('Estimated runtime', 'Hours left at the current discharge slope. Blank while charging or flat.',
           s.batt?.eta_h != null ? `${s.batt.eta_h.toFixed(1)} h` : '–'),
+        text(
+          'Fan energy today',
+          'Watt-hours the fan has drawn since local midnight — measured by the Tapo meter when it answers, the cubic-law estimate otherwise — and what that costs at the price below.',
+          `${(s.wh_today / 1000).toFixed(2)} kWh · $${((s.wh_today / 1000) * s.cost_kwh).toFixed(2)}`,
+        ),
+        step(
+          'Electricity price',
+          'Your utility rate, for the cost readouts. Display math only — nothing bills against it.',
+          `$${s.cost_kwh.toFixed(2)} / kWh`,
+          () => set(`ckwh=${clamp(Math.round((s.cost_kwh - 0.01) * 100) / 100, 0.01, 2)}`),
+          () => set(`ckwh=${clamp(Math.round((s.cost_kwh + 0.01) * 100) / 100, 0.01, 2)}`),
+        ),
       ],
     },
     {

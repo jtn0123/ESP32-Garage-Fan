@@ -10,6 +10,7 @@
 #include "config.h"
 #include "fan/auto_logic.h"
 #include "system/eventlog.h"
+#include "sensors/air.h"
 #include "sensors/climate.h"
 
 namespace fan {
@@ -24,6 +25,10 @@ int g_auto_max = 9;
 int g_auto_min = 0;                           // rest speed once equalized (0 = off)
 float g_auto_onf = 2.5f, g_auto_offf = 1.5f;  // engage/release, deg F
 bool g_auto_high = false;                     // hysteresis latch for fan_auto_decide
+bool g_gas_on = kFanGasDefaults.enabled;      // gas boost: VOC index forces a floor
+int g_gas_spd = kFanGasDefaults.boost_speed;
+int g_gas_voc = kFanGasDefaults.on_index;
+bool g_gas_high = false;  // hysteresis latch for fan_gas_floor
 
 // LEDC, not RMT. On 2026-08-13 the fan ignored an entire 0..12 calibration
 // sweep against a watt meter: rmtWriteLooping() reported success at every
@@ -72,6 +77,9 @@ void restore(Preferences* prefs) {
     g_auto_min = prefs->getInt("amin", 0);
     g_auto_onf = prefs->getFloat("onf", 2.5f);
     g_auto_offf = prefs->getFloat("offf", 1.5f);
+    g_gas_on = prefs->getBool("gason", kFanGasDefaults.enabled);
+    g_gas_spd = prefs->getInt("gasspd", kFanGasDefaults.boost_speed);
+    g_gas_voc = prefs->getInt("gasvoc", kFanGasDefaults.on_index);
     const int saved = prefs->getInt("speed", 0);
     if (saved > 0 && saved <= 12) {
       g_speed = saved;
@@ -122,8 +130,24 @@ void tick_auto() {
   cfg.max_speed = g_auto_max;
   cfg.on_delta_c = g_auto_onf * 5 / 9;  // user thinks in F; logic runs in C
   cfg.off_delta_c = g_auto_offf * 5 / 9;
-  const int next = fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(),
-                                   g_speed < 0 ? 0 : g_speed, &g_auto_high, cfg);
+  const int prev = g_speed < 0 ? 0 : g_speed;
+  int next =
+      fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(), prev, &g_auto_high, cfg);
+  // The gas floor layers under the thermostat: bad air forces a minimum
+  // speed, it never lowers what the thermostat wanted. The release edge of
+  // the latch goes to the flight recorder so "why did the fan spin up at
+  // 2am" has an answer.
+  FanGasCfg gcfg = kFanGasDefaults;
+  gcfg.enabled = g_gas_on;
+  gcfg.boost_speed = g_gas_spd;
+  gcfg.on_index = g_gas_voc;
+  gcfg.off_index = g_gas_voc - 50 > 0 ? g_gas_voc - 50 : 1;
+  const bool was_high = g_gas_high;
+  const int floor_speed = fan_gas_floor(static_cast<int>(air::voc_index()), &g_gas_high, gcfg);
+  if (g_gas_high != was_high)
+    eventlog::log("gas", "boost %s voc=%ld floor=%d", g_gas_high ? "ON" : "off",
+                  (long)air::voc_index(), floor_speed);
+  next = fan_apply_gas_floor(next, prev, floor_speed);
   if (next != g_speed)
     apply(next, "auto", false);
 }
@@ -143,6 +167,10 @@ float watts(int speed) {
 }
 
 bool auto_on() { return g_auto_on; }
+bool gas_boost_on() { return g_gas_on; }
+int gas_speed() { return g_gas_spd; }
+int gas_voc_on() { return g_gas_voc; }
+bool gas_active() { return g_gas_high; }
 int auto_max() { return g_auto_max; }
 int auto_min() { return g_auto_min; }
 float engage_f() { return g_auto_onf; }
@@ -153,6 +181,26 @@ void set_auto(bool on) {
   if (g_prefs)
     g_prefs->putBool("auto", on);
   Serial.printf("auto mode %s\n", on ? "on" : "off");
+}
+
+void set_gas_boost(bool on) {
+  g_gas_on = on;
+  if (!on)
+    g_gas_high = false;  // releasing the feature releases the latch too
+  if (g_prefs)
+    g_prefs->putBool("gason", on);
+}
+
+void set_gas_speed(int v) {
+  g_gas_spd = v;
+  if (g_prefs)
+    g_prefs->putInt("gasspd", v);
+}
+
+void set_gas_voc_on(int v) {
+  g_gas_voc = v;
+  if (g_prefs)
+    g_prefs->putInt("gasvoc", v);
 }
 
 void set_auto_max(int v) {

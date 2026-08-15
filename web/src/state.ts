@@ -73,42 +73,28 @@ export const ROW_IDS: Record<RowKey, { sub: string; canvas: string; readout: str
   nox: { sub: 'sub_n', canvas: 'cv_n', readout: 'roN' },
 };
 
+/** One status bit: keeps each entry a single call so the list reads as a table. */
+function bit(key: string, title: string, body: string) {
+  return { key, title, body } as const;
+}
+
 export const STATUS_BITS = [
-  {
-    key: 'RSSI',
-    title: 'WI-FI SIGNAL',
-    body: 'How strong the controller’s link to the house access point is. Around −61 dBm is a solid connection; below about −80 dBm the MQTT session starts dropping and telemetry gaps show up in the charts.',
-  },
-  {
-    key: 'SD',
-    title: 'LOG STORAGE',
-    body: 'Space used by on-device logs on the microSD card. Every 5-minute sample is written locally first, then published — so a broker outage never loses history. The card is mounted lazily and quarantined if a mount ever crashes the board.',
-  },
-  {
-    key: 'VBAT',
-    title: 'BATTERY VOLTAGE',
-    body: 'Live cell voltage of the backup pack — the same series plotted in the BATTERY row. Roughly 4.10 V is full and 3.3 V is empty. The pack keeps the controller logging when the USB supply drops out; the fan itself runs from its own 12 V brick.',
-  },
-  {
-    key: 'PLUG',
-    title: 'MEASURED DRAW',
-    body: 'What the Tapo watt meter on the fan’s supply actually measures, polled out of Home Assistant by the controller. This is the fan link’s only feedback — the control wire has no tach — so a draw that disagrees with the commanded speed is the one signal that catches a fan not obeying.',
-  },
-  {
-    key: 'T-OFFSET',
-    title: 'PROBE CALIBRATION',
-    body: 'A fixed correction added to every garage temperature reading to cancel heat the board adds to its own sensor. Charging warms the board much more than idle does, so there are two values — set both in Settings › Sensors after comparing against a reference thermometer.',
-  },
-  {
-    key: 'UPTIME',
-    title: 'TIME SINCE BOOT',
-    body: 'How long the controller has been running without a reboot. A number that keeps resetting to zero usually means brownouts on the supply rather than a firmware crash — the status line also carries the previous boot’s cause of death.',
-  },
-  {
-    key: 'SLOT',
-    title: 'FIRMWARE SLOT',
-    body: 'The device keeps two firmware images, app0 and app1, and boots whichever was flashed last. “Confirmed” means this image came up cleanly and checked in with the broker, so it is now the permanent choice — an unconfirmed image rolls back to the other slot rather than boot-looping.',
-  },
+  bit('RSSI', 'WI-FI SIGNAL',
+    'How strong the controller’s link to the house access point is. Around −61 dBm is a solid connection; below about −80 dBm the MQTT session starts dropping and telemetry gaps show up in the charts.'),
+  bit('SD', 'LOG STORAGE',
+    'Space used by on-device logs on the microSD card. Every 5-minute sample is written locally first, then published — so a broker outage never loses history. The card is mounted lazily and quarantined if a mount ever crashes the board.'),
+  bit('VBAT', 'BATTERY VOLTAGE',
+    'Live cell voltage of the backup pack — the same series plotted in the BATTERY row. Roughly 4.10 V is full and 3.3 V is empty. The pack keeps the controller logging when the USB supply drops out; the fan itself runs from its own 12 V brick.'),
+  bit('PLUG', 'MEASURED DRAW',
+    'What the Tapo watt meter on the fan’s supply actually measures, polled out of Home Assistant by the controller. This is the fan link’s only feedback — the control wire has no tach — so a draw that disagrees with the commanded speed is the one signal that catches a fan not obeying.'),
+  bit('GAS', 'GAS BOOST',
+    'Bad air overrides a resting thermostat: while the SGP41’s VOC index is above the trigger, auto mode holds at least the boost speed — a car started in the garage spins the fan up even when the temperature says rest. Trigger, speed and the on/off switch live in Settings › Auto mode.'),
+  bit('T-OFFSET', 'PROBE CALIBRATION',
+    'A fixed correction added to every garage temperature reading to cancel heat the board adds to its own sensor. Charging warms the board much more than idle does, so there are two values — set both in Settings › Sensors after comparing against a reference thermometer.'),
+  bit('UPTIME', 'TIME SINCE BOOT',
+    'How long the controller has been running without a reboot. A number that keeps resetting to zero usually means brownouts on the supply rather than a firmware crash — the status line also carries the previous boot’s cause of death.'),
+  bit('SLOT', 'FIRMWARE SLOT',
+    'The device keeps two firmware images, app0 and app1, and boots whichever was flashed last. “Confirmed” means this image came up cleanly and checked in with the broker, so it is now the permanent choice — an unconfirmed image rolls back to the other slot rather than boot-looping.'),
 ] as const;
 
 /**

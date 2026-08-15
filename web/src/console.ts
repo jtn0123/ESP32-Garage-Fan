@@ -208,6 +208,13 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
   return `Gap is ${gap}°F, inside the +${s.off_f}°/+${s.on_f}° deadband — auto is holding ${s.speed > 0 ? `speed ${s.speed}` : 'off'} until it crosses a threshold, so the fan does not chatter.`;
 }
 
+/** The GAS status bit: off (dim), armed (quiet), or actively boosting (loud). */
+function gasBit(s: DeviceState): { value: string; colour: string } {
+  if (!s.gas_on) return { value: 'off', colour: DIM };
+  if (s.gas_active) return { value: `BOOSTING ≥${s.gas_spd}`, colour: OR };
+  return { value: `armed · trig ${s.gas_voc}`, colour: OUT };
+}
+
 function bitValues(): { value: string; colour: string }[] {
   const s = view.state;
   if (!s) return [];
@@ -232,6 +239,7 @@ function bitValues(): { value: string; colour: string }[] {
         : 'no meter',
       colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
     },
+    gasBit(s),
     { value: `${s.toff > 0 ? '+' : ''}${s.toff.toFixed(1)} °C`, colour: OR },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
     {
