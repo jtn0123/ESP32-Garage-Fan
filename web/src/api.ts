@@ -5,6 +5,7 @@
 // the render and showing up as NaN three functions later.
 
 import type {
+  Boots,
   DeviceInfo,
   DeviceState,
   DisplayFrame,
@@ -41,6 +42,14 @@ export const refreshDisplay = async (): Promise<Response> => {
 };
 export const getHistory = (days: number): Promise<History> =>
   json<History>(`/api/history?days=${days}`);
+
+/**
+ * Restart marks for the same window. Deliberately a SEPARATE request: the
+ * charts must still render when this fails (an older firmware has no such
+ * route), so the caller treats an empty list and a failed fetch alike.
+ */
+export const getBoots = (days: number): Promise<Boots> =>
+  json<Boots>(`/api/boots?days=${days}`);
 
 /**
  * Every command endpoint answers with the new state, so the UI never guesses.

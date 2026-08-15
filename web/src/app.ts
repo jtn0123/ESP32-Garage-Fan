@@ -371,10 +371,17 @@ let historySeq = 0;
 async function loadHistory(): Promise<void> {
   const seq = ++historySeq;
   try {
-    const raw = await api.getHistory(view.days);
+    // Boots ride along but must never be able to fail the chart: an older
+    // firmware has no /api/boots, and a missing explanation is not a reason
+    // to withhold the data it would have explained.
+    const [raw, boots] = await Promise.all([
+      api.getHistory(view.days),
+      api.getBoots(view.days).catch(() => ({ boots: [] })),
+    ]);
     if (seq !== historySeq) return; // superseded by a newer range request
     view.historyError = null;
     view.history = raw;
+    view.boots = boots.boots ?? [];
     view.series = build(raw);
     drawAll();
     paintHero();
@@ -391,6 +398,7 @@ async function loadHistory(): Promise<void> {
         ? 'this range is unavailable — the card is not mounted, or the clock has not synced'
         : 'could not load history from the controller';
     view.history = null;
+    view.boots = [];
     view.series = null;
     drawAll();
     paintHero();

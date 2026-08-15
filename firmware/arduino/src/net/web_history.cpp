@@ -13,6 +13,7 @@
 #include "fan/control.h"
 #include "generated_wire.h"
 #include "net/http_tx.h"
+#include "storage/bootlog.h"
 #include "storage/history.h"
 #include "storage/sdcard.h"
 #include "system/eventlog.h"
@@ -355,6 +356,53 @@ void handle_csv() {
   tx.end();
 }
 
+// GET /api/boots?days=N -- the restart marks the charts hang their outage
+// labels on. Same day validation as /api/history: a malformed question gets
+// an error, never a plausible-looking answer for a window nobody asked for.
+void handle_boots() {
+  const String days_arg = g_http->hasArg("days") ? g_http->arg("days") : "";
+  if (days_arg != "1" && days_arg != "7" && days_arg != "30" && days_arg != "60") {
+    g_http->send(400, "application/json", "{\"error\":\"days must be 1, 7, 30 or 60\"}");
+    return;
+  }
+  if (!sdcard::ok() || !time_synced()) {
+    g_http->send(503, "application/json",
+                 sdcard::ok() ? "{\"error\":\"clock not synced yet\"}"
+                              : "{\"error\":\"sd card not mounted\"}");
+    return;
+  }
+  const time_t cutoff = time(nullptr) - static_cast<time_t>(days_arg.toInt()) * 86400;
+  http_tx::Chunked tx(g_http->client(), "application/json");
+  tx.print("{" WK_BOOTS "[");
+  // The sink parses each stored line and re-emits it as an object: the file
+  // is the device's own format, the wire is types.ts's.
+  struct Ctx {
+    http_tx::Chunked* tx;
+    uint32_t n;
+  } ctx{&tx, 0};
+  bootlog::stream(
+      cutoff,
+      [](const char* line, void* raw) {
+        auto* c = static_cast<Ctx*>(raw);
+        long ts = 0;
+        unsigned long boots = 0;
+        char cause[24] = "";
+        // %23[^\n,] stops at the separator AND the newline, so a truncated
+        // final line cannot drag the next record into this one's cause.
+        if (sscanf(line, "%ld,%lu,%23[^\n,]", &ts, &boots, cause) < 2)
+          return true;  // skip a malformed row rather than tearing the body
+        if (!c->tx->printf(c->n ? ",{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"}"
+                                : "{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"}",
+                           ts, boots, cause[0] ? cause : "unknown"))
+          return false;
+        c->n++;
+        return true;
+      },
+      &ctx);
+  tx.print("]}");
+  tx.end();
+}
+
 void handle_stats() {
   float tmin, tmax, tavg;
   history::temp_stats(&tmin, &tmax, &tavg);
@@ -377,6 +425,7 @@ void register_routes(WebServer& http) {
   g_http = &http;
   http.on("/api/history", handle_history);
   http.on("/api/stats", handle_stats);
+  http.on("/api/boots", handle_boots);
   http.on("/download.csv", handle_csv);
 }
 

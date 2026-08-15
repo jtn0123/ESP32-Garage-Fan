@@ -3,7 +3,7 @@
 // arrives by SSE (or the 15 s poll) and every command endpoint answers with
 // the new state, so nothing here optimistically guesses what the device did.
 
-import type { DeviceInfo, DeviceState, History, Sensors, Stats } from './types.js';
+import type { BootMark, DeviceInfo, DeviceState, History, Sensors, Stats } from './types.js';
 import type { Series } from './series.js';
 import type { UpdateStatus } from './update.js';
 
@@ -16,6 +16,8 @@ export interface View {
   live: Sensors | null;
   series: Series | null;
   history: History | null;
+  /** Restart marks inside the loaded window; [] when unknown or none. */
+  boots: BootMark[];
   /** Why the last history fetch failed, or null. Shown in place of the chart. */
   historyError: string | null;
   update: UpdateStatus | null;
@@ -48,6 +50,7 @@ export const view: View = {
   live: null,
   series: null,
   history: null,
+  boots: [],
   historyError: null,
   update: null,
   days: 1,

@@ -56,6 +56,18 @@ def history() -> Json:
     return value
 
 
+# Restart marks for the window the last history build produced. Derived there
+# rather than independently so the mark always lands inside the mock's gap --
+# a marker that missed its own outage would make the console look broken while
+# the console was right.
+_boots: list[Json] = []
+
+
+def boots() -> list[Json]:
+    history()  # ensure the current scenario has been built
+    return _boots
+
+
 def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario knobs
     n = int(SCEN["rows"])
     end = int(time.time())
@@ -108,6 +120,19 @@ def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario kno
             noxr.append(15800 + (i % 25) * 8)
             voc.append(80 + (i % 30))
             nox.append(1 + (i % 3))
+    # The restart that EXPLAINS the gap: stamped inside it, the way the real
+    # device records a boot that happened between two samples.
+    global _boots
+    _boots = []
+    if SCEN["gap_at"] is not None and 0 < SCEN["gap_at"] < len(ts):
+        i = int(SCEN["gap_at"])
+        _boots = [
+            {
+                "ts": (ts[i - 1] + ts[i]) // 2,
+                "n": 82,
+                "cause": "brownout",
+            }
+        ]
     if SCEN["corrupt"]:  # what a bad CSV row must become
         if len(temp) > 5:
             temp[5] = None

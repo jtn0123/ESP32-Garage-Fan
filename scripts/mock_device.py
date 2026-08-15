@@ -54,7 +54,7 @@ import sys as _sys  # noqa: E402
 # so the sibling modules are found relative to THIS file, not the cwd.
 _sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mock_data import console_bytes, history  # noqa: E402
+from mock_data import boots, console_bytes, history  # noqa: E402
 from mock_panel import (  # noqa: E402
     DISP_H,
     DISP_STRIDE,
@@ -228,6 +228,14 @@ class H(BaseHTTPRequestHandler):
             return self._json(503, {"error": "sd card not mounted"})
         return self._json(200, history())
 
+    def _boots(self, query: Query) -> None:
+        days = query.get("days", [None])[0]
+        if days not in ("1", "7", "30", "60"):
+            return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
+        if not (SCEN["card"] and SCEN["synced"]):
+            return self._json(503, {"error": "sd card not mounted"})
+        return self._json(200, {"boots": boots()})
+
     def _csv(self, query: Query) -> None:
         if "days" in query:
             raw = query["days"][0]
@@ -329,6 +337,7 @@ class H(BaseHTTPRequestHandler):
         "/api/sensors": _sensors,
         "/api/events": _events,
         "/api/history": _history,
+        "/api/boots": _boots,
         "/api/display": _display,
         "/download.csv": _csv,
         # Reads, but token-guarded: a core dump is a RAM snapshot and RAM holds
