@@ -244,11 +244,26 @@ void compose() {
   const bool plug_fresh = plug::age_s() >= 0 && plug::age_s() < 60;
   power_text(plug_fresh ? plug::watts() : NAN, pw, sizeof(pw));
   voc_text(static_cast<int>(air::voc_index()), voc, sizeof(voc));
-  snprintf(line, sizeof(line), "%s  %s%s%s%s%s", rt, batt, pw[0] ? "  " : "", pw,
-           voc[0] ? "  " : "", voc);
+  // The IP/version block is right-aligned on the SAME row, so the left side
+  // must budget for it: 5x7 font at size 1 is 6 px per glyph, and the two
+  // optional fields are appended only while they still fit inside the budget
+  // (watts first -- it is the rarer, more actionable number). Without this,
+  // "15h56m  4.19V 100%  20W  VOC 156" ran straight through the address.
+  char right[40];
+  snprintf(right, sizeof(right), "%s v%s", WiFi.localIP().toString().c_str(), kFwVersion);
+  const size_t budget =
+      static_cast<size_t>((kWidth - 4 - static_cast<int>(strlen(right)) * 6 - 4 - 8) / 6);
+  snprintf(line, sizeof(line), "%s  %s", rt, batt);
+  if (pw[0] && strlen(line) + 2 + strlen(pw) <= budget) {
+    strlcat(line, "  ", sizeof(line));
+    strlcat(line, pw, sizeof(line));
+  }
+  if (voc[0] && strlen(line) + 2 + strlen(voc) <= budget) {
+    strlcat(line, "  ", sizeof(line));
+    strlcat(line, voc, sizeof(line));
+  }
   draw_text(g_black, 4, 108, 1, line);
-  snprintf(line, sizeof(line), "%s v%s", WiFi.localIP().toString().c_str(), kFwVersion);
-  draw_text(g_black, kWidth - 4 - static_cast<int>(strlen(line)) * 6, 108, 1, line);
+  draw_text(g_black, kWidth - 4 - static_cast<int>(strlen(right)) * 6, 108, 1, right);
 }
 
 /** Push both planes to the panel. */

@@ -65,9 +65,11 @@ void tick(int speed, float watts) {
     g_run_total_s += c.total_s;
     g_run_today_s += c.today_s;
     if (speed > 0) {
-      const float wh = watts * elapsed_s / 3600.0f;
-      g_energy_wh += wh;
-      g_wh_today += wh;
+      g_energy_wh += watts * elapsed_s / 3600.0f;
+      // c.today_s, not elapsed_s: a tick that spans local midnight credits
+      // only its post-midnight seconds to the new day -- same rule the
+      // runtime counter already follows (odometer_logic::credit).
+      g_wh_today += watts * c.today_s / 3600.0f;
     }
     if (clock_valid)
       g_today_ymd = ymd;

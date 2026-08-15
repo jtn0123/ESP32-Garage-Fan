@@ -116,7 +116,17 @@ void judge() {
   }
   if (!g_ever_read || millis() - g_read_ms > kStaleMs || millis() - g_speed_since_ms < kSettleMs ||
       speed < 0 || speed > 12 || isnan(g_watts)) {
+    // Falling from disagreement to CANNOT-SAY must replace the retained
+    // alert too, or a stale "plug_disagree" keeps speaking for a meter that
+    // stopped answering. It becomes "unknown", not "ok": silence is not
+    // agreement.
+    const bool was_disagree = g_verdict == -1;
     g_verdict = 0;
+    if (was_disagree) {
+      char alert[128];
+      alert_json(alert, sizeof(alert));
+      mqtt_link::publish_alert(alert);
+    }
     return;
   }
   const float e = kBaselineW[speed];
@@ -196,8 +206,12 @@ void alert_json(char* out, size_t cap) {
              "{\"kind\":\"plug_disagree\",\"speed\":%d,\"expect_w\":%.1f,"
              "\"measured_w\":%.1f}",
              speed, kBaselineW[speed], g_ever_read ? g_watts : -1.0f);
-  } else {
+  } else if (g_verdict == 1) {
     snprintf(out, cap, "{\"kind\":\"ok\"}");
+  } else {
+    // Verdict 0: stale reading, speed still settling, or no meter. Distinct
+    // from ok so an automation can tell "verified fine" from "cannot say".
+    snprintf(out, cap, "{\"kind\":\"unknown\"}");
   }
 }
 

@@ -175,7 +175,10 @@ def test_history_branches_agree():
     # becomes: every declared series appears exactly once in the shared
     # emitter, and handle_history calls that emitter on BOTH sides.
     emitter = find_function("write_all_series")
-    series = ["temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg"]
+    series = [
+        "temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg",
+        "watts", "voc_raw", "nox_raw", "voc", "nox", "bme_t", "bme_rh",
+    ]  # fmt: skip
     for name in series:
         n = len(re.findall(rf'"{name}"', emitter))
         assert n == 1, (

@@ -211,7 +211,9 @@ static void the_fault_banner_outranks_the_mode() {
   TEST_ASSERT_EQUAL_STRING("FAN FAULT", b);
 }
 
-static void power_only_speaks_with_a_fresh_reading() {
+// Formatter only: the freshness gate lives in display.cpp's compose(),
+// which needs hardware -- here we pin what each input renders as.
+static void power_formats_valid_readings() {
   char b[12];
   display_layout::power_text(20.3f, b, sizeof(b));
   TEST_ASSERT_EQUAL_STRING("20W", b);
@@ -246,7 +248,7 @@ int main() {
   RUN_TEST(the_hot_flag_follows_the_engage_threshold);
   RUN_TEST(mode_names_who_is_driving);
   RUN_TEST(the_fault_banner_outranks_the_mode);
-  RUN_TEST(power_only_speaks_with_a_fresh_reading);
+  RUN_TEST(power_formats_valid_readings);
   RUN_TEST(voc_names_the_warmup_instead_of_blanking);
   RUN_TEST(runtime_keeps_a_stable_width);
   RUN_TEST(battery_drops_the_percent_when_the_gauge_has_none);
