@@ -135,9 +135,17 @@ def test_handle_sensors_matches_sensors():
 
 
 def test_handle_history_matches_history():
-    # ApiError covers the 400 branch: days is required to be 1|7|30 and the
+    # ApiError covers the 400 branch: days is required to be 1|7|30|60 and the
     # rejection body is part of the wire contract like any other response.
-    check("handle_history", "History", "ApiError")
+    # The series keys live in write_all_series (the shared emitter both
+    # branches call); handle_history itself carries source/interval_s/ts and
+    # the error bodies.
+    wire = cpp_keys("handle_history") | cpp_keys("write_all_series")
+    typed = ts_fields("History") | ts_fields("ApiError")
+    assert wire == typed, (
+        f"history wire/type mismatch: firmware-only {sorted(wire - typed)}, "
+        f"types-only {sorted(typed - wire)}"
+    )
 
 
 def test_duty_table_matches_protocol():
@@ -162,17 +170,24 @@ def test_history_branches_agree():
     describes one shape, and check() above passes as long as SOME branch emits
     each field. This pins that every series is written on BOTH sides.
     """
-    body = find_function("handle_history")
-    # Everything the History interface declares as a data series.
+    # The series list now lives in ONE place -- write_all_series -- and both
+    # branches call it, which removes the drift risk structurally. The pin
+    # becomes: every declared series appears exactly once in the shared
+    # emitter, and handle_history calls that emitter on BOTH sides.
+    emitter = find_function("write_all_series")
     series = ["temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg"]
     for name in series:
-        n = len(re.findall(rf'"{name}"', body))
-        assert n == 2, (
-            f"handle_history writes '{name}' {n} time(s); expected exactly 2 "
-            f"(the SD branch and the ring branch). A series emitted on only one "
-            f"side is the 7/30-day regression: the chart loses that line for "
-            f"whichever range takes the other path."
+        n = len(re.findall(rf'"{name}"', emitter))
+        assert n == 1, (
+            f"write_all_series writes '{name}' {n} time(s); expected exactly 1. "
+            f"A series missing here is the 7/30-day regression for every range."
         )
+    body = find_function("handle_history")
+    calls = len(re.findall(r"\bwrite_all_series\s*\(", body))
+    assert calls == 2, (
+        f"handle_history calls write_all_series {calls} time(s); expected 2 "
+        f"(the SD branch and the ring branch)."
+    )
     # And both branches must anchor their rows in real time.
     assert re.search(r"\bwrite_ts\s*\(", body), "SD branch must emit per-row ts[]"
     assert re.search(r"\bwrite_ts_derived\s*\(", body), "ring branch must emit ts[]"

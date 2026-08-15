@@ -179,6 +179,67 @@ bool scratch_ready() {
   return g_scratch.ready;
 }
 
+// Every series both /api/history branches emit, in wire order. One emitter,
+// two sources: the SD path fills a SeriesView from the PSRAM scratch, the
+// ring path from the ring's accessors. The list living in exactly one place
+// is what keeps the two branches from drifting apart (the contract test
+// checks the names; this keeps the ORDER and the formatting honest too).
+struct SeriesView {
+  const float* t;
+  const float* h;
+  const float* p;
+  const float* o;
+  const float* b;
+  const float* w;
+  const float* bt;
+  const float* bh;
+  const int8_t* sp;
+  const int8_t* cg;
+  const int32_t* vr;
+  const int32_t* nr;
+  const int16_t* vi;
+  const int16_t* ni;
+};
+
+void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
+  tx.print(",");
+  write_series(tx, "temp_c", v.t, n, 1);
+  tx.print(",");
+  write_series(tx, "rh", v.h, n, 0);
+  tx.print(",");
+  write_series(tx, "hpa", v.p, n, 1);
+  tx.print(",");
+  write_series(tx, "out_f", v.o, n, 1);
+  tx.print(",");
+  write_series(tx, "batt_v", v.b, n, 2);
+  tx.print(",");
+  write_ints(tx, "spd", v.sp, n);
+  tx.print(",");
+  write_ints(tx, "chg", v.cg, n);
+  tx.print(",");
+  write_series(tx, "watts", v.w, n, 1);
+  tx.print(",");
+  write_gas(tx, "voc_raw", v.vr, n);
+  tx.print(",");
+  write_gas(tx, "nox_raw", v.nr, n);
+  tx.print(",");
+  write_gas(tx, "voc", v.vi, n);
+  tx.print(",");
+  write_gas(tx, "nox", v.ni, n);
+  tx.print(",");
+  write_series(tx, "bme_t", v.bt, n, 2);
+  tx.print(",");
+  write_series(tx, "bme_rh", v.bh, n, 0);
+  tx.print("}");
+}
+
+// The CSV header, once: /download.csv writes it on both the card path and
+// the ring fallback, and two literals had already started to count as
+// duplication before they could start to disagree.
+// clang-format off
+constexpr const char* kCsvHeader = "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n";  // NOLINT(whitespace/line_length)
+// clang-format on
+
 void handle_history() {
   // Reject anything but the documented ?days=1|7|30 instead of quietly
   // serving the RAM ring. A caller who typos the parameter (?range=7d) used
@@ -235,70 +296,20 @@ void handle_history() {
     // requested_span/actual_span whenever the card held less than the window.
     tx.printf("{\"source\":\"sd\",\"interval_s\":%ld,", step);
     write_ts(tx, s.ts, n);
-    tx.print(",");
-    write_series(tx, "temp_c", s.t, n, 1);
-    tx.print(",");
-    write_series(tx, "rh", s.h, n, 0);
-    tx.print(",");
-    write_series(tx, "hpa", s.p, n, 1);
-    tx.print(",");
-    write_series(tx, "out_f", s.o, n, 1);
-    tx.print(",");
-    write_series(tx, "batt_v", s.b, n, 2);
-    tx.print(",");
-    write_ints(tx, "spd", s.sp, n);
-    tx.print(",");
-    write_ints(tx, "chg", s.cg, n);
-    tx.print(",");
-    write_series(tx, "watts", s.w, n, 1);
-    tx.print(",");
-    write_gas(tx, "voc_raw", s.vr, n);
-    tx.print(",");
-    write_gas(tx, "nox_raw", s.nr, n);
-    tx.print(",");
-    write_gas(tx, "voc", s.vi, n);
-    tx.print(",");
-    write_gas(tx, "nox", s.ni, n);
-    tx.print(",");
-    write_series(tx, "bme_t", s.bt, n, 2);
-    tx.print(",");
-    write_series(tx, "bme_rh", s.bh, n, 0);
-    tx.print("}");
+    write_all_series(
+        tx, {s.t, s.h, s.p, s.o, s.b, s.w, s.bt, s.bh, s.sp, s.cg, s.vr, s.nr, s.vi, s.ni}, n);
   } else {
     // No card and days=1: the ring is all there is, and the response says so
     // rather than letting the caller assume persistence it does not have.
     const uint16_t rows = history::count();
     tx.printf("{\"source\":\"ring\",\"interval_s\":%ld,", step);
     write_ts_derived(tx, history::end_ts(), rows, step);
-    tx.print(",");
-    write_series(tx, "temp_c", history::temp(), rows, 1);
-    tx.print(",");
-    write_series(tx, "rh", history::rh(), rows, 0);
-    tx.print(",");
-    write_series(tx, "hpa", history::hpa(), rows, 1);
-    tx.print(",");
-    write_series(tx, "out_f", history::out_f(), rows, 1);
-    tx.print(",");
-    write_series(tx, "batt_v", history::batt_v(), rows, 2);
-    tx.print(",");
-    write_ints(tx, "spd", history::speed(), rows);
-    tx.print(",");
-    write_ints(tx, "chg", history::chg(), rows);
-    tx.print(",");
-    write_series(tx, "watts", history::watts(), rows, 1);
-    tx.print(",");
-    write_gas(tx, "voc_raw", history::voc_raw(), rows);
-    tx.print(",");
-    write_gas(tx, "nox_raw", history::nox_raw(), rows);
-    tx.print(",");
-    write_gas(tx, "voc", history::voc(), rows);
-    tx.print(",");
-    write_gas(tx, "nox", history::nox(), rows);
-    tx.print(",");
-    write_series(tx, "bme_t", history::bme_t(), rows, 2);
-    tx.print(",");
-    write_series(tx, "bme_rh", history::bme_rh(), rows, 0);
-    tx.print("}");
+    write_all_series(
+        tx,
+        {history::temp(), history::rh(), history::hpa(), history::out_f(), history::batt_v(),
+         history::watts(), history::bme_t(), history::bme_rh(), history::speed(), history::chg(),
+         history::voc_raw(), history::nox_raw(), history::voc(), history::nox()},
+        rows);
   }
   tx.end();
 }
@@ -325,9 +336,7 @@ void handle_csv() {
     // Header names the full 1.14.48 column set; older rows in the same file
     // carry 6, 8 or 13 fields and are streamed exactly as stored rather than
     // back-filled -- a short row simply has no values under the later labels.
-    tx.print(
-        "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
-        "watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n");
+    tx.print(kCsvHeader);
     sdcard::stream_range(
         time(nullptr) - (time_t)days * 86400,
         [](const char* line, void* ctx) {
@@ -342,9 +351,7 @@ void handle_csv() {
   const uint16_t n = history::count();
   http_tx::Chunked tx(g_http->client(), "text/csv",
                       "Content-Disposition: attachment; filename=garage-fan-ring.csv\r\n");
-  tx.print(
-      "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,"
-      "watts,voc_raw,nox_raw,voc,nox,bme_t,bme_rh\n");
+  tx.print(kCsvHeader);
   for (uint16_t i = 0; i < n && tx.ok(); i++) {
     const long ts =
         history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * (kSampleMs / 1000) : 0;
