@@ -11,8 +11,11 @@ makes that comparison possible:
 Reads watts from Home Assistant (the plug is Matter-commissioned there; its
 native protocol is TPAP, which nothing open speaks yet). Steps 0, 1..12, 0 --
 OFF is measured twice, first for the idle baseline and last to prove the walk
-ended where it started. At each step it polls until the reading settles
-(three consecutive samples within a band), then records the median.
+ended where it started. At each step it waits out a blackout (the plug's
+Matter sensor lags ROUGHLY A FULL STEP -- the 2026-08-13 sweep recorded each
+speed's watts against the next speed's key until long-dwell spot checks
+caught it), then polls until five consecutive samples sit inside a band and
+records the median.
 
 Writes docs/fan_power_baseline.json and prints a markdown table. Restores
 speed 0 + auto mode even on Ctrl-C: the one thing a calibration run must not
@@ -23,7 +26,9 @@ Env:
     HA_POWER_ENTITY     optional -- else the first sensor whose id mentions
                         both "power" and a P110/tapo-ish name is offered
     FAN_HOST            optional -- default 10.27.27.187
-    SETTLE_S            optional -- max seconds to wait per step (default 90)
+    SETTLE_S            optional -- max seconds to wait per step (default 180)
+    BLACKOUT_S          optional -- seconds to ignore after a speed change
+                        while the plug still reports the old speed (default 60)
 """
 
 import json
@@ -31,14 +36,17 @@ import os
 import statistics
 import sys
 import time
+import urllib.error
 import urllib.request
 
 HA_URL = os.environ.get("HA_URL", "").rstrip("/")
 HA_TOKEN = os.environ.get("HA_TOKEN", "")  # value from env only; gitleaks:allow
 ENTITY = os.environ.get("HA_POWER_ENTITY", "")
 FAN = os.environ.get("FAN_HOST", "10.27.27.187")
-SETTLE_S = int(os.environ.get("SETTLE_S", "90"))
-BAND_W = 1.5  # three consecutive samples within this many watts = settled
+SETTLE_S = int(os.environ.get("SETTLE_S", "180"))
+BLACKOUT_S = int(os.environ.get("BLACKOUT_S", "60"))  # discard the lag window
+BAND_W = 1.0  # five consecutive samples within this many watts = settled
+WINDOW_N = 5
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "fan_power_baseline.json")
 
 
@@ -57,6 +65,19 @@ def _http(url, method="GET", token=None, timeout=10):
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=timeout) as r:  # NOSONAR - LAN
         return json.load(r)
+
+
+def _http_retry(url, method="GET", token=None, tries=4):
+    """The device parks its whole loop during an eInk refresh (~15 s), so any
+    single request can time out through no fault of its own. Ride it out."""
+    for i in range(tries):
+        try:
+            return _http(url, method=method, token=token)
+        except (OSError, urllib.error.URLError) as e:
+            if i == tries - 1:
+                raise
+            print(f"  retry {i + 1} after {e}", flush=True)
+            time.sleep(8)
 
 
 def ha_states():
@@ -82,25 +103,25 @@ def find_entity():
 
 
 def watts(entity):
-    s = _http(f"{HA_URL}/api/states/{entity}", token=HA_TOKEN)
     try:
+        s = _http(f"{HA_URL}/api/states/{entity}", token=HA_TOKEN)
         return float(s["state"])
-    except (KeyError, ValueError):
+    except (OSError, urllib.error.URLError, KeyError, ValueError):
         return None
 
 
 def set_speed(v):
     url = f"http://{FAN}/api/set?speed={v}"  # NOSONAR - LAN device, no TLS stack
-    _http(url, method="POST")
+    _http_retry(url, method="POST")
 
 
 def set_auto(on):
     url = f"http://{FAN}/api/config?auto={1 if on else 0}"  # NOSONAR - LAN, no TLS stack
-    _http(url, method="POST")
+    _http_retry(url, method="POST")
 
 
 def settle(entity, label):
-    """Poll until three consecutive readings sit inside BAND_W, else time out."""
+    """Poll until WINDOW_N consecutive readings sit inside BAND_W, else time out."""
     t0 = time.time()
     window = []
     readings = []
@@ -108,9 +129,9 @@ def settle(entity, label):
         w = watts(entity)
         if w is not None:
             readings.append(w)
-            window = (window + [w])[-3:]
+            window = (window + [w])[-WINDOW_N:]
             print(f"  {label}: {w:7.1f} W", flush=True)
-            if len(window) == 3 and max(window) - min(window) <= BAND_W:
+            if len(window) == WINDOW_N and max(window) - min(window) <= BAND_W:
                 return statistics.median(window), readings
         time.sleep(3)
     if not readings:
@@ -136,7 +157,10 @@ def main():
         for step, speed in enumerate([0] + list(range(1, 13)) + [0]):
             key = f"{speed}" if step == 0 or speed != 0 else "0_return"
             set_speed(speed)
-            time.sleep(4)  # give the motor a head start before polling
+            # Blackout: the plug's sensor keeps serving the PREVIOUS speed's
+            # watts for on the order of a minute. Poll too early and the whole
+            # table shifts by one speed (2026-08-13, learned the hard way).
+            time.sleep(BLACKOUT_S)
             median, _ = settle(entity, f"speed {speed}")
             table[key] = round(median, 1)
             print(f"speed {speed}: {median:.1f} W")

@@ -322,8 +322,11 @@ void maybe_render() {
   // garage-fan-03f784 disconnected: exceeded timeout" on a 317 s beat. Never
   // let that cost be invisible again -- the sample and the SD flush were both
   // instrumented and exonerated before anyone thought to time the screen.
+  // A tricolor SSD1680 full refresh measures 14.74 s +/- 10 ms on this glass,
+  // so "slow" must mean slower than the panel's own physics -- the old 2 s
+  // threshold (mono-era) flagged every refresh and buried the event log.
   const uint32_t dt = millis() - t_render;
-  if (dt > 2000)
+  if (dt > 18000)
     eventlog::log("slow", "epd refresh %lums", (unsigned long)dt);
 }
 
