@@ -55,7 +55,9 @@ export function airflow(speed: number): string {
 export function storage(usedMb: number, totalMb: number, freeMb?: number): string {
   if (!Number.isFinite(usedMb) || !Number.isFinite(totalMb)) return '–';
   const base = `${(usedMb / 1024).toFixed(2)} / ${(totalMb / 1024).toFixed(1)} GB`;
-  if (freeMb === undefined || totalMb <= 0) return base;
+  // freeMb is RENDERED below, so it needs the same guard the other two
+  // got: a non-finite value reached the user as 'NaN MB free'.
+  if (freeMb === undefined || !Number.isFinite(freeMb) || totalMb <= 0) return base;
   const pctFull = (100 * usedMb) / totalMb;
   if (pctFull < 90) return base;
   const free = freeMb >= 1024 ? `${(freeMb / 1024).toFixed(1)} GB` : `${freeMb} MB`;

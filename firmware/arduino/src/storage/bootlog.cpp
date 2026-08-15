@@ -64,9 +64,21 @@ void tick() {
   char line[64];
   const int n = snprintf(line, sizeof(line), "%ld,%lu,%s\n", static_cast<long>(booted),
                          static_cast<unsigned long>(crashlog::boots()), crashlog::last_death());
-  if (n > 0 && n < static_cast<int>(sizeof(line)))
-    f.write(reinterpret_cast<const uint8_t*>(line), n);
+  if (n <= 0 || n >= static_cast<int>(sizeof(line))) {
+    f.close();
+    g_written = true;  // unformattable, and retrying cannot change that
+    return;
+  }
+  const size_t written = f.write(reinterpret_cast<const uint8_t*>(line), n);
   f.close();
+  // Same rule sdcard::log_sample follows: a short write means the card is
+  // failing or full, and half a line is worse than none -- it would parse as
+  // a boot at a garbage epoch. Leave g_written false so the next tick tries
+  // again on a remounted card.
+  if (written != static_cast<size_t>(n)) {
+    sdcard::mark_unmounted();
+    return;
+  }
   g_written = true;
   eventlog::log("boot", "marked %ld cause=%s", static_cast<long>(booted), crashlog::last_death());
 }

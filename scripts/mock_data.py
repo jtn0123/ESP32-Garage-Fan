@@ -63,9 +63,15 @@ def history() -> Json:
 _boots: list[Json] = []
 
 
-def boots() -> list[Json]:
+def boots(days: int = 60) -> list[Json]:
+    """Marks inside the window, like bootlog::stream's cutoff.
+
+    It used to ignore `days` entirely and hand back everything, so the mock
+    would have certified a console that ignored the selected range.
+    """
     history()  # ensure the current scenario has been built
-    return _boots
+    cutoff = time.time() - days * 86400
+    return [b for b in _boots if float(b["ts"]) >= cutoff]
 
 
 def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario knobs

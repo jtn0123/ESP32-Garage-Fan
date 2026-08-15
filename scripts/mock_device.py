@@ -234,7 +234,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
         if not (SCEN["card"] and SCEN["synced"]):
             return self._json(503, {"error": "sd card not mounted"})
-        return self._json(200, {"boots": boots()})
+        return self._json(200, {"boots": boots(int(days))})
 
     def _csv(self, query: Query) -> None:
         # Range and columns both mirror web_history.cpp exactly. They had

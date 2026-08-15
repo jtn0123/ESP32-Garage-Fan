@@ -391,6 +391,18 @@ void handle_boots() {
         // final line cannot drag the next record into this one's cause.
         if (sscanf(line, "%ld,%lu,%23[^\n,]", &ts, &boots, cause) < 2)
           return true;  // skip a malformed row rather than tearing the body
+        // The cause lands inside a JSON string, and the file is bytes on a
+        // card that anything could have written -- a quote or a backslash in
+        // there would invalidate the WHOLE response. crashlog's vocabulary is
+        // words and underscores, so anything else is corruption: drop it to
+        // '_' rather than escaping, which keeps the value readable and the
+        // document well-formed by construction.
+        for (char* p = cause; *p; ++p) {
+          const bool safe = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                            (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' || *p == ' ';
+          if (!safe)
+            *p = '_';
+        }
         if (!c->tx->printf(c->n ? ",{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"}"
                                 : "{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"}",
                            ts, boots, cause[0] ? cause : "unknown"))
