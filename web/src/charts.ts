@@ -222,6 +222,31 @@ function placeholder({ c, W, H }: Surface, message: string): void {
 }
 
 /**
+ * The band between the two traces, tinted by which one is on top: orange
+ * where the garage is hotter than the yard (the fan can help), blue where it
+ * is cooler (running the fan would import heat).
+ */
+function fillDifferential({ c, W, H }: Surface, s: Series, sc: Scale): void {
+  for (let i = 0; i + 1 < s.n; i++) {
+    const a = at(s.tf, i);
+    const b = at(s.tf, i + 1);
+    const oa = at(s.of, i);
+    const ob = at(s.of, i + 1);
+    // s.gap[i+1]: the pair straddles an outage, so there is nothing between
+    // them to tint -- filling it would invent a differential across the hole.
+    if (a === null || b === null || oa === null || ob === null || s.gap[i + 1]) continue;
+    c.beginPath();
+    c.moveTo(xAt(s, i, W), yAt(a, H, sc));
+    c.lineTo(xAt(s, i + 1, W), yAt(b, H, sc));
+    c.lineTo(xAt(s, i + 1, W), yAt(ob, H, sc));
+    c.lineTo(xAt(s, i, W), yAt(oa, H, sc));
+    c.closePath();
+    c.fillStyle = (a + b) / 2 >= (oa + ob) / 2 ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
+    c.fill();
+  }
+}
+
+/**
  * Restart stems, drawn last so nothing hides them.
  *
  * This is the half the outage band cannot supply: the band says "no data
@@ -275,25 +300,7 @@ export function drawTemperature(
   }
   frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, true);
 
-  // The band between the two traces, tinted by which one is on top: orange
-  // where the garage is hotter than the yard (the fan can help), blue where it
-  // is cooler (running the fan would import heat).
-  for (let i = 0; i + 1 < s.n; i++) {
-    const a = at(s.tf, i);
-    const b = at(s.tf, i + 1);
-    const oa = at(s.of, i);
-    const ob = at(s.of, i + 1);
-    if (a === null || b === null || oa === null || ob === null) continue;
-    if (s.gap[i + 1]) continue; // the pair straddles an outage; nothing to tint
-    c.beginPath();
-    c.moveTo(xAt(s, i, W), yAt(a, H, sc));
-    c.lineTo(xAt(s, i + 1, W), yAt(b, H, sc));
-    c.lineTo(xAt(s, i + 1, W), yAt(ob, H, sc));
-    c.lineTo(xAt(s, i, W), yAt(oa, H, sc));
-    c.closePath();
-    c.fillStyle = (a + b) / 2 >= (oa + ob) / 2 ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
-    c.fill();
-  }
+  fillDifferential(surf, s, sc);
 
   line(surf, s, sc, s.of, OUT, true, 2);
   line(surf, s, sc, s.tf, OR, false, 2.2);
