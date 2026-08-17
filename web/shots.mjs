@@ -3,7 +3,10 @@
  * Phone-sized screenshot sweep of the console, for looking at it rather than
  * asserting on it.
  *
- *   npm run build && node shots.mjs ../.shots [--port 8123]
+ *   npm run build && node shots.mjs round3 [--port 8123]
+ *
+ * The argument names a sweep, not a path: every sweep lands in the gitignored
+ * <repo>/.shots/<name>/, so a run can never write outside the working copy.
  *
  * The Playwright suite already runs every spec in a `mobile` project, but an
  * assertion only fails on what someone thought to assert. Overflow, dead
@@ -28,21 +31,38 @@ import { fileURLToPath } from 'node:url';
 import { chromium, devices } from '@playwright/test';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const outdir = resolve(process.argv[2] || `${REPO}/.shots`);
+const ROOT = resolve(REPO, '.shots');
+
+/**
+ * Resolve the sweep name to a directory, or refuse.
+ *
+ * The argument is a NAME, never a path, and the result is checked to be inside
+ * <repo>/.shots after resolution -- so `..`, an absolute path, or a symlinked
+ * component cannot walk out. The first version took the directory straight
+ * from argv and ran `rmSync(dir, {recursive:true, force:true})` on it, which
+ * turns `node shots.mjs /` (or any typo) into a recursive delete of whatever
+ * was named; SonarCloud flagged the argv-to-filesystem path twice and was
+ * right both times. Nothing this script writes or deletes can now land outside
+ * one gitignored directory in the working copy.
+ */
+function sweepDir(name) {
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+    throw new Error(`sweep name must be [A-Za-z0-9._-]+, got ${JSON.stringify(name)}`);
+  }
+  const dir = resolve(ROOT, name);
+  if (dir !== ROOT && !dir.startsWith(`${ROOT}/`)) {
+    throw new Error(`refusing to write outside ${ROOT}`);
+  }
+  return dir;
+}
+
+const outdir = sweepDir(process.argv[2] || 'latest');
 const portArg = process.argv.indexOf('--port');
 const PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : 8123;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-/**
- * Clear a previous sweep WITHOUT a recursive delete of an argv path.
- *
- * The first version was `rmSync(outdir, {recursive:true, force:true})`, which
- * makes `node shots.mjs /` -- or any typo'd path -- a recursive delete of
- * whatever was named. The directory is caller-supplied, so it must never be
- * treated as ours to destroy. Only the PNGs this script itself writes are
- * removed, by name, one level deep: stale shots from an older sweep go, and
- * nothing else in the directory can.
- */
+// Clear the previous sweep by removing only the PNGs this script writes, one
+// level deep -- not by deleting the directory.
 mkdirSync(outdir, { recursive: true });
 for (const entry of readdirSync(outdir, { withFileTypes: true })) {
   if (entry.isFile() && entry.name.endsWith('.png')) unlinkSync(resolve(outdir, entry.name));
