@@ -22,7 +22,7 @@
  * the previous bundle.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, devices } from '@playwright/test';
@@ -33,8 +33,20 @@ const portArg = process.argv.indexOf('--port');
 const PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : 8123;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-rmSync(outdir, { recursive: true, force: true });
+/**
+ * Clear a previous sweep WITHOUT a recursive delete of an argv path.
+ *
+ * The first version was `rmSync(outdir, {recursive:true, force:true})`, which
+ * makes `node shots.mjs /` -- or any typo'd path -- a recursive delete of
+ * whatever was named. The directory is caller-supplied, so it must never be
+ * treated as ours to destroy. Only the PNGs this script itself writes are
+ * removed, by name, one level deep: stale shots from an older sweep go, and
+ * nothing else in the directory can.
+ */
 mkdirSync(outdir, { recursive: true });
+for (const entry of readdirSync(outdir, { withFileTypes: true })) {
+  if (entry.isFile() && entry.name.endsWith('.png')) unlinkSync(resolve(outdir, entry.name));
+}
 
 const mock = spawn('/usr/bin/python3', [`${REPO}/scripts/mock_device.py`], {
   env: { ...process.env, MOCK_PORT: String(PORT) },
