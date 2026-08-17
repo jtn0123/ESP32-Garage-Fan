@@ -1,6 +1,10 @@
 # Local validation and analysis artifacts (do not commit)
 out/
 validation_reports/
+# Throwaway one-off probe scripts -- "drive the console and print what it does"
+# while chasing a layout or timing question. They answer one question and are
+# deleted; anything worth keeping becomes an e2e spec instead.
+*.tmp.mjs
 
 # PlatformIO build artifacts
 .pio/
