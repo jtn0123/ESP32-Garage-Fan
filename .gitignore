@@ -80,3 +80,6 @@ web/test-results/
 web/playwright-report/
 web/blob-report/
 web/.playwright/
+
+# Screenshot sweeps from web/shots.mjs (look at them, do not commit them)
+.shots/
