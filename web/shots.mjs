@@ -101,6 +101,99 @@ async function shoot(page, name, opts = {}) {
   console.log(`  ${name}.png`);
 }
 
+/** Drag across a plot and hold, so the shot catches a scrub in progress. */
+async function scrubShot(page, name, from, to) {
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * from, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * to, y, { steps: 8 });
+  await page.waitForTimeout(300);
+  await shoot(page, name);
+  await page.mouse.up();
+}
+
+/** The hero, the controls, and both control states. */
+async function shootConsole(page, name, width) {
+  // The header alone, big enough to judge tap targets.
+  await shoot(page, `${name}-00-header`, { clip: { x: 0, y: 0, width, height: 70 } });
+  await shoot(page, `${name}-01-fold`);
+  await shoot(page, `${name}-02-full`, { fullPage: true });
+
+  await page.locator('#stack button[title="set speed 7"]').click();
+  await page.waitForTimeout(400);
+  await shoot(page, `${name}-03-speed7`);
+
+  await page.locator('#boff').click();
+  await page.waitForTimeout(400);
+  await shoot(page, `${name}-04-off`);
+  await page.locator('#stack button[title="set speed 4"]').click();
+  await page.waitForTimeout(300);
+
+  await page.locator('#pwmcell').click();
+  await page.waitForTimeout(600);
+  await shoot(page, `${name}-05-scope`, { fullPage: true });
+  await page.locator('#scclose').click();
+  await page.waitForTimeout(200);
+}
+
+/**
+ * The charts, at 24 h and at the long ranges.
+ *
+ * A wide window is not the 24 h chart with different numbers on it: the axis
+ * carries dates, the row step is hours rather than minutes, and gap detection
+ * has to survive both -- which is exactly where "7D shows no data" lived. Each
+ * range gets a plain shot and a scrubbed one, since the readout gains a date
+ * there and that is the part with no room to spare at 320.
+ */
+async function shootCharts(page, name) {
+  for (const label of ['HUM', 'FAN', 'PWR']) {
+    const chip = page.locator('#chips button', { hasText: label });
+    if (await chip.count()) await chip.first().click();
+  }
+  await page.waitForTimeout(500);
+  await page.locator('#charts').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await shoot(page, `${name}-06-charts`);
+  await scrubShot(page, `${name}-07-scrub`, 0.35, 0.62);
+
+  for (const days of [7, 30]) {
+    const range = page.locator(`#ranges button[data-d="${days}"]`);
+    if (!(await range.count())) continue;
+    await range.click();
+    await page.waitForTimeout(1200);
+    await page.locator('#charts').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await shoot(page, `${name}-07b-range${days}d`);
+    await scrubShot(page, `${name}-07c-scrub${days}d`, 0.4, 0.55);
+  }
+  await page.locator('#ranges button[data-d="1"]').click();
+  await page.waitForTimeout(800);
+}
+
+/** The footer, a tooltip, and the settings screen. */
+async function shootFooterAndSettings(page, name) {
+  await page.locator('#stats').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await shoot(page, `${name}-08-bottom`);
+
+  const bit = page.locator('#stats span.bit').first();
+  if (await bit.count()) {
+    await bit.click().catch(() => {});
+    await page.waitForTimeout(300);
+    await shoot(page, `${name}-09-tip`);
+  }
+
+  // Clicked through the DOM: if the header overflows on a narrow phone the
+  // button can be off-screen or covered -- that is a bug to see in the shots,
+  // not a reason for the run to die here.
+  await page.evaluate(() => document.getElementById('nav')?.click());
+  await page.waitForTimeout(600);
+  await shoot(page, `${name}-10-settings`);
+  await shoot(page, `${name}-11-settings-full`, { fullPage: true });
+}
+
 async function run() {
   await waitForMock();
   const browser = await chromium.launch();
@@ -114,103 +207,9 @@ async function run() {
     await page.waitForSelector('#railnum:not(:has-text("–"))', { timeout: 15000 });
     await page.waitForTimeout(700);
 
-    // 0. The header alone, big enough to judge tap targets.
-    await shoot(page, `${name}-00-header`, {
-      clip: { x: 0, y: 0, width: device.viewport.width, height: 70 },
-    });
-    // 1. Above the fold, exactly as it lands.
-    await shoot(page, `${name}-01-fold`);
-    // 2. The whole console page.
-    await shoot(page, `${name}-02-full`, { fullPage: true });
-
-    // 3. Speed rail engaged at a mid step.
-    await page.locator('#stack button[title="set speed 7"]').click();
-    await page.waitForTimeout(400);
-    await shoot(page, `${name}-03-speed7`);
-
-    // 4. Fan off state.
-    await page.locator('#boff').click();
-    await page.waitForTimeout(400);
-    await shoot(page, `${name}-04-off`);
-    await page.locator('#stack button[title="set speed 4"]').click();
-    await page.waitForTimeout(300);
-
-    // 5. The PWM scope, opened.
-    await page.locator('#pwmcell').click();
-    await page.waitForTimeout(600);
-    await shoot(page, `${name}-05-scope`, { fullPage: true });
-    await page.locator('#scclose').click();
-    await page.waitForTimeout(200);
-
-    // 6. Charts with extra rows added (the sub-plots).
-    for (const label of ['HUM', 'FAN', 'PWR']) {
-      const chip = page.locator('#chips button', { hasText: label });
-      if (await chip.count()) await chip.first().click();
-    }
-    await page.waitForTimeout(500);
-    await page.locator('#charts').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-    await shoot(page, `${name}-06-charts`);
-
-    // 7. A chart readout under touch: press and drag across the temp plot.
-    const box = await page.locator('#cv_t').boundingBox();
-    if (box) {
-      await page.mouse.move(box.x + box.width * 0.35, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(box.x + box.width * 0.62, box.y + box.height / 2, { steps: 8 });
-      await page.waitForTimeout(300);
-      await shoot(page, `${name}-07-scrub`);
-      await page.mouse.up();
-    }
-
-    // 7b. The long ranges. A wide window is not the 24 h chart with different
-    // numbers on it: the axis has to carry dates, the row step is hours rather
-    // than minutes, and gap detection has to survive both -- which is exactly
-    // where "7D shows no data" lived. Captured per range so the axis tiers can
-    // be read rather than assumed.
-    for (const days of [7, 30]) {
-      const range = page.locator(`#ranges button[data-d="${days}"]`);
-      if (!(await range.count())) continue;
-      await range.click();
-      await page.waitForTimeout(1200);
-      await page.locator('#charts').scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
-      await shoot(page, `${name}-07b-range${days}d`);
-      // And the same range under a finger, since the scrub label gains a date
-      // here and that is the part with no room to spare at 320.
-      const rbox = await page.locator('#cv_t').boundingBox();
-      if (rbox) {
-        await page.mouse.move(rbox.x + rbox.width * 0.4, rbox.y + rbox.height / 2);
-        await page.mouse.down();
-        await page.mouse.move(rbox.x + rbox.width * 0.55, rbox.y + rbox.height / 2, { steps: 6 });
-        await page.waitForTimeout(300);
-        await shoot(page, `${name}-07c-scrub${days}d`);
-        await page.mouse.up();
-      }
-    }
-    await page.locator('#ranges button[data-d="1"]').click();
-    await page.waitForTimeout(800);
-
-    // 8. Odometer + status bar at the very bottom.
-    await page.locator('#stats').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-    await shoot(page, `${name}-08-bottom`);
-
-    // 9. A status-bar tooltip (tap target + popover placement).
-    const bit = page.locator('#stats span.bit').first();
-    if (await bit.count()) {
-      await bit.click().catch(() => {});
-      await page.waitForTimeout(300);
-      await shoot(page, `${name}-09-tip`);
-    }
-
-    // 10-11. Settings drawer, top and full. Forced: if the header overflows on
-    // a narrow phone the button can be off-screen or covered -- that is a bug
-    // to see in the shots, not a reason for the run to die here.
-    await page.evaluate(() => document.getElementById('nav')?.click());
-    await page.waitForTimeout(600);
-    await shoot(page, `${name}-10-settings`);
-    await shoot(page, `${name}-11-settings-full`, { fullPage: true });
+    await shootConsole(page, name, device.viewport.width);
+    await shootCharts(page, name);
+    await shootFooterAndSettings(page, name);
 
     await ctx.close();
   }
