@@ -13,6 +13,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -42,6 +43,11 @@ def _pick_port() -> int:
 
 PORT = _pick_port()
 BASE = f"http://127.0.0.1:{PORT}"
+
+# The knob table itself, so the reset-coverage test below compares against the
+# mock's own definition rather than a second copy of the list that would drift.
+sys.path.insert(0, str(ROOT / "scripts"))
+from mock_state import SCEN_SPEC  # noqa: E402
 
 
 def _free(port: int) -> bool:
@@ -333,3 +339,30 @@ def test_display_refresh_is_post_only(mock):
     assert status == 200
     status, _ = req("/api/display/refresh")
     assert status in (404, 405), "a GET must not trigger a panel repaint"
+
+
+def test_every_scenario_knob_is_in_the_playwright_reset(mock):
+    """The e2e reset must restore EVERY knob, not the ones someone remembered.
+
+    web/e2e/harness.ts resets the mock between tests from its own SCEN_DEFAULTS
+    literal, and a knob missing from that literal is never restored -- so the
+    last spec to flip it decides what every later spec in that worker sees.
+    `plug` was missing exactly that way: the two plug-disagreement specs left
+    the meter at 43.5 W, and "the DRAW cell shows the measured watts" expected
+    20.3 and failed whenever the ordering put it second. It passed for as long
+    as the order held, which is the worst way for a test to pass.
+
+    Pinned here rather than in the TypeScript because this side owns the knobs:
+    adding one to mock_state.SCEN_SPEC should fail until the reset knows it.
+    """
+    harness = ROOT / "web" / "e2e" / "harness.ts"
+    literal = re.search(
+        r"export const SCEN_DEFAULTS = \{(.*?)\n\} as const;", harness.read_text(), re.S
+    )
+    assert literal, "SCEN_DEFAULTS is no longer a plain object literal in harness.ts"
+    reset_keys = set(re.findall(r"^\s*(\w+):", literal.group(1), re.M))
+    assert reset_keys == set(SCEN_SPEC), (
+        "harness.ts SCEN_DEFAULTS and mock_state.SCEN_SPEC disagree; "
+        f"missing from the reset: {sorted(set(SCEN_SPEC) - reset_keys)}, "
+        f"unknown to the mock: {sorted(reset_keys - set(SCEN_SPEC))}"
+    )

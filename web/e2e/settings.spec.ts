@@ -264,3 +264,35 @@ test('the token field is used instead of prompting', async ({ page }) => {
   expect(req?.method()).toBe('POST');
   expect(req?.url()).toContain('token=token-from-the-field');
 });
+
+/**
+ * Every control in the drawer, measured rather than declared.
+ *
+ * These were 26-30 px tall -- including `Format SD card` and `Delete card
+ * contents`, which erase the flight recorder. A destructive button smaller
+ * than a fingertip is a design bug with consequences.
+ */
+test('every settings control is at least 44 px tall', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  await page.locator('#nav').click();
+  await expect(page.locator('#settings')).not.toHaveClass(/hide/);
+
+  const small = await page.evaluate(() => {
+    const out: string[] = [];
+    const seen = document.querySelectorAll<HTMLElement>(
+      '#groups .stp button, #groups .stp span, #groups .acts button, #groups .acts a, #groups .tgl',
+    );
+    for (const el of seen) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue; // inside a collapsed row
+      // The switch keeps its 42x24 pill and grows only its hit area, so measure
+      // what a finger actually hits, not what is painted.
+      const hit = el.classList.contains('tgl') ? r.height + 20 : r.height;
+      if (hit < 44) out.push(`${el.className || el.tagName}: ${hit.toFixed(1)}px`);
+    }
+    return out;
+  });
+  expect(small, `controls under 44 px: ${small.join(', ')}`).toEqual([]);
+  expect(await page.locator('#groups .acts button').count()).toBeGreaterThan(0);
+});

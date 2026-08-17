@@ -1,26 +1,24 @@
-// Painters for the console screen: hero numbers, gauge, PWM readouts, the
-// scope, charts, odometer tiles and status bits. Everything reads the shared
-// view-model in state.ts and writes only to the DOM.
+// Painters for the live half of the console screen: hero numbers, gauge, PWM
+// readouts, the scope, odometer tiles and status bits. Everything reads the
+// shared view-model in state.ts and writes only to the DOM.
+//
+// The recorded half -- the charts, their captions and readouts -- lives in
+// history_view.ts, which this file leans on only for the scrub stamp.
 //
 // The one thing this module does NOT know is the settings screen -- that
 // needs the command functions in app.ts, which imports us. app.ts registers
 // its settings painter through setSettingsPainter to keep the dependency one
 // way.
 
-import {
-  SERIES_COLOURS,
-  drawAxis,
-  drawBattery,
-  drawFanSpeed,
-  drawSimple,
-  drawTemperature,
-} from './charts.js';
+import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
-import { ago, airflow, cardTight, clock, hoursMinutes, signed, storage } from './format.js';
+import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
+import { paintChartTitle } from './history_view.js';
+import { paintRail } from './rail.js';
+import { paintBits } from './status_bits.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
-import type { Series } from './series.js';
-import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
-import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
+import { ROW_IDS, sampleIndex, view, type RowKey } from './state.js';
+import { AC, FAI, OK, OR, OUT, PU, TX } from './theme.js';
 import type { DeviceState } from './types.js';
 
 let settingsPainter: (() => void) | null = null;
@@ -155,21 +153,43 @@ export function paintHero(): void {
   const stamp = $('stamp');
   if (scrubbing) {
     const t = series.ts(i);
-    const tNow = series.ts(series.n - 1);
-    // Real timestamp difference, not index * interval: a cache-merged series
-    // has holes, and across one the index arithmetic understates the age.
-    const minutes =
-      t !== null && tNow !== null
-        ? (tNow - t) / 60
-        : ((series.n - 1 - i) * (view.history?.interval_s ?? 300)) / 60;
-    stamp.textContent = `${t === null ? '–' : clock(t)} · ${ago(minutes)}`;
+    // The CLOCK only -- no date, no age. This badge shares a flex row with the
+    // GARAGE label inside the hero's first column, so its width feeds straight
+    // into that column's width: at `19:33 · 13H20 AGO` (and worse, 25 characters
+    // at 7D) it outgrew the 92 px temperature beside it, the third hero column
+    // wrapped to a second row, and everything below -- pills, metric strip,
+    // rail, the whole chart stack -- slid 79 px DOWN mid-gesture. The full
+    // moment, weekday and age all live in the chart header readout, which is
+    // pinned above the plots and is the copy a thumb can actually see.
+    stamp.textContent = t === null ? '–' : clock(t);
     stamp.className = 'scrub';
+  } else if (view.pollFail > 0) {
+    // A poll has failed but the verdict has not landed yet. The reading on
+    // screen is as old as the last answer, so the badge says so instead of
+    // asserting NOW for the next 20 seconds.
+    const age = view.lastOk ? (Date.now() - view.lastOk) / 60_000 : Number.NaN;
+    stamp.textContent = view.lastOk ? ago(age) : 'NO CONTACT';
+    stamp.className = 'stale';
   } else {
     stamp.textContent = 'NOW';
     stamp.className = '';
   }
+  paintChartTitle();
 
   $('reason').textContent = reason(delta, scrubbing, i);
+}
+
+/**
+ * What the fan was doing at a logged moment: "running at 7", "off", or the
+ * honest third answer.
+ *
+ * "not logged" is not "off". Rows written before the speed column existed have
+ * no speed in them at all, and a sentence that says the fan was off at a moment
+ * nobody recorded is inventing history.
+ */
+function loggedSpeed(speed: number | undefined): string {
+  if (speed === undefined) return 'not logged';
+  return speed > 0 ? `running at ${speed}` : 'off';
 }
 
 function reason(delta: number | null, scrubbing: boolean, i: number): string {
@@ -179,16 +199,17 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
 
   if (scrubbing && view.series) {
     const t = view.series.ts(i);
-    const when = t === null ? 'that sample' : clock(t);
-    const histSpeed = view.series.spd.length ? view.series.spd[i] : undefined;
-    const fanWas =
-      histSpeed === undefined
-        ? 'not logged'
-        : histSpeed > 0
-          ? `running at ${histSpeed}`
-          : 'off';
+    // Same precision rule as the stamp: on a 60-day chart "At 15:27" names
+    // sixty different moments and answers nothing.
+    const when = t === null ? 'that sample' : moment(t, view.days);
+    const fanWas = loggedSpeed(view.series.spd.length ? view.series.spd[i] : undefined);
     const gap = delta === null ? '–' : delta.toFixed(1);
-    return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}. Move off the chart to return to now.`;
+    // No "move off the chart to return to now" tail any more. It was 36
+    // characters of instruction for a gesture the reader has already performed,
+    // and this sentence has to fit inside the box reserved for the live one it
+    // replaces (scrub.ts::freezeReason) -- the live sentences are never shorter
+    // than three lines at 320 px, and this is at most three.
+    return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}.`;
   }
   if (delta === null) {
     const topic = view.info?.topic_out ? ` on ${view.info.topic_out}` : '';
@@ -205,189 +226,6 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     return `Garage is only ${gap}°F hotter than the yard — under the +${s.off_f}° release point, so auto has dropped the fan to ${rest}. It engages speed ${s.auto_max} again above +${s.on_f}°.`;
   }
   return `Gap is ${gap}°F, inside the +${s.off_f}°/+${s.on_f}° deadband — auto is holding ${s.speed > 0 ? `speed ${s.speed}` : 'off'} until it crosses a threshold, so the fan does not chatter.`;
-}
-
-/** The GAS status bit: off (dim), armed (quiet), or actively boosting (loud). */
-function gasBit(s: DeviceState): { value: string; colour: string } {
-  if (!s.gas_on) return { value: 'off', colour: DIM };
-  if (s.gas_active) return { value: `BOOSTING ≥${s.gas_spd}`, colour: OR };
-  return { value: `armed · trig ${s.gas_voc}`, colour: OUT };
-}
-
-function bitValues(): { value: string; colour: string }[] {
-  const s = view.state;
-  if (!s) return [];
-  const card = s.sd_total_mb
-    ? storage(s.sd_used_mb, s.sd_total_mb, s.sd_free_mb)
-    : s.sd_q
-      ? 'quarantined'
-      : 'not mounted';
-  // A card with no room left stops being a flight recorder, so it reads as a
-  // warning rather than as ordinary status text.
-  const cardTense = s.sd_total_mb > 0 && cardTight(s.sd_used_mb, s.sd_total_mb);
-  let cardColour = OUT;
-  if (!s.sd_total_mb) cardColour = DIM;
-  else if (cardTense) cardColour = OR;
-  return [
-    { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
-    { value: card, colour: cardColour },
-    { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
-    {
-      value: s.plug
-        ? `${s.plug.w.toFixed(1)} W${s.plug.v !== null ? ` · ${s.plug.v.toFixed(1)} V` : ''}`
-        : 'no meter',
-      colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
-    },
-    gasBit(s),
-    { value: hoursMinutes(s.uptime_s), colour: OUT },
-    {
-      value: `${s.slot} · ${s.confirmed ? 'confirmed' : 'unconfirmed'}`,
-      colour: s.confirmed ? OK : OR,
-    },
-  ];
-}
-
-export function paintBits(): void {
-  const values = bitValues();
-  if (!values.length) return;
-  const host = $('stats');
-  host.replaceChildren(
-    ...STATUS_BITS.map((bit, n) => {
-      const span = el('span', { className: 'bit' });
-      span.append(el('b', { textContent: bit.key }));
-      const v = el('span', { textContent: values[n]?.value ?? '' });
-      v.style.color = values[n]?.colour ?? DIM;
-      span.append(v);
-      span.onmouseenter = () => {
-        view.tip = n;
-        paintTip();
-      };
-      span.onmouseleave = () => {
-        view.tip = -1;
-        paintTip();
-      };
-      span.onclick = () => {
-        view.tip = view.tip === n ? -1 : n;
-        paintTip();
-      };
-      return span;
-    }),
-  );
-  paintTip();
-}
-
-export function paintTip(): void {
-  const bit = view.tip >= 0 ? STATUS_BITS[view.tip] : undefined;
-  show($('tip'), !!bit);
-  if (!bit) return;
-  const title = $('tipt');
-  title.textContent = bit.title;
-  title.style.color = bitValues()[view.tip]?.colour ?? DIM;
-  $('tipb').textContent = bit.body;
-}
-
-/** One entry of a series legend: a coloured line sample and the sensor name. */
-function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement {
-  const b = el('b', { textContent: `${dashed ? '╌╌' : '——'} ${name}` });
-  b.style.color = colour;
-  return b;
-}
-
-/** Which line is which sensor, on the rows that carry more than one. */
-function paintLegends(_s: Series): void {
-  $('tleg').replaceChildren(
-    legendEntry('GARAGE', OR, false),
-    legendEntry('OUTSIDE', OUT, true),
-  );
-  $('hleg').replaceChildren(legendEntry('GARAGE', SERIES_COLOURS.humidity, false));
-}
-
-/** "index 93 · raw 30125" / "warming up · raw 29850" / '' -- one gas row. */
-function gasReadout(idx: number | null, raw: number | null): string {
-  if (idx === null && raw === null) return '';
-  const rawPart = raw === null ? '' : ` · raw ${raw.toFixed(0)}`;
-  return idx !== null && idx > 0 ? `index ${idx.toFixed(0)}${rawPart}` : `warming up${rawPart}`;
-}
-
-function paintReadouts(): void {
-  const s = view.series;
-  const i = sampleIndex();
-  if (!s || i < 0) return;
-  const tf = at(s.tf, i);
-  const of = at(s.of, i);
-  $('roT').textContent =
-    (tf === null ? '–' : `${tf.toFixed(1)}°`) + (of === null ? '' : ` · out ${of.toFixed(1)}°`);
-  const spd = s.spd.length ? s.spd[i] : undefined;
-  $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
-  const rhNow = at(s.rh, i);
-  $('roH').textContent = rhNow === null ? '' : `${rhNow.toFixed(0)}%`;
-  const hpa = at(s.hpa, i);
-  $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
-  const bv = at(s.bv, i);
-  $('roB').textContent =
-    bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
-  const w = at(s.w, i);
-  $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
-  $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
-  $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
-}
-
-/**
- * Blank every plot and put the reason in the caption.
- *
- * Used when a range cannot be served: leaving the previous range's picture
- * under the new range's title is the failure the firmware's 503 exists to
- * prevent, and silently keeping it undid that at the last step.
- */
-function clearPlots(reason: string): void {
-  $('tcap').textContent = reason;
-  for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
-    const c = document.getElementById(id) as HTMLCanvasElement | null;
-    const ctx = c?.getContext('2d');
-    if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
-  }
-}
-
-export function drawAll(): void {
-  if (view.screen !== 'console') return;
-  const s = view.series;
-  if (!s) {
-    if (view.historyError) clearPlots(view.historyError);
-    return;
-  }
-  paintLegends(s);
-  drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots);
-  if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
-  if (view.rows.humidity) {
-    drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub);
-  }
-  if (view.rows.pressure) {
-    // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
-    // legible in the labels and does not need flattening.
-    drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
-  }
-  if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
-  if (view.rows.power) {
-    drawSimple($<HTMLCanvasElement>('cv_w'), s, s.w, SERIES_COLOURS.power,
-      (v) => v.toFixed(1), 'no plug data yet', view.scrub);
-  }
-  // Gas rows plot the INDEX once the algorithm produces one, and the raw
-  // ticks before that -- the user asked to watch the warm-up, not to stare at
-  // a flat zero for the hours Sensirion's blackout lasts.
-  if (view.rows.voc) {
-    const warming = !s.voc.some((v) => v !== null && v > 0);
-    drawSimple($<HTMLCanvasElement>('cv_v'), s, warming ? s.vocr : s.voc, SERIES_COLOURS.voc,
-      (v) => v.toFixed(0), 'no VOC sensor data', view.scrub);
-  }
-  if (view.rows.nox) {
-    const warming = !s.nox.some((v) => v !== null && v > 0);
-    drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
-      (v) => v.toFixed(0), 'no NOx sensor data', view.scrub);
-  }
-  drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
-  paintReadouts();
 }
 
 export function paintStats(): void {
@@ -422,7 +260,7 @@ export function paintChips(): void {
     const b = child as HTMLElement;
     const key = b.dataset['key'] as RowKey;
     const on = view.rows[key];
-    b.style.color = on ? TX : '#4d5765';
+    b.style.color = on ? TX : FAI;
     b.style.borderColor = on ? SERIES_COLOURS[key] : 'transparent';
     show($(ROW_IDS[key].sub), on);
   });
@@ -444,10 +282,43 @@ export function isNewer(next: DeviceState, cur: DeviceState | null): boolean {
   return next.uptime_s >= cur.uptime_s;
 }
 
+/**
+ * What the page says when it has never reached the controller at all.
+ *
+ * The cold-load case: you walk into the garage, the fan is not running, you
+ * open the console -- and it used to sit on "Connecting to the controller…"
+ * indefinitely, because the whole offline path was gated on having had one
+ * successful poll to go stale from. A first-fetch failure is as much
+ * information as a later one.
+ */
+const NO_CONTACT_REASON =
+  'No answer from the controller. The page keeps retrying every 15 seconds — ' +
+  'if this persists, check that the board has power and is on the network ' +
+  '(garage-fan.local). Nothing below is a live reading.';
+
+
+
+/**
+ * The broker chip: one decision, so one function returning both halves.
+ *
+ * Four states in priority order. "We cannot reach the DEVICE" outranks anything
+ * the device would have told us about the broker -- that flag is a last-known
+ * value like every other, and a green "BROKER UP" on a controller that has not
+ * answered in minutes is the single most misleading thing this page can say.
+ * Then: nothing heard yet (boot), and the device's own view.
+ */
+function brokerChip(stale: boolean, s: DeviceState | null): { text: string; cls: string } {
+  if (stale) return { text: '● NO CONTACT', cls: 'stale' };
+  if (!s) return { text: '● BROKER —', cls: '' };
+  if (s.mqtt) return { text: '● BROKER UP', cls: 'up' };
+  return { text: '● BROKER DOWN', cls: '' };
+}
+
 export function paint(next?: DeviceState): void {
   if (next) {
     view.lastOk = Date.now();
     view.offline = false;
+    view.pollFail = 0;
     // A straggler still proves the device is reachable, so it clears `offline`
     // -- but it must not be allowed to skip the repaint, or the page keeps
     // showing "● NO CONTACT" and stays dimmed while the state says otherwise,
@@ -455,16 +326,31 @@ export function paint(next?: DeviceState): void {
     if (isNewer(next, view.state)) view.state = next;
   }
   const s = view.state;
-  if (!s) return;
-
   const stale = view.offline;
+
+  // The broker chip and the body tint are painted BEFORE the no-state guard:
+  // "we cannot reach it" is precisely the case with no frame to read, and the
+  // old early return meant a cold failure repainted nothing at all. Offline
+  // also outranks every field below -- they are all last-known values, and the
+  // broker flag in particular would otherwise keep asserting a green "UP"
+  // about a device that has not answered in minutes.
   const mqtt = $('hmq');
-  // Offline outranks every field in here: they are all last-known values, and
-  // the broker flag in particular would otherwise keep asserting "UP" about a
-  // device we have not heard from in minutes.
-  mqtt.textContent = stale ? '● NO CONTACT' : s.mqtt ? '● BROKER UP' : '● BROKER DOWN';
-  mqtt.className = stale ? 'stale' : s.mqtt ? 'up' : '';
+  const chip = brokerChip(stale, s);
+  mqtt.textContent = chip.text;
+  mqtt.className = chip.cls;
   document.body.classList.toggle('offline', stale);
+  if (!s) {
+    if (stale) {
+      $('reason').textContent = NO_CONTACT_REASON;
+      // The badge cannot be left saying NOW over an en dash: there is no
+      // reading, current or otherwise.
+      const stamp = $('stamp');
+      stamp.textContent = 'NO CONTACT';
+      stamp.className = 'stale';
+    }
+    return;
+  }
+
   const batt = $('hbat');
   if (s.batt) {
     show(batt, true);
@@ -476,14 +362,7 @@ export function paint(next?: DeviceState): void {
   }
   $('hfw').textContent = `FW ${s.fw}`;
 
-  $('railnum').textContent = s.speed === 0 ? 'off' : s.speed < 0 ? 'raw' : String(s.speed);
-  Array.from($('stack').children).forEach((child, k) => {
-    const b = child as HTMLElement;
-    const n = k + 1;
-    const lit = n <= s.speed && s.speed > 0;
-    b.style.background = lit ? `rgba(59,130,246,${0.2 + 0.055 * n})` : '#12161d';
-    b.style.borderColor = n === s.speed ? AC : lit ? 'rgba(59,130,246,.4)' : '#1a2029';
-  });
+  paintRail(s.speed);
 
   $('bauto').className = `pill${s.auto ? ' on' : ''}`;
   $('bauto').textContent = s.auto ? 'auto on' : 'auto off';

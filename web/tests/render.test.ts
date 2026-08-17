@@ -7,7 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import { limits } from '../src/charts.js';
 import { isNewer } from '../src/console.js';
-import { cardTight, storage } from '../src/format.js';
+import { battReadout, speedReadout } from '../src/history_view.js';
+import { axisLabel, cardTight, storage } from '../src/format.js';
 import type { DeviceState } from '../src/types.js';
 
 describe('limits: minimum y-span', () => {
@@ -109,5 +110,44 @@ describe('storage: a nearly-full card has to look nearly full', () => {
     expect(cardTight(8999, 10000)).toBe(false);
     expect(cardTight(9000, 10000)).toBe(true);
     expect(cardTight(0, 0)).toBe(false); // no card: not "tight", just absent
+  });
+});
+
+describe('axisLabel: one format per range', () => {
+  // 2026-08-16 15:27 local, whatever zone the test box is in.
+  const t = Math.floor(new Date(2026, 7, 16, 15, 27).getTime() / 1000);
+
+  it('gives 24 h the clock', () => {
+    expect(axisLabel(t, 1)).toBe('15:27');
+  });
+
+  it('gives a week the date AND the hour', () => {
+    // Without the hour two neighbouring ticks both read "8/16" and the axis
+    // looks broken.
+    expect(axisLabel(t, 7)).toBe('8/16 15h');
+  });
+
+  it('drops the hour past a week', () => {
+    // 30 and 60 day rows are 2.6 and 5.1 hours apart, so an hour on the label
+    // claims a precision the sample does not have -- and it is what made the
+    // long axis unreadable at phone width.
+    expect(axisLabel(t, 30)).toBe('8/16');
+    expect(axisLabel(t, 60)).toBe('8/16');
+  });
+});
+
+describe('the scrub readouts each say one thing', () => {
+  it('distinguishes a stopped fan from an unlogged one', () => {
+    // Not the same fact: rows written before the speed column existed have no
+    // speed at all, and rendering those as "off" invents a reading.
+    expect(speedReadout(7)).toBe('speed 7');
+    expect(speedReadout(0)).toBe('off');
+    expect(speedReadout(undefined)).toBe('');
+  });
+
+  it('names the charger only while it was actually running', () => {
+    expect(battReadout(4.187, false)).toBe('4.19 V');
+    expect(battReadout(4.187, true)).toBe('4.19 V ⚡ charging');
+    expect(battReadout(null, true)).toBe('');
   });
 });

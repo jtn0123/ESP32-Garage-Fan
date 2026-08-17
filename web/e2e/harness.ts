@@ -1,6 +1,13 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { expect, test as base, type Page, type Request } from '@playwright/test';
+import {
+  expect,
+  test as base,
+  type CDPSession,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
 
 /**
  * Shared harness for the console's end-to-end pass.
@@ -72,11 +79,23 @@ async function waitForMock(port: number, proc: ChildProcess): Promise<void> {
 export const SCEN_DEFAULTS = {
   card: 'true',
   synced: 'true',
-  rows: '288',
+  // Rows the mock card HOLDS -- 60 days at 300 s, i.e. enough to fill every
+  // range. Must track mock_state.SCEN or a reset would leave the mock in a
+  // state its own default never produces.
+  rows: '17280',
   gap_at: 'none',
   corrupt: 'false',
   flat_rh: 'false',
   down: 'false',
+  // EVERY knob in mock_state.SCEN_SPEC belongs here, including the ones no
+  // spec in this file flips today. A reset is only as good as its
+  // most-forgotten key: `plug` was missing, so the two plug-disagreement
+  // specs left the meter reading 43.5 W for whatever the worker ran next, and
+  // "the DRAW cell shows the measured watts" failed on 20.3 vs 43.5 whenever
+  // the order happened to put it second. It survived on luck for as long as
+  // the ordering held, which is the worst way for a test to pass.
+  panel_ready: 'true',
+  plug: 'ok',
 } as const;
 
 /** Flip scenario knobs on the mock. */
@@ -90,6 +109,59 @@ export async function scen(page: Page, knobs: Record<string, string | number>): 
 
 export async function resetScen(page: Page): Promise<void> {
   await scen(page, SCEN_DEFAULTS as unknown as Record<string, string>);
+}
+
+/**
+ * Serve the Google-hosted webfonts from Node, when asked for by REAL_FONTS=1.
+ *
+ * Off by default, and that default is deliberate: routing these makes every
+ * test depend on outbound network, which is not a property a unit-of-behaviour
+ * suite should have. But the fallback font is not a neutral choice either --
+ * this sandbox cannot reach fonts.googleapis.com (Chromium does not trust the
+ * agent proxy's CA, so the `media="print"` link never fires its onload and the
+ * stylesheet stays print-only), while CI fetches it fine and renders in
+ * Instrument Sans / JetBrains Mono. Every local measurement in this repo has
+ * therefore been taken in the WRONG metrics, and one layout bug (the hero
+ * rewrapping when the scrub badge widened) was reachable only in CI.
+ *
+ * Node's fetch does trust the proxy CA, so with this on, the browser gets
+ * exactly the bytes CI gets:  REAL_FONTS=1 npx playwright test --workers=2
+ *
+ * The tests themselves assert font-independent invariants ("this box is the
+ * same size before and after"), which is what actually catches that class. This
+ * is the reproduction tool, not the guard.
+ */
+const fontCache = new Map<string, { body: Buffer; type: string }>();
+
+async function serveWebfonts(page: Page): Promise<void> {
+  const fetchOnce = async (url: string): Promise<{ body: Buffer; type: string }> => {
+    const hit = fontCache.get(url);
+    if (hit) return hit;
+    const res = await fetch(url, {
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151 Safari/537.36',
+      },
+    });
+    const fresh = {
+      body: Buffer.from(await res.arrayBuffer()),
+      type: res.headers.get('content-type') ?? 'application/octet-stream',
+    };
+    fontCache.set(url, fresh);
+    return fresh;
+  };
+  for (const pattern of ['https://fonts.googleapis.com/**', 'https://fonts.gstatic.com/**']) {
+    await page.route(pattern, async (route) => {
+      try {
+        const { body, type } = await fetchOnce(route.request().url());
+        await route.fulfill({ status: 200, contentType: type, body });
+      } catch {
+        // No network: fall through to the browser's own (failing) request, which
+        // is the normal local behaviour anyway.
+        await route.continue();
+      }
+    });
+  }
 }
 
 /**
@@ -123,7 +195,16 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
     await use(`http://127.0.0.1:${mockPort}`);
   },
 
-  errors: async ({ page }, use) => {
+  // Wraps the built-in `page` so the route is installed before any test body
+  // can navigate. It was hooked onto `errors` first, which silently did nothing:
+  // see the note there.
+  page: async ({ page }, use) => {
+    if (process.env['REAL_FONTS']) await serveWebfonts(page);
+    await use(page);
+  },
+
+  errors: [
+    async ({ page }, use) => {
     const errors: string[] = [];
     page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
@@ -134,7 +215,15 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
     // them); an uncaught exception never is.
     const fatal = errors.filter((e) => !/Failed to load resource/.test(e));
     expect(fatal, 'the page reported errors').toEqual([]);
-  },
+    },
+    // AUTO, which it was not. A fixture is only constructed when a test asks
+    // for it, and not one spec in this suite destructures `errors` -- so the
+    // console-error guard that exists "so it cannot be forgotten" was never
+    // running for a single test. Most console regressions surface first as an
+    // uncaught TypeError with the page still looking plausible, which is exactly
+    // what this was meant to catch.
+    { auto: true },
+  ],
 });
 
 export { expect };
@@ -189,6 +278,134 @@ export async function inkedColumns(page: Page, canvasId: string): Promise<number
     }
     return inked;
   }, canvasId);
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * A real finger drag, through the browser's own touch pipeline.
+ *
+ * Playwright's touchscreen API only taps, and page.mouse never enters the touch
+ * path at all -- so the gesture where the console has to CHOOSE between
+ * scrubbing the chart and letting the page scroll was untestable, which is how
+ * a touchmove handler that called preventDefault() on every move shipped and
+ * turned 400 px of chart into a region a phone could not scroll out of.
+ *
+ * CDP dispatches what the compositor itself sees, so the scrolling the browser
+ * does on our behalf is part of what gets asserted. Chromium-only, which both
+ * projects in playwright.config.ts are.
+ *
+ * `hold` leaves the finger DOWN, because that is the only moment a scrub is
+ * observable: releasing ends it by design.
+ */
+// One session per page, kept: a finger held down belongs to the session that
+// pressed it, and a fresh session refuses the release with "Must send a
+// TouchStart first" -- which is how the held-scrub test failed the first time.
+const cdpSessions = new WeakMap<Page, CDPSession>();
+
+async function touchSession(page: Page): Promise<CDPSession> {
+  const existing = cdpSessions.get(page);
+  if (existing) return existing;
+  const fresh = await page.context().newCDPSession(page);
+  cdpSessions.set(page, fresh);
+  return fresh;
+}
+
+export async function touchDrag(
+  page: Page,
+  from: Point,
+  to: Point,
+  { hold = false, steps = 8 }: { hold?: boolean; steps?: number } = {},
+): Promise<void> {
+  const cdp = await touchSession(page);
+  const at = (
+    type: 'touchStart' | 'touchMove' | 'touchEnd',
+    x: number,
+    y: number,
+  ): Promise<unknown> =>
+    cdp.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints: type === 'touchEnd' ? [] : [{ x, y }],
+    });
+  await at('touchStart', from.x, from.y);
+  for (let i = 1; i <= steps; i++) {
+    await at(
+      'touchMove',
+      from.x + ((to.x - from.x) * i) / steps,
+      from.y + ((to.y - from.y) * i) / steps,
+    );
+  }
+  if (!hold) await at('touchEnd', to.x, to.y);
+}
+
+/** Lift a finger left down by `touchDrag(..., { hold: true })`. */
+export async function touchRelease(page: Page): Promise<void> {
+  const cdp = await touchSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/** True on the phone project; the desk project has no touchscreen to drive. */
+export async function hasTouch(page: Page): Promise<boolean> {
+  return page.evaluate(() => 'ontouchstart' in window);
+}
+
+/**
+ * Open a status bit's explanation the way the platform in front of you does.
+ *
+ * A phone taps; a desk hovers. The distinction is not cosmetic -- the hover
+ * handlers are bound only where `(hover: hover)` matches, because binding them
+ * on a touchscreen made a tap open and immediately close the tip. A shared
+ * assertion about tooltip CONTENT should therefore drive the tips through
+ * whichever gesture the project actually has, rather than being exiled to the
+ * one project that can hover.
+ */
+export async function openTip(page: Page, bit: Locator): Promise<void> {
+  // The strip is the last thing on a long page, so it starts ~1500 px down:
+  // page.touchscreen.tap() takes viewport coordinates and silently does nothing
+  // outside them, whereas hover() scrolls for you. Scroll first, measure after.
+  await bit.scrollIntoViewIfNeeded();
+  if (!(await hasTouch(page))) {
+    await bit.hover();
+    return;
+  }
+  const box = await bit.boundingBox();
+  if (!box) throw new Error('the status bit has no box to tap');
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/**
+ * The area a finger can actually hit, measured by probing, not by reading CSS.
+ *
+ * `boundingBox()` is the wrong instrument for three of this page's controls: the
+ * header nav, the scope's close button and the settings switch all keep a small
+ * PAINTED box on purpose (padding there would push the fold budget back down, or
+ * reflow a fixed-height strip) and grow their target with a transparent
+ * `::after`. A box measurement calls those 13 px tall; a person hits 45. So this
+ * walks outward from the centre asking the document what is under each point,
+ * which is the same question the browser asks on a tap.
+ */
+export async function hitBox(page: Page, selector: string): Promise<{ w: number; h: number }> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { w: 0, h: 0 };
+    const r = el.getBoundingClientRect();
+    const cx = Math.round(r.left + r.width / 2);
+    const cy = Math.round(r.top + r.height / 2);
+    const owns = (x: number, y: number): boolean => {
+      const hit = document.elementFromPoint(x, y);
+      return !!hit && (hit === el || el.contains(hit) || hit.closest(sel) === el);
+    };
+    if (!owns(cx, cy)) return { w: 0, h: 0 };
+    const walk = (dx: number, dy: number): number => {
+      let n = 0;
+      while (n < 80 && owns(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+      return n;
+    };
+    return { w: walk(-1, 0) + walk(1, 0) + 1, h: walk(0, -1) + walk(0, 1) + 1 };
+  }, selector);
 }
 
 /** Record every request the console makes to a path, for "did it actually call?" */

@@ -6,7 +6,9 @@
  * RAM-ring data as if it were the card's), and the 7/30-day branch used to
  * return three series instead of seven.
  */
-import { expect, openConsole, recordRequests, test } from './harness';
+// Touch gestures live in touch.spec.ts: they need a touchscreen, which the
+// desk project does not have.
+import { expect, inkedColumns, openConsole, openTip, recordRequests, test } from './harness';
 
 test('the four ranges are offered and 24H starts selected', async ({ page }) => {
   await openConsole(page);
@@ -32,6 +34,34 @@ for (const [days, title] of [
     await expect
       .poll(() => fetches.some((r) => new RegExp(`days=${days}\\b`).test(r.url())))
       .toBeTruthy();
+  });
+}
+
+/**
+ * A relabelled chart is not a plotted one.
+ *
+ * Every assertion above this was satisfied by a 7D button that fetched, said
+ * "LAST 7 DAYS", and drew nothing -- which is exactly what the console did:
+ * the wide ranges arrive decimated (~2400 s per row at 7 days against the
+ * device's 300 s cadence), and measuring that step against interval_s flagged
+ * every row as an outage, so every line broke into invisible one-point
+ * segments. Ink on the canvas and a filled readout are what distinguish a
+ * range that works from one that only announces itself.
+ */
+for (const days of ['7', '30', '60'] as const) {
+  test(`the ${days}-day range actually plots its data`, async ({ page }) => {
+    await openConsole(page);
+    await page.locator(`#ranges button[data-d="${days}"]`).click();
+    await expect(page.locator('#chtitle')).toHaveText(new RegExp(`${days} DAYS`, 'i'));
+    await expect
+      .poll(() => inkedColumns(page, 'cv_t'), {
+        message: `the ${days}-day chart is blank`,
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(100);
+    await expect(page.locator('#roT')).toContainText('°');
+    // And nothing apologises: a working range needs no explanation.
+    await expect(page.locator('#tcap')).not.toContainText(/could not|no samples/i);
   });
 }
 
@@ -126,27 +156,36 @@ test('leaving the plots returns the hero to now', async ({ page }) => {
   await expect(page.locator('#stamp')).toHaveText('NOW');
 });
 
-// The explanations behind the status strip. Note the handlers sit on .bit, not
-// on the value span inside it -- a selector that lands on the child silently
-// clicks nothing, which is how this test failed the first time.
-test('a status bit explains itself on hover', async ({ page }) => {
+/**
+ * The moment being pointed at has to be READABLE, and not only under the
+ * finger. On a phone the hero stamp has scrolled off the top by the time a
+ * thumb reaches the plots and the hand covers the crosshair, so the chart
+ * header carries it too -- that is the only copy a touch user can see.
+ */
+test('scrubbing names the moment above the plots', async ({ page }) => {
   await openConsole(page);
-  const bits = page.locator('#stats .bit');
-  expect(await bits.count(), 'the status strip rendered nothing').toBeGreaterThan(0);
-  await expect(page.locator('#tip')).toHaveClass(/hide/);
-  await bits.first().hover();
-  await expect(page.locator('#tip')).not.toHaveClass(/hide/);
-  await expect(page.locator('#tipt')).not.toBeEmpty();
-  await expect(page.locator('#tipb')).not.toBeEmpty();
+  await expect(page.locator('#chtitle')).toHaveText(/24 HOURS/i);
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  // A clock, not merely "not NOW": a scrub readout with no time answers nothing.
+  await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}:\d{2}/);
+  await expect(page.locator('#stamp')).toHaveText(/\d{1,2}:\d{2}/);
+  // And the per-row readout tracks the same sample.
+  await expect(page.locator('#roT')).toContainText('°');
 });
 
-/**
- * Hover is useless on the phone in the garage, so the bit is click-to-toggle
- * as well. Written as a TOGGLE rather than "click shows it" on purpose: with a
- * real pointer the click is preceded by mouseenter, which has already opened
- * the tip, so the click closes it. Asserting "click shows" passes only on
- * touch and fails on a desk -- which is exactly how this test failed first.
- */
+test('a scrubbed moment on a multi-day range carries its date', async ({ page }) => {
+  await openConsole(page);
+  await page.locator('#ranges button[data-d="7"]').click();
+  await expect(page.locator('#chtitle')).toHaveText(/7 DAYS/i);
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.5);
+  // "15:27" happens once a day for a week; the day is the point of the range.
+  await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}\/\d{1,2} \d{1,2}:\d{2}/);
+});
+
 test('a status bit toggles on click', async ({ page }) => {
   await openConsole(page);
   const bit = page.locator('#stats .bit').first();
@@ -161,13 +200,19 @@ test('a status bit toggles on click', async ({ page }) => {
   expect(await hidden()).toBe(afterFirst);
 });
 
+/**
+ * Every bit explains something DIFFERENT -- a content assertion, not a hover
+ * one, so it runs on both projects and drives the tips the way each platform
+ * does (tap on the phone, hover on the desk). It caught a real defect once: the
+ * strip rendered seven bits that all opened the same tooltip.
+ */
 test('each status bit explains something different', async ({ page }) => {
   await openConsole(page);
   const bits = page.locator('#stats .bit');
   const seen = new Set<string>();
   const n = Math.min(await bits.count(), 4);
   for (let i = 0; i < n; i++) {
-    await bits.nth(i).hover();
+    await openTip(page, bits.nth(i));
     await expect(page.locator('#tip')).not.toHaveClass(/hide/);
     seen.add(((await page.locator('#tipt').textContent()) ?? '').trim());
   }
@@ -214,4 +259,114 @@ test('a controller with no restart marks still draws its charts', async ({ page 
   await openConsole(page);
   await expect(page.locator('#cv_t')).toBeVisible();
   await expect(page.locator('#tcap')).not.toContainText(/could not load/i);
+});
+
+/**
+ * The chart must not move while a finger is reading it.
+ *
+ * Four separate causes so far, all the same shape -- something above the plots
+ * re-measures when the scrub content replaces the live content:
+ *
+ *  1. the sticky readout grew when it gained a weekday at 7D (+32 px);
+ *  2. the state sentence wraps to a different line count when it describes a
+ *     past moment (-17 px at 412, +19 px at 320);
+ *  3. the hero badge went from `NOW` to `19:33 · 13H20 AGO`, which widened the
+ *     hero's first column until the third column wrapped to a second row
+ *     (+79 px) -- CI caught this one and local runs could not, because the
+ *     webfonts do not load here and the fallback metrics are narrower;
+ *  4. the same badge at 7D, 25 characters wide.
+ *
+ * These assertions are deliberately font-INDEPENDENT: each one says "this box
+ * is the same size before and after", which is true in any font, rather than
+ * naming pixel values that only hold in one. Both phone widths, because 320 and
+ * 412 wrap the hero differently and (2) only showed up at 320.
+ */
+for (const width of [320, 412] as const) {
+  for (const days of ['1', '7', '30'] as const) {
+    test(`starting a scrub moves nothing at ${width}px on the ${days}-day range`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 320 ? 568 : 839 });
+      await openConsole(page);
+      if (days !== '1') await page.locator(`#ranges button[data-d="${days}"]`).click();
+      await page.locator('#cv_t').scrollIntoViewIfNeeded();
+
+      const shape = () =>
+        page.evaluate(() => {
+          const box = (sel: string) => {
+            const el = document.querySelector(sel);
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { top: +(r.top + scrollY).toFixed(1), h: +r.height.toFixed(1), w: +r.width.toFixed(1) };
+          };
+          const hero = document.getElementById('hero')!;
+          return {
+            plotTop: box('#cv_t')!.top,
+            hero: box('#hero'),
+            // Column tops, so a rewrap is caught even if the height did not
+            // happen to change with it.
+            heroCols: [...hero.children].map((c) => +(c.getBoundingClientRect().top + scrollY).toFixed(1)),
+            reason: box('#reason'),
+            chead: box('#chead'),
+            stampW: box('#stamp')!.w,
+          };
+        });
+
+      const before = await shape();
+      const plot = await page.locator('#cv_t').boundingBox();
+      if (!plot) return;
+      await page.mouse.move(plot.x + plot.width * 0.5, plot.y + plot.height * 0.5);
+      await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}:\d{2}/);
+      const after = await shape();
+
+      // The badge's fixed footprint is the MECHANISM behind the hero half: a
+      // constant-width box cannot re-measure the column it sits in.
+      expect(after.stampW, 'the hero badge changed width on scrub').toBe(before.stampW);
+      expect(after.hero, 'the hero re-measured on scrub').toEqual(before.hero);
+      expect(after.heroCols, 'a hero column moved on scrub').toEqual(before.heroCols);
+      expect(after.reason, 'the state sentence re-measured on scrub').toEqual(before.reason);
+      expect(after.chead, 'the sticky readout re-measured on scrub').toEqual(before.chead);
+      expect(after.plotTop, 'the plot moved under the scrub').toBe(before.plotTop);
+    });
+  }
+}
+
+test('the row chips are thumb-sized and say the strip continues', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  const chips = page.locator('#chips');
+  // Seven chips need 332 px in a 288 px column, so at this width the strip
+  // MUST advertise itself as scrollable -- a silent clip reads as a bug.
+  await expect(chips).toHaveClass(/more/);
+  for (const i of [0, 3, 6]) {
+    const b = await page.locator('#chips button').nth(i).boundingBox();
+    expect(b!.height, `chip ${i} is under 44 px tall`).toBeGreaterThanOrEqual(44);
+  }
+  // NOX is the last one and the one that used to be unreachable.
+  await chips.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+  await expect(chips).not.toHaveClass(/more/);
+  const inView = await page.evaluate(() => {
+    const host = document.getElementById('chips')!;
+    const nox = host.querySelector('[data-key="nox"]')!.getBoundingClientRect();
+    const box = host.getBoundingClientRect();
+    return nox.left >= box.left - 1 && nox.right <= box.right + 1;
+  });
+  expect(inView, 'NOX is still not on screen after scrolling to the end').toBeTruthy();
+  await page.locator('#chips button[data-key="nox"]').click();
+  await expect(page.locator('#sub_n')).not.toHaveClass(/hide/);
+});
+
+test('the range chips are thumb-sized and separated', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  const boxes = await page.locator('#ranges button').evaluateAll((els) =>
+    els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, w: r.width, h: r.height }; }),
+  );
+  expect(boxes).toHaveLength(4);
+  for (const [i, b] of boxes.entries()) {
+    expect(b.w, `range chip ${i} is ${b.w} px wide`).toBeGreaterThanOrEqual(44);
+    expect(b.h, `range chip ${i} is ${b.h} px tall`).toBeGreaterThanOrEqual(44);
+  }
+  // Adjacent chips must not share an edge, or one thumb hits two ranges.
+  for (let i = 1; i < boxes.length; i++) {
+    expect(boxes[i]!.x - (boxes[i - 1]!.x + boxes[i - 1]!.w)).toBeGreaterThanOrEqual(4);
+  }
 });

@@ -5,6 +5,7 @@
 // page has no framework: the whole thing ships inside the firmware image.
 
 import { at } from './dom.js';
+import { axisLabel } from './format.js';
 import type { Series } from './series.js';
 import type { BootMark } from './types.js';
 import { hasData } from './series.js';
@@ -101,6 +102,17 @@ export function xAtTime(s: Series, t: number, W: number): number | null {
 
 const yAt = (v: number, H: number, s: Scale): number =>
   H - 6 - ((v - s.min) * (H - 16)) / (s.max - s.min);
+
+/**
+ * Coarsest row spacing the overnight stripes still describe honestly.
+ *
+ * Night is derived per ROW, so a stripe edge can only land where a row does.
+ * At the 24 h and 7 day resolutions (300 s and ~2400 s) that is within an hour
+ * of the real 20:00/06:00 boundary. At 30 and 60 days each row covers 2.6 and
+ * 5.1 hours, so the same shading would place sunset up to half a night out and
+ * render as banding that says nothing. No stripes beats wrong stripes.
+ */
+const NIGHT_MAX_STEP = 3600;
 
 /** The dim overnight stripes behind the temperature trace. */
 function shadeNights({ c, W, H }: Surface, s: Series): void {
@@ -298,7 +310,7 @@ export function drawTemperature(
     placeholder(surf, 'no data');
     return;
   }
-  frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, true);
+  frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, s.step <= NIGHT_MAX_STEP);
 
   fillDifferential(surf, s, sc);
 
@@ -459,13 +471,7 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
   for (let i = 0; i < s.n; i += step) {
     const t = s.ts(i);
     if (t === null) continue;
-    const d = new Date(t * 1000);
-    // Multi-day ranges carry the hour too: without it two ticks can both read
-    // "8/3" and the axis looks broken.
-    const label =
-      days === 1
-        ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-        : `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}h`;
+    const label = axisLabel(t, days);
     const x = Math.min(Math.max(xAt(s, i, W), 22), W - 24);
     if (x - lastX < perLabel * 0.6) continue;
     lastX = x;

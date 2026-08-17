@@ -1,4 +1,9 @@
-:root{--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#5a6472;--fai:#4d5765;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
+/* --dim and --fai carry LABELS, so they are contrast-bound, not taste: at
+   #5a6472 and #4d5765 they measured 3.22:1 and 2.65:1 against --bg at ~10 px,
+   in a garage, on a phone. Lifted to 5.32:1 and 4.77:1 -- past the 4.5:1 floor
+   with the inactive state of a control still legible. The bright values
+   (--tx 15.9:1) deliberately did not move. */
+:root{--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#7d8795;--fai:#757f8c;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg)}
 body{font-family:var(--sans);color:var(--tx);min-height:100vh;padding:0 40px 40px;-webkit-text-size-adjust:100%}
@@ -15,6 +20,14 @@ button{font-family:inherit}
 #brand{font:600 12px var(--mono);letter-spacing:.14em;color:var(--dim);white-space:nowrap}
 #rule{flex:1;height:1px;background:var(--ln)}
 #hbits{display:flex;gap:16px;align-items:center;font:500 11px var(--mono);color:var(--dim);white-space:nowrap}
+/* The navigation lives OUTSIDE the status chips so the two can be laid out
+   independently. Measured on an iPhone SE: one nowrap row of brand + chips +
+   SETTINGS wants ~394 px against a 320 px screen, so the row overflowed, the
+   document became wider than the viewport (the whole page panned sideways),
+   and SETTINGS -- which from the settings screen is also the only way BACK --
+   sat off the right edge where nothing could reach it. */
+#hnav{display:flex;gap:10px;align-items:center;font:500 11px var(--mono);color:var(--dim);white-space:nowrap}
+#hmq{font:500 11px var(--mono);color:var(--dim);white-space:nowrap}
 #hmq.up{color:var(--ok)}
 /* No contact with the device. Everything on screen is a last-known value, so
    the whole page is dimmed rather than only the broker chip -- a lone red
@@ -29,14 +42,29 @@ button{font-family:inherit}
    values". Colour drains out; text contrast stays. The "● NO CONTACT" chip
    carries the state in words, not by colour alone. */
 body.offline #console,body.offline #settings{filter:saturate(.25)}
-#nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0}
+/* The hit area grows, the BOX does not: padding here would push the header --
+   and with it the hero, the pills and the whole fold budget -- down by the same
+   amount, undoing the 11 px that getting this row onto one line bought. Same
+   trick as .tgl and #scclose. */
+#nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0;position:relative}
+#nav::after{content:'';position:absolute;inset:-17px -12px}
 #nav.on{color:var(--tx)}
 
 /* ---- console hero ---- */
 #conmain{display:grid;grid-template-columns:1fr 164px;gap:28px;align-items:start}
 #hero{display:flex;align-items:flex-start;gap:44px;flex-wrap:wrap}
-#stamp{font:500 10px var(--mono);letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:var(--pop);color:var(--dim)}
+/* A FIXED footprint, in ch so it tracks whatever monospace actually renders.
+   Every state this badge can be in -- NOW, a clock, an age, NO CONTACT -- is
+   drawn in the same box, so changing states cannot re-measure the hero column
+   it sits in. 9ch + 8 px of padding stays under the width of the 62 px
+   temperature directly below it, which is what makes the column's width depend
+   on the reading rather than on the badge. */
+#stamp{font:500 11px var(--mono);letter-spacing:.08em;padding:2px 4px;border-radius:3px;background:var(--pop);color:var(--dim);min-width:9ch;text-align:center;white-space:nowrap}
 #stamp.scrub{background:rgba(232,131,74,.16);color:var(--or)}
+/* Not current, and not yet declared unreachable: the badge carries the age of
+   the last answer instead of the word NOW. Amber rather than red -- one missed
+   poll is not a verdict. */
+#stamp.stale{background:rgba(232,131,74,.10);color:var(--or)}
 .t1{font:600 92px/.82 var(--sans);letter-spacing:-.045em;color:var(--or);margin-top:4px}
 .t2{font:600 62px/.82 var(--sans);letter-spacing:-.04em;margin-top:6px}
 .deg{opacity:.42}
@@ -57,7 +85,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 
 /* ---- action pills ---- */
 #acts{display:flex;gap:10px;margin-top:18px;align-items:center;flex-wrap:wrap}
-.pill{font-size:13.5px;padding:11px 22px;border-radius:999px;cursor:pointer;border:1px solid var(--pbd);background:transparent;color:var(--tx)}
+.pill{font-size:13.5px;padding:11px 22px;min-height:44px;border-radius:999px;cursor:pointer;border:1px solid var(--pbd);background:transparent;color:var(--tx)}
 #bauto.on{background:var(--ok);border-color:var(--ok);color:#fff}
 #boff{border-color:#3a2626;color:#e0a9a9}
 #boff.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
@@ -72,7 +100,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #pwmrow{display:flex;align-items:center;gap:8px;margin-top:3px}
 #pwmval{font-size:15px;border-bottom:1px dotted var(--pbd);color:var(--tx)}
 #pwmval.lit{color:var(--ac)}
-#pwmhint{font:500 9px var(--mono);letter-spacing:.1em;color:#3d4653}
+#pwmhint{font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
 #pwmhint.lit{color:var(--ac)}
 #pwmcard{position:absolute;bottom:100%;left:-14px;margin-bottom:12px;width:250px;background:var(--pop);border:1px solid var(--pbd);border-radius:8px;padding:11px 13px 10px;box-shadow:0 12px 34px rgba(0,0,0,.6);z-index:6}
 #pwmcard h4{font:600 9.5px var(--mono);letter-spacing:.14em;color:var(--ac);margin:0}
@@ -88,7 +116,10 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:#4a5a6e}
 #scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:#4a5a6e}
 #scknobs span{padding:3px 7px;border:1px solid #1c2b3d;border-radius:3px}
-#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
+/* The scope's only way out, at 50x13 before this. Hit area only, again: the
+   scope bar is a fixed-height strip and padding would reflow it. */
+#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim);position:relative}
+#scclose::after{content:'';position:absolute;inset:-17px -12px}
 #cv_pw{display:block;width:100%;height:154px}
 #scstats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#16212e;border-top:1px solid #16212e}
 #scstats div{background:#080d14;padding:10px 2px 9px;text-align:center;border-top:2px solid var(--out)}
@@ -96,12 +127,12 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #scstats .sv{font:500 15px var(--mono);margin-top:5px}
 #captop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 #captop b{font:600 9.5px var(--mono);letter-spacing:.14em;color:#4a5a6e;font-weight:600}
-#captop i{font-size:11.5px;color:#3d4653;font-style:normal}
+#captop i{font-size:11.5px;color:var(--fai);font-style:normal}
 #capgrid{display:grid;grid-template-columns:repeat(13,1fr);gap:2px;margin-top:8px}
 #capgrid button{padding:6px 0 5px;border:1px solid #16212e;border-radius:4px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s;background:#080d14}
 #capgrid button:hover{border-color:var(--ac)}
 #capgrid button.on{background:rgba(59,130,246,.16);border-color:var(--ac)}
-#capgrid .ck{font:500 9px var(--mono);letter-spacing:.06em;color:#3d4653}
+#capgrid .ck{font:500 10px var(--mono);letter-spacing:.06em;color:var(--fai)}
 #capgrid .cu{font:500 10.5px var(--mono);margin-top:3px;color:var(--dim)}
 #capgrid button.on .ck{color:#cfe0f2}
 #capgrid button.on .cu{color:#d6e8ff}
@@ -110,20 +141,35 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 /* ---- speed rail ---- */
 #rail{display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:40px}
 #railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em}
+/* The value under a live thumb, before the command goes out (rail.ts). */
+#railnum.pick{color:var(--ac)}
 #stack{display:flex;flex-direction:column-reverse;gap:3px;width:100%;margin-top:4px}
 #stack button{height:19px;border-radius:4px;border:1px solid var(--ln);background:#12161d;cursor:pointer;transition:background .15s;padding:0}
 
 /* ---- charts ---- */
 #charts{margin-top:36px}
-#chead{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ln);padding-bottom:2px;flex-wrap:wrap}
-#chead .ct{font:600 11px var(--mono);letter-spacing:.1em;color:var(--mut);padding-bottom:6px}
-#chead .cl{font:500 10px var(--mono);letter-spacing:.1em;color:#3d4653;padding-bottom:6px}
+#chead{display:flex;align-items:center;gap:12px;padding-bottom:2px}
+#chctl{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ln);padding-bottom:2px;flex-wrap:wrap}
+#chead .ct{flex:1 1 100%;font:600 12px var(--mono);letter-spacing:.1em;color:var(--mut);padding-bottom:6px}
+/* The title slot IS the scrub readout (see history_view.ts::paintChartTitle):
+   it sits directly above the plots and never under the hand, which the
+   crosshair and the hero stamp cannot both claim on a phone. */
+/* Colour changes, size does not: at 11 px idle and 12 px scrubbing this line
+   grew by a pixel the instant a finger touched the chart, and everything below
+   it -- including the plot being read -- moved with it. */
+#chead .ct.scrub{color:var(--or)}
+#chctl .cl{font:500 10px var(--mono);letter-spacing:.1em;color:var(--fai);padding-bottom:6px}
 #chips{display:flex;gap:12px}
 #chips button{background:none;padding:4px 0 6px;cursor:pointer;font:500 10px var(--mono);letter-spacing:.1em;border:0;border-bottom:2px solid transparent;color:var(--fai)}
 #ranges{margin-left:auto;display:flex;gap:14px;font:500 10px var(--mono);letter-spacing:.08em;padding-bottom:6px}
 #ranges button{background:none;border:0;padding:0;cursor:pointer;font:inherit;color:var(--dim)}
 #ranges button.on{color:var(--tx)}
-#plots{cursor:crosshair}
+/* pan-y: the browser keeps vertical scrolling, we keep horizontal drags.
+   Scrubbing is a horizontal gesture, so declaring that up front lets the
+   compositor scroll a vertical swipe over the charts WITHOUT waiting on a
+   handler -- the JS axis lock in app.ts still decides per gesture, this only
+   removes the frame of hesitation before the page moves. */
+#plots{cursor:crosshair;touch-action:pan-y}
 .crow{display:flex;align-items:baseline;gap:12px;margin:12px 0 2px}
 .crow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--mut)}
 .crow .cd{font-size:11.5px;color:var(--dim)}
@@ -150,7 +196,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #statwrap{position:relative;margin-top:22px}
 #stats{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font:500 11px var(--mono);letter-spacing:.04em}
 #stats span.bit{cursor:help;display:flex;gap:6px;border-bottom:1px dotted var(--bd);padding-bottom:2px}
-#stats span.bit>b{color:#3d4653;font-weight:500}
+#stats span.bit>b{color:var(--dim);font-weight:500}
 #tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:12px;width:440px;max-width:calc(100vw - 40px);background:var(--pop);border:1px solid var(--pbd);border-radius:7px;padding:11px 14px;box-shadow:0 10px 30px rgba(0,0,0,.55);z-index:5}
 #tipt{font:600 10px var(--mono);letter-spacing:.12em}
 #tipb{font-size:13px;color:#b9c1cc;margin-top:5px;line-height:1.5;text-wrap:pretty}
@@ -168,42 +214,125 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 .grow .rlab{font-size:14.5px;color:var(--tx)}
 .grow .rh{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.45;text-wrap:pretty}
 .stp{display:flex;align-items:center}
-.stp button{width:28px;height:28px;border:1px solid var(--bd);background:#12161d;color:var(--mut);cursor:pointer;font:500 15px var(--mono)}
+.stp button{width:44px;height:44px;border:1px solid var(--bd);background:#12161d;color:var(--mut);cursor:pointer;font:500 15px var(--mono)}
 .stp button:first-child{border-radius:5px 0 0 5px;border-right:0}
 .stp button:last-child{border-radius:0 5px 5px 0;border-left:0}
-.stp span{min-width:90px;height:28px;line-height:28px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px var(--mono);color:var(--tx)}
+/* The line-height rides INSIDE the font shorthand (12.5px/44px). Declared
+   separately it was silently dropped: `font:` resets line-height to normal, and
+   the shorthand came after it, so the value sat top-aligned in its 44 px box
+   instead of centred in it -- introduced by the same change that grew the
+   stepper to 44 px for a thumb. */
+.stp span{min-width:90px;height:44px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px/44px var(--mono);color:var(--tx)}
+/* The pill stays 42x24 -- it reads correctly at that size -- and the ::after
+   grows the HIT area to 44 px without painting anything, the same trick the
+   rail uses. A switch you have to aim at is a switch you toggle by accident. */
 .tgl{width:42px;height:24px;border-radius:999px;border:1px solid var(--bd);cursor:pointer;position:relative;padding:0;transition:background .15s;background:#12161d}
+.tgl::after{content:'';position:absolute;inset:-10px;border-radius:999px}
 .tgl i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;transition:left .15s;background:var(--fai)}
 .tgl.on{background:rgba(34,160,107,.30);border-color:var(--ok)}
 .tgl.on i{left:22px;background:var(--ok)}
 .rtx{font:500 12.5px var(--mono);color:var(--mut);text-align:right}
 .acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.acts button,.acts a{padding:7px 14px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;white-space:nowrap;line-height:1.15;background:transparent;color:var(--tx);text-decoration:none;display:inline-block}
+.acts button,.acts a{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;white-space:nowrap;line-height:1.15;background:transparent;color:var(--tx);text-decoration:none;display:inline-block}
 .acts .danger{border-color:#3a2626;color:#e0a9a9}
-.fld{font-size:12.5px;padding:6px 8px;border-radius:5px;background:#0e1218;color:var(--tx);border:1px solid var(--bd);font-family:var(--mono);max-width:190px}
+.fld{font-size:12.5px;padding:11px 10px;min-height:44px;border-radius:5px;background:#0e1218;color:var(--tx);border:1px solid var(--bd);font-family:var(--mono);max-width:190px}
 /* The native file input needs room for its own "No file chosen" text, which
    190px clips mid-word. Let it size to content, bounded by the row. */
 .fld[type=file]{max-width:100%;width:auto}
 .fld::file-selector-button{font:500 11px var(--mono);letter-spacing:.06em;padding:4px 9px;margin-right:9px;border-radius:4px;border:1px solid var(--pbd);background:#12161d;color:var(--mut);cursor:pointer}
 #otarow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-#otarow button{padding:7px 14px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
+#otarow button{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
 #otamsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;margin-top:6px}
 
 @media(max-width:900px){
 body{padding:0 16px 32px}
-#top{gap:8px}
+/* Vertical budget on a phone. Every number below was a gap that existed only
+   because a 1136 px desk layout could afford it: on a 568 px screen they added
+   up to most of a fold, and the charts -- the thing the console is opened for
+   in the garage -- started below y=728 on a 839 px Pixel. Trimmed, not
+   removed: the hero, the sentence and the pills keep their own breathing room.
+   Measured: ~70 px recovered above the plots. */
+#top{gap:8px;padding:14px 0 12px}
 #hbits{gap:9px}
-.crow{flex-wrap:wrap}
+#gauge{margin-top:16px}
+#reason{margin-top:12px;min-height:0}
+#acts{margin-top:14px}
+.crow{flex-wrap:wrap;margin:4px 0 2px}
+/* The prose hint is desktop-only, but an EXPLANATION is not decoration: a
+   failed load, an empty range or a card that cannot cover the window has to
+   say so on the screen where it is most likely to be seen. */
 .crow .cd{display:none}
-#conmain{grid-template-columns:1fr;gap:22px}
-#hero{gap:26px}
+.crow .cd.note{display:block;color:var(--or);flex-basis:100%}
+#conmain{grid-template-columns:1fr;gap:14px}
+#hero{gap:18px}
 .t1{font-size:62px}.t2{font-size:40px}
-.hcol{padding-top:10px}
+.hcol{padding-top:6px}
+#stamp{font-size:11px;padding:3px 7px}
+/* The scrub readout stays on screen while a thumb works down 370 px of plots:
+   the moment being read is useless if it has scrolled off the top. ONE line
+   pins, not the whole header -- three sticky rows were 93 px, 16% of a 568 px
+   screen, and the range buttons are a before-the-gesture control that has no
+   business covering the plot during one.
+   The readout also owns its line outright (`.ct{flex:1 1 100%}`), because when
+   it gained the weekday at 7D it no longer fitted beside ADD ROW: that pushed
+   ADD ROW onto its own line and shoved the whole sticky plot stack 32 px DOWN
+   mid-gesture -- the chart moving out from under the finger reading it. */
+#chead{position:sticky;top:0;z-index:4;background:var(--bg);padding-top:2px;padding-bottom:2px}
+/* Two 44 px control rows are worth 24 px of gap elsewhere: the targets are the
+   requirement, the padding around them was not. */
+#chctl{gap:8px;padding-bottom:0}
+/* ADD ROW is a label, not a control, and at phone width it was a 2.03:1 grey
+   crowding the readout. The chips underneath say the same thing by being
+   tappable. */
+#chctl .cl{display:none}
+/* Seven row toggles want 332 px and a small phone has 288. A contained
+   scroller keeps every chip reachable without wrapping (which would cost a
+   line) -- but a scroller that stops politely at the 16 px body padding reads
+   as a clipping bug: VOC was chopped mid-glyph with dead space beyond it, and
+   nothing said the row continued. So it bleeds to the screen edge (the cut
+   lands where a cut means "more"), fades at that edge while there IS more (the
+   `more` class, set from the scroll position in app.ts), and snaps. */
+#chips{flex:1 1 100%;min-width:0;overflow-x:auto;margin:0 -16px;padding:0 16px;
+  scroll-snap-type:x proximity;scrollbar-width:none}
+#chips::-webkit-scrollbar{display:none}
+#chips.more{mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 34px),transparent 100%)}
+#chips button{scroll-snap-align:end;padding:12px 6px;min-height:44px}
 #rail{margin-right:0;align-items:stretch}
-#railtop{display:flex;align-items:baseline;gap:10px;justify-content:center}
-#stack{flex-direction:row;gap:4px}
-#stack button{flex:1;height:34px}
-#metrics{gap:24px}
+/* Anchored, not centred: `off` and `7` and `12` are different widths, so a
+   centred pair moved the number that matters to a different place in every
+   state. Label left, value right, both against the rail's own edges. */
+#railtop{display:flex;align-items:baseline;gap:10px;justify-content:space-between}
+/* The primary control. Twelve 20x34 px blocks with 4 px gutters is under half
+   a fingertip on the one thing you reach for in a garage, where a mis-tap
+   changes the fan speed. The row is 44 px tall and the whole rail is a DRAG
+   (rail.ts): sweeping a thumb along it previews each step and the command is
+   sent once on release, so accuracy is a gesture you can correct mid-flight
+   rather than twelve chances to hit the wrong bar. pan-y, so a vertical swipe
+   that happens to start on the rail still scrolls the page. */
+#stack{flex-direction:row;gap:4px;touch-action:pan-y}
+#stack button{flex:1;height:44px}
+/* B3's budget, and the last 54.5 px of it. At 320 the four stats need 248 px
+   of content against 288 available: they wrapped 3+1 only because 3x20 px of
+   gap pushed them to 308. At 12 px they fit on one row, which is what puts the
+   whole speed rail inside the first 568 px. */
+#metrics{gap:12px;margin-top:14px;padding-top:10px;flex-wrap:nowrap}
+/* `SIGNAL` was a 10 px label with no label of its own sitting on the value
+   baseline, and it made the PWM cell 97.8 px wide -- which is why the four
+   stats wrapped 3+1 and the rail fell off the screen. The dotted underline
+   under the value is the affordance; the word was decoration. (`LIVE ▾` goes
+   with it: when the scope is open you are looking at the scope.) */
+#pwmhint{display:none}
+#metrics>div{min-width:0}
+#charts{margin-top:8px}
+/* 11 px of ink was the entire hit area for `7D` -- and this row is how you
+   reach the 7-day chart. The glyph stays small; the target does not. The row
+   had 180 px of empty space to its left, so the padding is free. */
+#ranges{gap:6px;padding-bottom:0}
+#ranges button{padding:12px 8px;min-height:44px;min-width:44px}
+/* 250 px of temperature chart is 40% of a phone screen. 220 still carries the
+   diurnal shape and the differential band, and the 30 px it gives back are
+   what lift the plots into the first screenful instead of below it. */
+#cv_t{height:220px}
 #scstats{grid-template-columns:repeat(3,1fr)}
 #capgrid{grid-template-columns:repeat(7,1fr)}
 #odo{grid-template-columns:repeat(2,1fr)}
@@ -211,7 +340,33 @@ body{padding:0 16px 32px}
 .grp{grid-template-columns:1fr;gap:14px}
 .grow{flex-direction:column;align-items:flex-start;gap:10px}
 .grow .rl{max-width:none}
+/* A 146 px stepper in a 320 px column left two thirds of the row empty while
+   its own buttons were 28 px. Spanning the row costs nothing and buys the
+   target size (M6/H3 are one edit). */
+.stp{width:100%}
+.stp span{flex:1;min-width:0}
+.acts{width:100%}
+.acts button,.acts a{flex:1;text-align:center}
 .rtx,.acts{text-align:left;justify-content:flex-start}
+}
+
+/* Narrow phones: the header goes to two lines rather than one overflowing one.
+   Brand and the SETTINGS/back control keep the top line -- the same place they
+   occupy on a desk -- and the status meta wraps underneath, where it can be
+   read but never has to be reached. Deliberately not a hamburger: there are
+   four things in this header, and hiding a two-item nav behind a menu button
+   trades a reachable control for an extra tap. */
+@media(max-width:480px){
+#top{flex-wrap:wrap}
+/* One line again, and the 11 px it cost the fold goes back to the speed rail.
+   What stays is what a phone needs at a glance: the device name, whether the
+   controller is answering, and the way into settings. The firmware version and
+   the battery percentage moved to the diagnostics footer (STATUS_BITS), which
+   is where SLOT, VBAT and UPTIME already live -- so nothing was hidden, it was
+   filed with its own kind. */
+#hbits{display:none}
+#hmq{order:2}
+#hnav{order:3}
 }
 
 /* ---- update check (Settings > UPDATE) ---- */
@@ -223,7 +378,7 @@ body{padding:0 16px 32px}
 .updmuted{color:var(--dim)}
 .updlink{color:var(--out);text-decoration:none;border-bottom:1px dotted var(--pbd)}
 .updlink:hover{color:var(--tx)}
-.updbtn{padding:6px 12px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-family:var(--sans);font-size:12.5px;background:transparent;color:var(--tx)}
+.updbtn{padding:12px 14px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-family:var(--sans);font-size:12.5px;background:transparent;color:var(--tx)}
 @media(max-width:900px){.upd,.updline{text-align:left;justify-content:flex-start}}
 
 /* The e-ink mirror in the settings drawer. The canvas is nearest-neighbour

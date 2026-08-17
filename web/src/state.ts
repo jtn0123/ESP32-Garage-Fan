@@ -41,6 +41,26 @@ export interface View {
   lastOk: number;
   /** True once contact has been lost long enough to distrust what is shown. */
   offline: boolean;
+  /**
+   * Consecutive failed state polls, 0 while the device is answering.
+   *
+   * The offline VERDICT waits for several of these; this is what lets the page
+   * stop saying `NOW` on the very first one, so the decay is visible before the
+   * verdict lands rather than 45 seconds of confident-looking numbers.
+   */
+  pollFail: number;
+  /**
+   * When this page load started, as the fallback reference for `pollFail`.
+   *
+   * The offline check used to be gated on `lastOk`, which is 0 until a poll
+   * succeeds -- so a console opened COLD against a dead controller never went
+   * offline at all and sat on "Connecting to the controller…" forever. That is
+   * the common case: you walk into the garage and open the page because the fan
+   * is not running.
+   */
+  startedAt: number;
+  /** Speed under a live rail drag, or null. Outranks the device's own speed. */
+  railPick: number | null;
 }
 
 export const view: View = {
@@ -64,6 +84,9 @@ export const view: View = {
   raf: null,
   lastOk: 0,
   offline: false,
+  pollFail: 0,
+  startedAt: Date.now(),
+  railPick: null,
 };
 
 export const ROW_IDS: Record<RowKey, { sub: string; canvas: string; readout: string }> = {
@@ -92,6 +115,8 @@ export const STATUS_BITS = [
     'What the Tapo watt meter on the fan’s supply actually measures, polled out of Home Assistant by the controller. This is the fan link’s only feedback — the control wire has no tach — so a draw that disagrees with the commanded speed is the one signal that catches a fan not obeying.'),
   bit('GAS', 'GAS BOOST',
     'Bad air overrides a resting thermostat: while the SGP41’s VOC index is above the trigger, auto mode holds at least the boost speed — a car started in the garage spins the fan up even when the temperature says rest. Trigger, speed and the on/off switch live in Settings › Auto mode.'),
+  bit('FW', 'RUNNING FIRMWARE',
+    'The image this controller is currently executing. The header carries it too on a wide screen; on a phone it lives here, beside the slot it booted from. Settings › Update compares it against the latest published release and can flash a new one over the air.'),
   bit('UPTIME', 'TIME SINCE BOOT',
     'How long the controller has been running without a reboot. A number that keeps resetting to zero usually means brownouts on the supply rather than a firmware crash — the status line also carries the previous boot’s cause of death.'),
   bit('SLOT', 'FIRMWARE SLOT',

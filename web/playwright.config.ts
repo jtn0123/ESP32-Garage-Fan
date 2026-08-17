@@ -52,11 +52,30 @@ export default defineConfig({
   },
 
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'desktop',
+      use: { ...devices['Desktop Chrome'] },
+      // A desk browser has no touchscreen, so the gesture specs cannot run
+      // here at all. Excluded rather than skipped at runtime: a skip that can
+      // never become a pass is noise in every report, and noise in the skip
+      // count is where a real skip would hide.
+      testIgnore: /touch\.spec\.ts/,
+    },
     // The console is used from a phone in the garage at least as often as from
     // a desk, and the layout has a real breakpoint. Running the whole suite in
     // both catches the "works until you shrink it" class of bug.
-    { name: 'mobile', use: { ...devices['Pixel 7'] } },
+    {
+      name: 'mobile',
+      use: { ...devices['Pixel 7'] },
+      // A phone cannot hover. Playwright will happily synthesise one, which is
+      // how a tooltip that opens on hover and closes on the tap that follows it
+      // stayed green here for two rounds while being dead on the device -- the
+      // hover handlers are now bound only where `(hover: hover)` matches, so
+      // these specs would be asserting a fiction. touch.spec.ts covers the same
+      // affordances by tapping. (The desk project excludes touch.spec.ts for the
+      // mirror-image reason.)
+      testIgnore: /hover\.spec\.ts/,
+    },
   ],
 
 });

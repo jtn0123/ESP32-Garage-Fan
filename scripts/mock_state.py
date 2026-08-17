@@ -84,7 +84,13 @@ STATS: Json = {
 SCEN: Json = {
     "card": True,
     "synced": True,
-    "rows": 288,
+    # Rows the CARD HOLDS, not rows a response returns: /api/history reads the
+    # requested window out of this and decimates it to 288 points, the way
+    # sdcard::read_range does. 17280 is 60 days at the 5-minute cadence, i.e. a
+    # card that can fill every range the console offers -- the default has to
+    # be a full card, or the long ranges are untestable here for the same
+    # reason they were broken there.
+    "rows": 60 * 288,
     "gap_at": None,
     "corrupt": False,
     "flat_rh": False,
@@ -110,8 +116,8 @@ ScenSpec = Union[type, Tuple[str, ...], Tuple[type, int, int]]
 SCEN_SPEC: dict[str, ScenSpec] = {
     "card": bool,
     "synced": bool,
-    "rows": (int, 0, 8640),
-    "gap_at": (int, 0, 8640),  # or None
+    "rows": (int, 0, 60 * 288),  # up to a full 60-day card
+    "gap_at": (int, 0, 8640),  # or None; an index into the RETURNED rows
     "corrupt": bool,
     "flat_rh": bool,
     "down": bool,
