@@ -42,7 +42,12 @@ button{font-family:inherit}
    values". Colour drains out; text contrast stays. The "● NO CONTACT" chip
    carries the state in words, not by colour alone. */
 body.offline #console,body.offline #settings{filter:saturate(.25)}
-#nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0}
+/* The hit area grows, the BOX does not: padding here would push the header --
+   and with it the hero, the pills and the whole fold budget -- down by the same
+   amount, undoing the 11 px that getting this row onto one line bought. Same
+   trick as .tgl and #scclose. */
+#nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0;position:relative}
+#nav::after{content:'';position:absolute;inset:-16px -12px}
 #nav.on{color:var(--tx)}
 
 /* ---- console hero ---- */
@@ -80,7 +85,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 
 /* ---- action pills ---- */
 #acts{display:flex;gap:10px;margin-top:18px;align-items:center;flex-wrap:wrap}
-.pill{font-size:13.5px;padding:11px 22px;border-radius:999px;cursor:pointer;border:1px solid var(--pbd);background:transparent;color:var(--tx)}
+.pill{font-size:13.5px;padding:11px 22px;min-height:44px;border-radius:999px;cursor:pointer;border:1px solid var(--pbd);background:transparent;color:var(--tx)}
 #bauto.on{background:var(--ok);border-color:var(--ok);color:#fff}
 #boff{border-color:#3a2626;color:#e0a9a9}
 #boff.on{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
@@ -111,7 +116,10 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:#4a5a6e}
 #scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:#4a5a6e}
 #scknobs span{padding:3px 7px;border:1px solid #1c2b3d;border-radius:3px}
-#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
+/* The scope's only way out, at 50x13 before this. Hit area only, again: the
+   scope bar is a fixed-height strip and padding would reflow it. */
+#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim);position:relative}
+#scclose::after{content:'';position:absolute;inset:-16px -12px}
 #cv_pw{display:block;width:100%;height:154px}
 #scstats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#16212e;border-top:1px solid #16212e}
 #scstats div{background:#080d14;padding:10px 2px 9px;text-align:center;border-top:2px solid var(--out)}

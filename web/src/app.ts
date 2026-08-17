@@ -361,6 +361,16 @@ export async function boot(): Promise<void> {
   });
 
   attachScrub($('plots'));
+  // Tap anywhere else to dismiss an open explanation. On a phone the tip has no
+  // mouseleave to close it, so without this the only way out was finding the
+  // same bit again. The `.bit` guard matters: this listener sees the same click
+  // that just opened the tip, on its way up to the document.
+  document.addEventListener('click', (e) => {
+    if (view.tip < 0) return;
+    if ((e.target as HTMLElement | null)?.closest('#stats .bit')) return;
+    view.tip = -1;
+    paintTip();
+  });
   window.addEventListener('resize', () => {
     drawAll();
     if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());

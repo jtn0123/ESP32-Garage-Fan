@@ -188,8 +188,16 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
     await use(`http://127.0.0.1:${mockPort}`);
   },
 
-  errors: async ({ page }, use) => {
+  // Wraps the built-in `page` so the route is installed before any test body
+  // can navigate. It was hooked onto `errors` first, which silently did nothing:
+  // see the note there.
+  page: async ({ page }, use) => {
     if (process.env['REAL_FONTS']) await serveWebfonts(page);
+    await use(page);
+  },
+
+  errors: [
+    async ({ page }, use) => {
     const errors: string[] = [];
     page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
@@ -200,7 +208,15 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
     // them); an uncaught exception never is.
     const fatal = errors.filter((e) => !/Failed to load resource/.test(e));
     expect(fatal, 'the page reported errors').toEqual([]);
-  },
+    },
+    // AUTO, which it was not. A fixture is only constructed when a test asks
+    // for it, and not one spec in this suite destructures `errors` -- so the
+    // console-error guard that exists "so it cannot be forgotten" was never
+    // running for a single test. Most console regressions surface first as an
+    // uncaught TypeError with the page still looking plausible, which is exactly
+    // what this was meant to catch.
+    { auto: true },
+  ],
 });
 
 export { expect };
@@ -322,6 +338,38 @@ export async function touchDrag(
 export async function touchRelease(page: Page): Promise<void> {
   const cdp = await touchSession(page);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/**
+ * The area a finger can actually hit, measured by probing, not by reading CSS.
+ *
+ * `boundingBox()` is the wrong instrument for three of this page's controls: the
+ * header nav, the scope's close button and the settings switch all keep a small
+ * PAINTED box on purpose (padding there would push the fold budget back down, or
+ * reflow a fixed-height strip) and grow their target with a transparent
+ * `::after`. A box measurement calls those 13 px tall; a person hits 45. So this
+ * walks outward from the centre asking the document what is under each point,
+ * which is the same question the browser asks on a tap.
+ */
+export async function hitBox(page: Page, selector: string): Promise<{ w: number; h: number }> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { w: 0, h: 0 };
+    const r = el.getBoundingClientRect();
+    const cx = Math.round(r.left + r.width / 2);
+    const cy = Math.round(r.top + r.height / 2);
+    const owns = (x: number, y: number): boolean => {
+      const hit = document.elementFromPoint(x, y);
+      return !!hit && (hit === el || el.contains(hit) || hit.closest(sel) === el);
+    };
+    if (!owns(cx, cy)) return { w: 0, h: 0 };
+    const walk = (dx: number, dy: number): number => {
+      let n = 0;
+      while (n < 80 && owns(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+      return n;
+    };
+    return { w: walk(-1, 0) + walk(1, 0) + 1, h: walk(0, -1) + walk(0, 1) + 1 };
+  }, selector);
 }
 
 /** Record every request the console makes to a path, for "did it actually call?" */

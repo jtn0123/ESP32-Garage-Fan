@@ -53,3 +53,46 @@ test('a horizontal drag scrubs without moving the page', async ({ page }) => {
   await touchRelease(page);
   await expect(page.locator('#stamp')).toHaveText('NOW');
 });
+
+// ------------------------------------------------------------ touch tooltips
+
+/**
+ * The six dotted underlines in the diagnostics footer, on a phone.
+ *
+ * They carried mouseenter/mouseleave AND click. A tap fires the pointer-enter
+ * compatibility event first, which opened the tip, and then the click toggled it
+ * -- so a single tap opened and closed it in one gesture and every one of those
+ * affordances was decoration on the device they matter most on. A click-only
+ * test passes against that bug, which is why this one taps.
+ */
+test('tapping a status bit opens its explanation and holds it', async ({ page }) => {
+  await openConsole(page);
+  const bit = page.locator('#stats .bit').first();
+  await bit.scrollIntoViewIfNeeded();
+  await expect(page.locator('#tip')).toHaveClass(/hide/);
+
+  const box = await bit.boundingBox();
+  if (!box) return;
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator('#tip')).not.toHaveClass(/hide/);
+  await expect(page.locator('#tipt')).not.toBeEmpty();
+  await expect(page.locator('#tipb')).not.toBeEmpty();
+
+  // A second tap on the same bit closes it again.
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator('#tip')).toHaveClass(/hide/);
+});
+
+test('tapping away closes an open explanation', async ({ page }) => {
+  await openConsole(page);
+  const bit = page.locator('#stats .bit').first();
+  await bit.scrollIntoViewIfNeeded();
+  const box = await bit.boundingBox();
+  if (!box) return;
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator('#tip')).not.toHaveClass(/hide/);
+  // On a phone there is no mouseleave to close it, so without a tap-away the
+  // only exit was finding the same bit again.
+  await page.touchscreen.tap(box.x + box.width / 2, box.y - 80);
+  await expect(page.locator('#tip')).toHaveClass(/hide/);
+});

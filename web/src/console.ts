@@ -305,6 +305,19 @@ function bitValues(): { value: string; colour: string }[] {
   ];
 }
 
+/**
+ * Does this device actually hover?
+ *
+ * The status bits carried mouseenter/mouseleave AND click, which on a touch
+ * screen is one gesture too many: a tap fires the pointer-enter compatibility
+ * event first (opening the tip), then the click toggles it -- so the tip opened
+ * and closed inside a single tap and all six dotted underlines were decoration
+ * on a phone. Binding the hover pair only where hover exists leaves the desk
+ * behaviour (read by hovering, which is the good one) untouched and lets the tap
+ * be a plain toggle.
+ */
+const CAN_HOVER = window.matchMedia?.('(hover: hover)').matches ?? true;
+
 export function paintBits(): void {
   const values = bitValues();
   if (!values.length) return;
@@ -316,14 +329,16 @@ export function paintBits(): void {
       const v = el('span', { textContent: values[n]?.value ?? '' });
       v.style.color = values[n]?.colour ?? DIM;
       span.append(v);
-      span.onmouseenter = () => {
-        view.tip = n;
-        paintTip();
-      };
-      span.onmouseleave = () => {
-        view.tip = -1;
-        paintTip();
-      };
+      if (CAN_HOVER) {
+        span.onmouseenter = () => {
+          view.tip = n;
+          paintTip();
+        };
+        span.onmouseleave = () => {
+          view.tip = -1;
+          paintTip();
+        };
+      }
       span.onclick = () => {
         view.tip = view.tip === n ? -1 : n;
         paintTip();

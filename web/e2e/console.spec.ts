@@ -4,7 +4,7 @@
  * These run against the same mock concurrently, so nothing here may flip a
  * scenario knob -- knob-flipping lives in scenarios.spec.ts, which is serial.
  */
-import { expect, openConsole, recordRequests, test } from './harness';
+import { expect, hitBox, openConsole, recordRequests, test } from './harness';
 
 test('loads, paints live data, and reports no errors', async ({ page }) => {
   await openConsole(page);
@@ -311,4 +311,33 @@ test('the speed rail is on the first screen at 320x568', async ({ page }) => {
   expect(geometry.scrollY, 'the page was already scrolled').toBe(0);
   expect(geometry.acts, 'the auto/off pills are below the fold').toBeLessThanOrEqual(568);
   expect(geometry.stack, 'the speed rail is below the fold').toBeLessThanOrEqual(568);
+});
+
+/**
+ * The controls the 44 px pass missed, measured as hit areas rather than boxes.
+ *
+ * `#nav` and `#scclose` keep a 13 px painted box deliberately -- padding on the
+ * header would push the fold budget back down, and the scope bar is a
+ * fixed-height strip -- so both grow their target with a transparent `::after`,
+ * and only a probe can see that. The pills are the exception: they are a real
+ * block in the flow and simply got taller.
+ */
+test('every touch control on the console screen is at least 44 px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+
+  for (const sel of ['#nav', '#bauto', '#boff']) {
+    const hit = await hitBox(page, sel);
+    expect(hit.h, `${sel} hit area is ${hit.h} px tall`).toBeGreaterThanOrEqual(44);
+    expect(hit.w, `${sel} hit area is ${hit.w} px wide`).toBeGreaterThanOrEqual(44);
+  }
+
+  // The scope's only dismissal, which needs the scope open to exist.
+  await page.locator('#pwmcell').click();
+  await expect(page.locator('#scope')).not.toHaveClass(/hide/);
+  const close = await hitBox(page, '#scclose');
+  expect(close.h, `#scclose hit area is ${close.h} px tall`).toBeGreaterThanOrEqual(44);
+  expect(close.w, `#scclose hit area is ${close.w} px wide`).toBeGreaterThanOrEqual(44);
+  await page.locator('#scclose').click();
+  await expect(page.locator('#scope')).toHaveClass(/hide/);
 });
