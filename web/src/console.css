@@ -48,7 +48,13 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 /* ---- console hero ---- */
 #conmain{display:grid;grid-template-columns:1fr 164px;gap:28px;align-items:start}
 #hero{display:flex;align-items:flex-start;gap:44px;flex-wrap:wrap}
-#stamp{font:500 11px var(--mono);letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:var(--pop);color:var(--dim)}
+/* A FIXED footprint, in ch so it tracks whatever monospace actually renders.
+   Every state this badge can be in -- NOW, a clock, an age, NO CONTACT -- is
+   drawn in the same box, so changing states cannot re-measure the hero column
+   it sits in. 9ch + 8 px of padding stays under the width of the 62 px
+   temperature directly below it, which is what makes the column's width depend
+   on the reading rather than on the badge. */
+#stamp{font:500 11px var(--mono);letter-spacing:.08em;padding:2px 4px;border-radius:3px;background:var(--pop);color:var(--dim);min-width:9ch;text-align:center;white-space:nowrap}
 #stamp.scrub{background:rgba(232,131,74,.16);color:var(--or)}
 /* Not current, and not yet declared unreachable: the badge carries the age of
    the last answer instead of the word NOW. Amber rather than red -- one missed

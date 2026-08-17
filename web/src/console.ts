@@ -12,8 +12,8 @@
 
 import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
-import { ago, airflow, cardTight, hoursMinutes, moment, signed, storage } from './format.js';
-import { minutesBack, paintChartTitle } from './history_view.js';
+import { ago, airflow, cardTight, clock, hoursMinutes, moment, signed, storage } from './format.js';
+import { paintChartTitle } from './history_view.js';
 import { paintRail } from './rail.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
@@ -152,7 +152,15 @@ export function paintHero(): void {
   const stamp = $('stamp');
   if (scrubbing) {
     const t = series.ts(i);
-    stamp.textContent = `${t === null ? '–' : moment(t, view.days)} · ${ago(minutesBack(series, i))}`;
+    // The CLOCK only -- no date, no age. This badge shares a flex row with the
+    // GARAGE label inside the hero's first column, so its width feeds straight
+    // into that column's width: at `19:33 · 13H20 AGO` (and worse, 25 characters
+    // at 7D) it outgrew the 92 px temperature beside it, the third hero column
+    // wrapped to a second row, and everything below -- pills, metric strip,
+    // rail, the whole chart stack -- slid 79 px DOWN mid-gesture. The full
+    // moment, weekday and age all live in the chart header readout, which is
+    // pinned above the plots and is the copy a thumb can actually see.
+    stamp.textContent = t === null ? '–' : clock(t);
     stamp.className = 'scrub';
   } else if (view.pollFail > 0) {
     // A poll has failed but the verdict has not landed yet. The reading on
