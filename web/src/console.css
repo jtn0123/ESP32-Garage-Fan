@@ -203,7 +203,12 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 .stp button{width:44px;height:44px;border:1px solid var(--bd);background:#12161d;color:var(--mut);cursor:pointer;font:500 15px var(--mono)}
 .stp button:first-child{border-radius:5px 0 0 5px;border-right:0}
 .stp button:last-child{border-radius:0 5px 5px 0;border-left:0}
-.stp span{min-width:90px;height:44px;line-height:44px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px var(--mono);color:var(--tx)}
+/* The line-height rides INSIDE the font shorthand (12.5px/44px). Declared
+   separately it was silently dropped: `font:` resets line-height to normal, and
+   the shorthand came after it, so the value sat top-aligned in its 44 px box
+   instead of centred in it -- introduced by the same change that grew the
+   stepper to 44 px for a thumb. */
+.stp span{min-width:90px;height:44px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px/44px var(--mono);color:var(--tx)}
 /* The pill stays 42x24 -- it reads correctly at that size -- and the ::after
    grows the HIT area to 44 px without painting anything, the same trick the
    rail uses. A switch you have to aim at is a switch you toggle by accident. */
