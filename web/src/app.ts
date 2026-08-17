@@ -12,7 +12,6 @@ import {
   paintHero,
   paintPwm,
   paintStats,
-  paintTip,
   setSettingsPainter,
   startScope,
   stopScope,
@@ -21,6 +20,7 @@ import {
 import { $, clear, el, show } from './dom.js';
 import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
 import { buildRail } from './rail.js';
+import { paintTip } from './status_bits.js';
 import { attachScrub, endScrub } from './scrub.js';
 import { drawPreview, drawScope } from './pwm.js';
 import { build } from './series.js';

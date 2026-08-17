@@ -47,7 +47,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
    amount, undoing the 11 px that getting this row onto one line bought. Same
    trick as .tgl and #scclose. */
 #nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0;position:relative}
-#nav::after{content:'';position:absolute;inset:-16px -12px}
+#nav::after{content:'';position:absolute;inset:-17px -12px}
 #nav.on{color:var(--tx)}
 
 /* ---- console hero ---- */
@@ -119,7 +119,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 /* The scope's only way out, at 50x13 before this. Hit area only, again: the
    scope bar is a fixed-height strip and padding would reflow it. */
 #scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim);position:relative}
-#scclose::after{content:'';position:absolute;inset:-16px -12px}
+#scclose::after{content:'';position:absolute;inset:-17px -12px}
 #cv_pw{display:block;width:100%;height:154px}
 #scstats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#16212e;border-top:1px solid #16212e}
 #scstats div{background:#080d14;padding:10px 2px 9px;text-align:center;border-top:2px solid var(--out)}

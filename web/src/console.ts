@@ -12,12 +12,13 @@
 
 import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
-import { ago, airflow, cardTight, clock, hoursMinutes, moment, signed, storage } from './format.js';
+import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
 import { paintChartTitle } from './history_view.js';
 import { paintRail } from './rail.js';
+import { paintBits } from './status_bits.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
-import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
-import { AC, DIM, FAI, OK, OR, OUT, PU, TX } from './theme.js';
+import { ROW_IDS, sampleIndex, view, type RowKey } from './state.js';
+import { AC, FAI, OK, OR, OUT, PU, TX } from './theme.js';
 import type { DeviceState } from './types.js';
 
 let settingsPainter: (() => void) | null = null;
@@ -178,6 +179,19 @@ export function paintHero(): void {
   $('reason').textContent = reason(delta, scrubbing, i);
 }
 
+/**
+ * What the fan was doing at a logged moment: "running at 7", "off", or the
+ * honest third answer.
+ *
+ * "not logged" is not "off". Rows written before the speed column existed have
+ * no speed in them at all, and a sentence that says the fan was off at a moment
+ * nobody recorded is inventing history.
+ */
+function loggedSpeed(speed: number | undefined): string {
+  if (speed === undefined) return 'not logged';
+  return speed > 0 ? `running at ${speed}` : 'off';
+}
+
 function reason(delta: number | null, scrubbing: boolean, i: number): string {
   const s = view.state;
   if (!s) return '';
@@ -188,13 +202,7 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     // Same precision rule as the stamp: on a 60-day chart "At 15:27" names
     // sixty different moments and answers nothing.
     const when = t === null ? 'that sample' : moment(t, view.days);
-    const histSpeed = view.series.spd.length ? view.series.spd[i] : undefined;
-    const fanWas =
-      histSpeed === undefined
-        ? 'not logged'
-        : histSpeed > 0
-          ? `running at ${histSpeed}`
-          : 'off';
+    const fanWas = loggedSpeed(view.series.spd.length ? view.series.spd[i] : undefined);
     const gap = delta === null ? '–' : delta.toFixed(1);
     // No "move off the chart to return to now" tail any more. It was 36
     // characters of instruction for a gesture the reader has already performed,
@@ -218,145 +226,6 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     return `Garage is only ${gap}°F hotter than the yard — under the +${s.off_f}° release point, so auto has dropped the fan to ${rest}. It engages speed ${s.auto_max} again above +${s.on_f}°.`;
   }
   return `Gap is ${gap}°F, inside the +${s.off_f}°/+${s.on_f}° deadband — auto is holding ${s.speed > 0 ? `speed ${s.speed}` : 'off'} until it crosses a threshold, so the fan does not chatter.`;
-}
-
-/**
- * Link quality, in the three bands that mean something operationally.
- *
- * Around -61 dBm is solid; past -80 the MQTT session starts dropping and gaps
- * appear in the charts, which is the failure this colour is warning about.
- */
-function rssiColour(dbm: number): string {
-  if (dbm > -70) return OK;
-  if (dbm > -80) return OR;
-  return '#e0a9a9';
-}
-
-/** "⚡ 100% · 4.195 V" / "3.71 V" / "no pack" -- the VBAT bit. */
-function battBit(batt: DeviceState['batt']): string {
-  if (!batt) return 'no pack';
-  const bolt = batt.chg ? '⚡ ' : '';
-  const pct = batt.pct === null ? '' : `${batt.pct}% · `;
-  return `${bolt}${pct}${batt.v.toFixed(3)} V`;
-}
-
-/** "20.3 W · 120.9 V" / "20.3 W" / "no meter" -- the PLUG bit. */
-function plugBit(plug: DeviceState['plug']): string {
-  if (!plug) return 'no meter';
-  const volts = plug.v === null ? '' : ` · ${plug.v.toFixed(1)} V`;
-  return `${plug.w.toFixed(1)} W${volts}`;
-}
-
-/** Red only for a MEASURED disagreement; absent hardware is not a fault. */
-function plugColour(plug: DeviceState['plug']): string {
-  if (!plug) return DIM;
-  return plug.verdict === -1 ? '#e0a9a9' : OK;
-}
-
-/**
- * The broker chip's state class.
- *
- * Three states, in priority order: we cannot reach the DEVICE (which outranks
- * anything the device would have told us about the broker), we have not heard
- * from it yet at all, or the device's own view of the broker.
- */
-function brokerClass(stale: boolean, s: DeviceState | null): string {
-  if (stale) return 'stale';
-  if (!s) return '';
-  return s.mqtt ? 'up' : '';
-}
-
-/** The GAS status bit: off (dim), armed (quiet), or actively boosting (loud). */
-function gasBit(s: DeviceState): { value: string; colour: string } {
-  if (!s.gas_on) return { value: 'off', colour: DIM };
-  if (s.gas_active) return { value: `BOOSTING ≥${s.gas_spd}`, colour: OR };
-  return { value: `armed · trig ${s.gas_voc}`, colour: OUT };
-}
-
-function bitValues(): { value: string; colour: string }[] {
-  const s = view.state;
-  if (!s) return [];
-  const card = s.sd_total_mb
-    ? storage(s.sd_used_mb, s.sd_total_mb, s.sd_free_mb)
-    : s.sd_q
-      ? 'quarantined'
-      : 'not mounted';
-  // A card with no room left stops being a flight recorder, so it reads as a
-  // warning rather than as ordinary status text.
-  const cardTense = s.sd_total_mb > 0 && cardTight(s.sd_used_mb, s.sd_total_mb);
-  let cardColour = OUT;
-  if (!s.sd_total_mb) cardColour = DIM;
-  else if (cardTense) cardColour = OR;
-  return [
-    { value: `${s.rssi} dBm`, colour: rssiColour(s.rssi) },
-    { value: card, colour: cardColour },
-    { value: battBit(s.batt), colour: s.batt ? PU : DIM },
-    {
-      value: plugBit(s.plug),
-      colour: plugColour(s.plug),
-    },
-    gasBit(s),
-    { value: s.fw, colour: OUT },
-    { value: hoursMinutes(s.uptime_s), colour: OUT },
-    {
-      value: `${s.slot} · ${s.confirmed ? 'confirmed' : 'unconfirmed'}`,
-      colour: s.confirmed ? OK : OR,
-    },
-  ];
-}
-
-/**
- * Does this device actually hover?
- *
- * The status bits carried mouseenter/mouseleave AND click, which on a touch
- * screen is one gesture too many: a tap fires the pointer-enter compatibility
- * event first (opening the tip), then the click toggles it -- so the tip opened
- * and closed inside a single tap and all six dotted underlines were decoration
- * on a phone. Binding the hover pair only where hover exists leaves the desk
- * behaviour (read by hovering, which is the good one) untouched and lets the tap
- * be a plain toggle.
- */
-const CAN_HOVER = window.matchMedia?.('(hover: hover)').matches ?? true;
-
-export function paintBits(): void {
-  const values = bitValues();
-  if (!values.length) return;
-  const host = $('stats');
-  host.replaceChildren(
-    ...STATUS_BITS.map((bit, n) => {
-      const span = el('span', { className: 'bit' });
-      span.append(el('b', { textContent: bit.key }));
-      const v = el('span', { textContent: values[n]?.value ?? '' });
-      v.style.color = values[n]?.colour ?? DIM;
-      span.append(v);
-      if (CAN_HOVER) {
-        span.onmouseenter = () => {
-          view.tip = n;
-          paintTip();
-        };
-        span.onmouseleave = () => {
-          view.tip = -1;
-          paintTip();
-        };
-      }
-      span.onclick = () => {
-        view.tip = view.tip === n ? -1 : n;
-        paintTip();
-      };
-      return span;
-    }),
-  );
-  paintTip();
-}
-
-export function paintTip(): void {
-  const bit = view.tip >= 0 ? STATUS_BITS[view.tip] : undefined;
-  show($('tip'), !!bit);
-  if (!bit) return;
-  const title = $('tipt');
-  title.textContent = bit.title;
-  title.style.color = bitValues()[view.tip]?.colour ?? DIM;
-  $('tipb').textContent = bit.body;
 }
 
 export function paintStats(): void {
@@ -427,6 +296,24 @@ const NO_CONTACT_REASON =
   'if this persists, check that the board has power and is on the network ' +
   '(garage-fan.local). Nothing below is a live reading.';
 
+
+
+/**
+ * The broker chip: one decision, so one function returning both halves.
+ *
+ * Four states in priority order. "We cannot reach the DEVICE" outranks anything
+ * the device would have told us about the broker -- that flag is a last-known
+ * value like every other, and a green "BROKER UP" on a controller that has not
+ * answered in minutes is the single most misleading thing this page can say.
+ * Then: nothing heard yet (boot), and the device's own view.
+ */
+function brokerChip(stale: boolean, s: DeviceState | null): { text: string; cls: string } {
+  if (stale) return { text: '● NO CONTACT', cls: 'stale' };
+  if (!s) return { text: '● BROKER —', cls: '' };
+  if (s.mqtt) return { text: '● BROKER UP', cls: 'up' };
+  return { text: '● BROKER DOWN', cls: '' };
+}
+
 export function paint(next?: DeviceState): void {
   if (next) {
     view.lastOk = Date.now();
@@ -448,14 +335,9 @@ export function paint(next?: DeviceState): void {
   // broker flag in particular would otherwise keep asserting a green "UP"
   // about a device that has not answered in minutes.
   const mqtt = $('hmq');
-  mqtt.textContent = stale
-    ? '● NO CONTACT'
-    : !s
-      ? '● BROKER —'
-      : s.mqtt
-        ? '● BROKER UP'
-        : '● BROKER DOWN';
-  mqtt.className = brokerClass(stale, s);
+  const chip = brokerChip(stale, s);
+  mqtt.textContent = chip.text;
+  mqtt.className = chip.cls;
   document.body.classList.toggle('offline', stale);
   if (!s) {
     if (stale) {

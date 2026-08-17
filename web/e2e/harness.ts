@@ -1,6 +1,13 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { expect, test as base, type CDPSession, type Page, type Request } from '@playwright/test';
+import {
+  expect,
+  test as base,
+  type CDPSession,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
 
 /**
  * Shared harness for the console's end-to-end pass.
@@ -338,6 +345,35 @@ export async function touchDrag(
 export async function touchRelease(page: Page): Promise<void> {
   const cdp = await touchSession(page);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/** True on the phone project; the desk project has no touchscreen to drive. */
+export async function hasTouch(page: Page): Promise<boolean> {
+  return page.evaluate(() => 'ontouchstart' in window);
+}
+
+/**
+ * Open a status bit's explanation the way the platform in front of you does.
+ *
+ * A phone taps; a desk hovers. The distinction is not cosmetic -- the hover
+ * handlers are bound only where `(hover: hover)` matches, because binding them
+ * on a touchscreen made a tap open and immediately close the tip. A shared
+ * assertion about tooltip CONTENT should therefore drive the tips through
+ * whichever gesture the project actually has, rather than being exiled to the
+ * one project that can hover.
+ */
+export async function openTip(page: Page, bit: Locator): Promise<void> {
+  // The strip is the last thing on a long page, so it starts ~1500 px down:
+  // page.touchscreen.tap() takes viewport coordinates and silently does nothing
+  // outside them, whereas hover() scrolls for you. Scroll first, measure after.
+  await bit.scrollIntoViewIfNeeded();
+  if (!(await hasTouch(page))) {
+    await bit.hover();
+    return;
+  }
+  const box = await bit.boundingBox();
+  if (!box) throw new Error('the status bit has no box to tap');
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
 }
 
 /**
