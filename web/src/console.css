@@ -15,6 +15,13 @@ button{font-family:inherit}
 #brand{font:600 12px var(--mono);letter-spacing:.14em;color:var(--dim);white-space:nowrap}
 #rule{flex:1;height:1px;background:var(--ln)}
 #hbits{display:flex;gap:16px;align-items:center;font:500 11px var(--mono);color:var(--dim);white-space:nowrap}
+/* The navigation lives OUTSIDE the status chips so the two can be laid out
+   independently. Measured on an iPhone SE: one nowrap row of brand + chips +
+   SETTINGS wants ~394 px against a 320 px screen, so the row overflowed, the
+   document became wider than the viewport (the whole page panned sideways),
+   and SETTINGS -- which from the settings screen is also the only way BACK --
+   sat off the right edge where nothing could reach it. */
+#hnav{display:flex;gap:10px;align-items:center;font:500 11px var(--mono);color:var(--dim);white-space:nowrap}
 #hmq.up{color:var(--ok)}
 /* No contact with the device. Everything on screen is a last-known value, so
    the whole page is dimmed rather than only the broker chip -- a lone red
@@ -36,7 +43,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #conmain{display:grid;grid-template-columns:1fr 164px;gap:28px;align-items:start}
 #hero{display:flex;align-items:flex-start;gap:44px;flex-wrap:wrap}
 #stamp{font:500 10px var(--mono);letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:var(--pop);color:var(--dim)}
-#stamp.scrub{background:rgba(232,131,74,.16);color:var(--or)}
+#stamp.scrub{background:rgba(232,131,74,.16);color:var(--or);font-size:11px}
 .t1{font:600 92px/.82 var(--sans);letter-spacing:-.045em;color:var(--or);margin-top:4px}
 .t2{font:600 62px/.82 var(--sans);letter-spacing:-.04em;margin-top:6px}
 .deg{opacity:.42}
@@ -117,13 +124,22 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #charts{margin-top:36px}
 #chead{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ln);padding-bottom:2px;flex-wrap:wrap}
 #chead .ct{font:600 11px var(--mono);letter-spacing:.1em;color:var(--mut);padding-bottom:6px}
+/* The title slot IS the scrub readout (see history_view.ts::paintChartTitle):
+   it sits directly above the plots and never under the hand, which the
+   crosshair and the hero stamp cannot both claim on a phone. */
+#chead .ct.scrub{color:var(--or);font-size:12px}
 #chead .cl{font:500 10px var(--mono);letter-spacing:.1em;color:#3d4653;padding-bottom:6px}
 #chips{display:flex;gap:12px}
 #chips button{background:none;padding:4px 0 6px;cursor:pointer;font:500 10px var(--mono);letter-spacing:.1em;border:0;border-bottom:2px solid transparent;color:var(--fai)}
 #ranges{margin-left:auto;display:flex;gap:14px;font:500 10px var(--mono);letter-spacing:.08em;padding-bottom:6px}
 #ranges button{background:none;border:0;padding:0;cursor:pointer;font:inherit;color:var(--dim)}
 #ranges button.on{color:var(--tx)}
-#plots{cursor:crosshair}
+/* pan-y: the browser keeps vertical scrolling, we keep horizontal drags.
+   Scrubbing is a horizontal gesture, so declaring that up front lets the
+   compositor scroll a vertical swipe over the charts WITHOUT waiting on a
+   handler -- the JS axis lock in app.ts still decides per gesture, this only
+   removes the frame of hesitation before the page moves. */
+#plots{cursor:crosshair;touch-action:pan-y}
 .crow{display:flex;align-items:baseline;gap:12px;margin:12px 0 2px}
 .crow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--mut)}
 .crow .cd{font-size:11.5px;color:var(--dim)}
@@ -191,19 +207,48 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 
 @media(max-width:900px){
 body{padding:0 16px 32px}
-#top{gap:8px}
+/* Vertical budget on a phone. Every number below was a gap that existed only
+   because a 1136 px desk layout could afford it: on a 568 px screen they added
+   up to most of a fold, and the charts -- the thing the console is opened for
+   in the garage -- started below y=728 on a 839 px Pixel. Trimmed, not
+   removed: the hero, the sentence and the pills keep their own breathing room.
+   Measured: ~70 px recovered above the plots. */
+#top{gap:8px;padding:14px 0 12px}
 #hbits{gap:9px}
-.crow{flex-wrap:wrap}
+#gauge{margin-top:16px}
+#reason{margin-top:12px;min-height:0}
+#acts{margin-top:14px}
+.crow{flex-wrap:wrap;margin-top:8px}
+/* The prose hint is desktop-only, but an EXPLANATION is not decoration: a
+   failed load, an empty range or a card that cannot cover the window has to
+   say so on the screen where it is most likely to be seen. */
 .crow .cd{display:none}
-#conmain{grid-template-columns:1fr;gap:22px}
-#hero{gap:26px}
+.crow .cd.note{display:block;color:var(--or);flex-basis:100%}
+#conmain{grid-template-columns:1fr;gap:14px}
+#hero{gap:18px}
 .t1{font-size:62px}.t2{font-size:40px}
-.hcol{padding-top:10px}
+.hcol{padding-top:6px}
+#stamp{font-size:11px;padding:3px 7px}
+/* The range buttons and the scrub readout stay on screen while a thumb works
+   down a 400 px stack of plots -- the moment being read is useless if it has
+   scrolled off the top. */
+#chead{position:sticky;top:0;z-index:4;background:var(--bg);padding-top:6px}
+/* Seven row toggles want 332 px and a small phone has 288. They used to simply
+   overflow -- NOX sat past the right edge and took the whole document with it,
+   so the page panned sideways -- and wrapping them would cost a line of the
+   fold the charts need. A contained scroller keeps every chip reachable
+   without either. */
+#chips{flex:1 1 100%;min-width:0;overflow-x:auto;padding-bottom:2px}
 #rail{margin-right:0;align-items:stretch}
 #railtop{display:flex;align-items:baseline;gap:10px;justify-content:center}
 #stack{flex-direction:row;gap:4px}
 #stack button{flex:1;height:34px}
-#metrics{gap:24px}
+#metrics{gap:20px;margin-top:18px;padding-top:12px}
+#charts{margin-top:16px}
+/* 250 px of temperature chart is 40% of a phone screen. 220 still carries the
+   diurnal shape and the differential band, and the 30 px it gives back are
+   what lift the plots into the first screenful instead of below it. */
+#cv_t{height:220px}
 #scstats{grid-template-columns:repeat(3,1fr)}
 #capgrid{grid-template-columns:repeat(7,1fr)}
 #odo{grid-template-columns:repeat(2,1fr)}
@@ -212,6 +257,17 @@ body{padding:0 16px 32px}
 .grow{flex-direction:column;align-items:flex-start;gap:10px}
 .grow .rl{max-width:none}
 .rtx,.acts{text-align:left;justify-content:flex-start}
+}
+
+/* Narrow phones: the header goes to two lines rather than one overflowing one.
+   Brand and the SETTINGS/back control keep the top line -- the same place they
+   occupy on a desk -- and the status meta wraps underneath, where it can be
+   read but never has to be reached. Deliberately not a hamburger: there are
+   four things in this header, and hiding a two-item nav behind a menu button
+   trades a reachable control for an extra tap. */
+@media(max-width:480px){
+#top{flex-wrap:wrap}
+#hbits{order:3;width:100%;white-space:normal;flex-wrap:wrap;gap:12px}
 }
 
 /* ---- update check (Settings > UPDATE) ---- */

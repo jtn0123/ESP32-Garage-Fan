@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { expect, test as base, type Page, type Request } from '@playwright/test';
+import { expect, test as base, type CDPSession, type Page, type Request } from '@playwright/test';
 
 /**
  * Shared harness for the console's end-to-end pass.
@@ -72,11 +72,23 @@ async function waitForMock(port: number, proc: ChildProcess): Promise<void> {
 export const SCEN_DEFAULTS = {
   card: 'true',
   synced: 'true',
-  rows: '288',
+  // Rows the mock card HOLDS -- 60 days at 300 s, i.e. enough to fill every
+  // range. Must track mock_state.SCEN or a reset would leave the mock in a
+  // state its own default never produces.
+  rows: '17280',
   gap_at: 'none',
   corrupt: 'false',
   flat_rh: 'false',
   down: 'false',
+  // EVERY knob in mock_state.SCEN_SPEC belongs here, including the ones no
+  // spec in this file flips today. A reset is only as good as its
+  // most-forgotten key: `plug` was missing, so the two plug-disagreement
+  // specs left the meter reading 43.5 W for whatever the worker ran next, and
+  // "the DRAW cell shows the measured watts" failed on 20.3 vs 43.5 whenever
+  // the order happened to put it second. It survived on luck for as long as
+  // the ordering held, which is the worst way for a test to pass.
+  panel_ready: 'true',
+  plug: 'ok',
 } as const;
 
 /** Flip scenario knobs on the mock. */
@@ -189,6 +201,78 @@ export async function inkedColumns(page: Page, canvasId: string): Promise<number
     }
     return inked;
   }, canvasId);
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * A real finger drag, through the browser's own touch pipeline.
+ *
+ * Playwright's touchscreen API only taps, and page.mouse never enters the touch
+ * path at all -- so the gesture where the console has to CHOOSE between
+ * scrubbing the chart and letting the page scroll was untestable, which is how
+ * a touchmove handler that called preventDefault() on every move shipped and
+ * turned 400 px of chart into a region a phone could not scroll out of.
+ *
+ * CDP dispatches what the compositor itself sees, so the scrolling the browser
+ * does on our behalf is part of what gets asserted. Chromium-only, which both
+ * projects in playwright.config.ts are.
+ *
+ * `hold` leaves the finger DOWN, because that is the only moment a scrub is
+ * observable: releasing ends it by design.
+ */
+// One session per page, kept: a finger held down belongs to the session that
+// pressed it, and a fresh session refuses the release with "Must send a
+// TouchStart first" -- which is how the held-scrub test failed the first time.
+const cdpSessions = new WeakMap<Page, CDPSession>();
+
+async function touchSession(page: Page): Promise<CDPSession> {
+  const existing = cdpSessions.get(page);
+  if (existing) return existing;
+  const fresh = await page.context().newCDPSession(page);
+  cdpSessions.set(page, fresh);
+  return fresh;
+}
+
+export async function touchDrag(
+  page: Page,
+  from: Point,
+  to: Point,
+  { hold = false, steps = 8 }: { hold?: boolean; steps?: number } = {},
+): Promise<void> {
+  const cdp = await touchSession(page);
+  const at = (
+    type: 'touchStart' | 'touchMove' | 'touchEnd',
+    x: number,
+    y: number,
+  ): Promise<unknown> =>
+    cdp.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints: type === 'touchEnd' ? [] : [{ x, y }],
+    });
+  await at('touchStart', from.x, from.y);
+  for (let i = 1; i <= steps; i++) {
+    await at(
+      'touchMove',
+      from.x + ((to.x - from.x) * i) / steps,
+      from.y + ((to.y - from.y) * i) / steps,
+    );
+  }
+  if (!hold) await at('touchEnd', to.x, to.y);
+}
+
+/** Lift a finger left down by `touchDrag(..., { hold: true })`. */
+export async function touchRelease(page: Page): Promise<void> {
+  const cdp = await touchSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/** True on the phone project; the desk project has no touchscreen to drive. */
+export async function hasTouch(page: Page): Promise<boolean> {
+  return page.evaluate(() => 'ontouchstart' in window);
 }
 
 /** Record every request the console makes to a path, for "did it actually call?" */

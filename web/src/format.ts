@@ -17,6 +17,25 @@ export function clock(epochSeconds: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
+
+/**
+ * The scrubbed instant, at the precision the selected range makes meaningful.
+ *
+ * On 24H the clock alone is unambiguous. On 7D/30D/60D it is not -- "15:27"
+ * happens once a day for sixty days, and the reason to drag across a two-month
+ * chart is to find out WHICH day the spike was on. The weekday earns its four
+ * characters on the 7-day range, where "8/12" takes a beat to place and "WED"
+ * does not; past a week the dates stop being nearby days and it is dropped.
+ */
+export function moment(epochSeconds: number, days = 1): string {
+  const d = new Date(epochSeconds * 1000);
+  const time = clock(epochSeconds);
+  if (days <= 1) return time;
+  const date = `${d.getMonth() + 1}/${d.getDate()}`;
+  return days <= 7 ? `${WEEKDAYS[d.getDay()]} ${date} ${time}` : `${date} ${time}`;
+}
+
 /** Minutes elapsed -> "45 MIN AGO" / "17H30 AGO", for the scrub stamp. */
 export function ago(minutes: number): string {
   if (!Number.isFinite(minutes)) return 'AGE UNKNOWN';
@@ -67,4 +86,22 @@ export function storage(usedMb: number, totalMb: number, freeMb?: number): strin
 /** True once the card is full enough that logging is at risk. */
 export function cardTight(usedMb: number, totalMb: number): boolean {
   return totalMb > 0 && (100 * usedMb) / totalMb >= 90;
+}
+
+/**
+ * One tick label, at the resolution the window can actually distinguish.
+ *
+ * Three tiers, because one format cannot serve 24 hours and 60 days. A day of
+ * samples wants the clock; a week wants the date AND the hour, or two ticks
+ * both read "8/3" and the axis looks broken; a month or two wants the date
+ * alone -- the hour is noise there (rows are 2.6 to 5.1 hours apart, so "8/3
+ * 14h" claims a precision the row does not have) and it is what made the
+ * 30D/60D axis unreadable at phone width.
+ */
+export function axisLabel(t: number, days: number): string {
+  const d = new Date(t * 1000);
+  const hh = String(d.getHours()).padStart(2, '0');
+  if (days <= 1) return `${hh}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const date = `${d.getMonth() + 1}/${d.getDate()}`;
+  return days <= 7 ? `${date} ${d.getHours()}h` : date;
 }

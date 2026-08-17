@@ -6,7 +6,16 @@
  * RAM-ring data as if it were the card's), and the 7/30-day branch used to
  * return three series instead of seven.
  */
-import { expect, openConsole, recordRequests, test } from './harness';
+import {
+  expect,
+  hasTouch,
+  inkedColumns,
+  openConsole,
+  recordRequests,
+  test,
+  touchDrag,
+  touchRelease,
+} from './harness';
 
 test('the four ranges are offered and 24H starts selected', async ({ page }) => {
   await openConsole(page);
@@ -32,6 +41,34 @@ for (const [days, title] of [
     await expect
       .poll(() => fetches.some((r) => new RegExp(`days=${days}\\b`).test(r.url())))
       .toBeTruthy();
+  });
+}
+
+/**
+ * A relabelled chart is not a plotted one.
+ *
+ * Every assertion above this was satisfied by a 7D button that fetched, said
+ * "LAST 7 DAYS", and drew nothing -- which is exactly what the console did:
+ * the wide ranges arrive decimated (~2400 s per row at 7 days against the
+ * device's 300 s cadence), and measuring that step against interval_s flagged
+ * every row as an outage, so every line broke into invisible one-point
+ * segments. Ink on the canvas and a filled readout are what distinguish a
+ * range that works from one that only announces itself.
+ */
+for (const days of ['7', '30', '60'] as const) {
+  test(`the ${days}-day range actually plots its data`, async ({ page }) => {
+    await openConsole(page);
+    await page.locator(`#ranges button[data-d="${days}"]`).click();
+    await expect(page.locator('#chtitle')).toHaveText(new RegExp(`${days} DAYS`, 'i'));
+    await expect
+      .poll(() => inkedColumns(page, 'cv_t'), {
+        message: `the ${days}-day chart is blank`,
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(100);
+    await expect(page.locator('#roT')).toContainText('°');
+    // And nothing apologises: a working range needs no explanation.
+    await expect(page.locator('#tcap')).not.toContainText(/could not|no samples/i);
   });
 }
 
@@ -123,6 +160,79 @@ test('leaving the plots returns the hero to now', async ({ page }) => {
   await expect(page.locator('#stamp')).not.toHaveText('NOW');
   // Out of the plots entirely, which is what fires mouseleave.
   await page.mouse.move(box.x - 60, box.y - 60);
+  await expect(page.locator('#stamp')).toHaveText('NOW');
+});
+
+/**
+ * The moment being pointed at has to be READABLE, and not only under the
+ * finger. On a phone the hero stamp has scrolled off the top by the time a
+ * thumb reaches the plots and the hand covers the crosshair, so the chart
+ * header carries it too -- that is the only copy a touch user can see.
+ */
+test('scrubbing names the moment above the plots', async ({ page }) => {
+  await openConsole(page);
+  await expect(page.locator('#chtitle')).toHaveText(/24 HOURS/i);
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  // A clock, not merely "not NOW": a scrub readout with no time answers nothing.
+  await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}:\d{2}/);
+  await expect(page.locator('#stamp')).toHaveText(/\d{1,2}:\d{2}/);
+  // And the per-row readout tracks the same sample.
+  await expect(page.locator('#roT')).toContainText('°');
+});
+
+test('a scrubbed moment on a multi-day range carries its date', async ({ page }) => {
+  await openConsole(page);
+  await page.locator('#ranges button[data-d="7"]').click();
+  await expect(page.locator('#chtitle')).toHaveText(/7 DAYS/i);
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.5);
+  // "15:27" happens once a day for a week; the day is the point of the range.
+  await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}\/\d{1,2} \d{1,2}:\d{2}/);
+});
+
+// ------------------------------------------------------------ touch gestures
+
+/**
+ * The charts used to be a trap. touchmove called preventDefault() on every
+ * move, so a vertical swipe that started anywhere over ~400 px of plots could
+ * not scroll the page at all -- on a phone you had to reach around the charts
+ * to get past them.
+ */
+test('a vertical swipe over the charts scrolls the page', async ({ page }) => {
+  await openConsole(page);
+  test.skip(!(await hasTouch(page)), 'no touchscreen on the desk project');
+  await page.locator('#cv_t').scrollIntoViewIfNeeded();
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  const before = await page.evaluate(() => window.scrollY);
+  const x = box.x + box.width * 0.5;
+  await touchDrag(page, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.8 - 200 });
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY), {
+      message: 'a vertical swipe over the plots did not scroll the page',
+    })
+    .toBeGreaterThan(before);
+  // And it must not have scrubbed on the way past.
+  await expect(page.locator('#stamp')).toHaveText('NOW');
+});
+
+test('a horizontal drag scrubs without moving the page', async ({ page }) => {
+  await openConsole(page);
+  test.skip(!(await hasTouch(page)), 'no touchscreen on the desk project');
+  await page.locator('#cv_t').scrollIntoViewIfNeeded();
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  const before = await page.evaluate(() => window.scrollY);
+  const y = box.y + box.height * 0.5;
+  await touchDrag(page, { x: box.x + box.width * 0.25, y }, { x: box.x + box.width * 0.75, y }, {
+    hold: true, // releasing ends the scrub, so read it with the finger still down
+  });
+  await expect(page.locator('#stamp')).not.toHaveText('NOW');
+  expect(await page.evaluate(() => window.scrollY), 'the page moved under the scrub').toBe(before);
+  await touchRelease(page);
   await expect(page.locator('#stamp')).toHaveText('NOW');
 });
 

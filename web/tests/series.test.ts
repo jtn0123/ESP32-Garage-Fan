@@ -103,3 +103,61 @@ describe('hasData', () => {
     expect(hasData(undefined)).toBe(false);
   });
 });
+
+/**
+ * A wide range does not arrive at the sample cadence.
+ *
+ * /api/history reads the whole window off the card and decimates it to
+ * kGraphMaxPts, so 7 days come back ~2400 s apart and 60 days ~18300 s --
+ * while interval_s keeps reporting the device's 300 s SAMPLE cadence, which is
+ * all the firmware ever promised it meant. Measuring the step against
+ * interval_s therefore called every row of a long range an outage: every line
+ * broke into invisible one-point segments and the whole chart shaded red,
+ * which is what "7D/30D/60D show no data" actually was.
+ */
+describe('build: the row spacing is measured, not assumed', () => {
+  const decimated = (step: number, n: number, gapAt = -1): History => {
+    const ts: number[] = [];
+    let t = T - (n - 1) * step;
+    for (let i = 0; i < n; i++) {
+      if (i === gapAt) t += step * 40;
+      ts.push(t);
+      t += step;
+    }
+    return h({
+      interval_s: 300, // the device's cadence, unchanged by the range
+      ts,
+      temp_c: ts.map(() => 24),
+      rh: ts.map(() => 40),
+      hpa: ts.map(() => 1000),
+      out_f: ts.map(() => 70),
+      spd: ts.map(() => 3),
+      batt_v: ts.map(() => 4),
+      chg: ts.map(() => 0),
+      watts: ts.map(() => 5),
+      voc_raw: ts.map(() => 30000),
+      nox_raw: ts.map(() => 15800),
+      voc: ts.map(() => 90),
+      nox: ts.map(() => 1),
+    });
+  };
+
+  it('reads the real step off the timestamps', () => {
+    expect(build(decimated(2400, 20)).step).toBe(2400);
+  });
+
+  it('does not call every row of a decimated range an outage', () => {
+    expect(build(decimated(2400, 20)).gap.some(Boolean)).toBe(false);
+  });
+
+  it('still finds a genuine hole at the coarser step', () => {
+    const s = build(decimated(2400, 20, 8));
+    expect(s.gap[8]).toBe(true);
+    expect(s.gap.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('falls back to interval_s when no stamp has synced', () => {
+    const n = 4;
+    expect(build(h({ ts: [0, 0, 0, 0].slice(0, n), temp_c: [24, 24, 24, 24] })).step).toBe(300);
+  });
+});

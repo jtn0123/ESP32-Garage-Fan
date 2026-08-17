@@ -226,7 +226,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(400, {"error": "days must be 1, 7, 30 or 60"})
         if days != "1" and not (SCEN["card"] and SCEN["synced"]):
             return self._json(503, {"error": "sd card not mounted"})
-        return self._json(200, history())
+        return self._json(200, history(int(days)))
 
     def _boots(self, query: Query) -> None:
         days = query.get("days", [None])[0]

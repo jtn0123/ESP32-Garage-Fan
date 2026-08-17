@@ -7,7 +7,6 @@
 
 import * as api from './api.js';
 import {
-  drawAll,
   paint,
   paintChips,
   paintHero,
@@ -20,13 +19,15 @@ import {
   waveform,
 } from './console.js';
 import { $, clear, el, show } from './dom.js';
+import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
 import { drawPreview, drawScope } from './pwm.js';
 import { build } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
 import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 import type { DeviceState } from './types.js';
-import { checkForUpdate, parseChecksum, sha256Hex } from './update.js';
+import { maintenance, uploadFirmware } from './ota.js';
+import { checkForUpdate } from './update.js';
 
 
 
@@ -96,117 +97,6 @@ export function setSpeed(n: number): void {
   void command(() => api.setSpeed(n));
 }
 
-function tokenFromFieldOrPrompt(question: string): string | null {
-  const field = document.getElementById('ota_t') as HTMLInputElement | null;
-  if (field?.value) return field.value;
-  return window.prompt(question);
-}
-
-const MAINTENANCE = {
-  restart: {
-    prompt: 'Update token to restart the controller:',
-    confirm: 'Reboot the controller? The fan keeps its current speed through the reset.',
-    run: api.restart,
-  },
-  format: {
-    prompt: 'Update token to format the card:',
-    confirm: 'Formatting erases every sample stored on the card. Continue?',
-    run: api.formatCard,
-  },
-  purge: {
-    prompt: 'Update token to delete the card contents:',
-    // Names what is actually at stake: this deletes EVERYTHING on the card,
-    // including whatever was on it before the fan ever used it.
-    confirm:
-      'Delete every file on the SD card? This unlinks all contents — the fan’s logs AND anything else stored on the card — leaving the filesystem in place. It cannot be undone.',
-    run: api.purgeCard,
-  },
-} as const;
-
-async function maintenance(kind: keyof typeof MAINTENANCE): Promise<void> {
-  const op = MAINTENANCE[kind];
-  const token = tokenFromFieldOrPrompt(op.prompt);
-  if (!token) return;
-  if (!window.confirm(op.confirm)) return;
-  try {
-    window.alert(await op.run(token));
-  } catch (err) {
-    window.alert(`request failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-/**
- * Hash the picked image and, when a published sum exists, compare against it.
- *
- * There is no secure boot and /update accepts whatever bytes it is handed, so
- * the release's `.sha256` sidecar is the only thing standing between GitHub
- * and the flash -- and nothing consulted it until now. Two rules:
- *
- *  - Fail closed. "We could not hash it" is not a reason to write it anyway.
- *  - Say whether anything was actually COMPARED. Printing a digest on its own
- *    reads like a passed check, and in the common cases (a locally built
- *    image, or a check that came back ahead/no-binary/up-to-date) there is no
- *    published sum and nothing was verified at all.
- */
-async function verifyImage(file: File): Promise<{ ok: boolean; note: string }> {
-  let digest: string;
-  try {
-    digest = await sha256Hex(file);
-  } catch (err) {
-    const why = err instanceof Error ? err.message : String(err);
-    return { ok: false, note: `ABORTED: could not hash the image (${why}).` };
-  }
-  const short = `${digest.slice(0, 16)}…`;
-  const upd = view.update;
-  if (upd?.kind !== 'available') {
-    return { ok: true, note: `NOT VERIFIED — no published checksum to compare; sha256 ${short}` };
-  }
-  const { asset, latest } = upd;
-  const expected = await fetch(`${asset.browser_download_url}.sha256`)
-    .then((r) => (r.ok ? r.text() : null))
-    .then((t) => (t ? parseChecksum(t) : null))
-    .catch(() => null);
-  if (!expected) {
-    return {
-      ok: true,
-      note: `NOT VERIFIED — could not fetch ${latest}'s published sum; sha256 ${short}`,
-    };
-  }
-  if (expected !== digest) {
-    return {
-      ok: false,
-      note: `ABORTED: this file's SHA-256 does not match ${latest}. Do not flash it.`,
-    };
-  }
-  return { ok: true, note: `verified against ${latest} (sha256 ${short})` };
-}
-
-async function uploadFirmware(): Promise<void> {
-  const file = (document.getElementById('ota_f') as HTMLInputElement | null)?.files?.[0];
-  const token = (document.getElementById('ota_t') as HTMLInputElement | null)?.value ?? '';
-  const msg = document.getElementById('otamsg');
-  if (!msg) return;
-  if (!file) {
-    msg.textContent = 'pick firmware.bin first';
-    return;
-  }
-  msg.textContent = 'checking image…';
-  const check = await verifyImage(file);
-  msg.textContent = check.note;
-  if (!check.ok) return;
-
-  const size = `${(file.size / 1024).toFixed(0)} KB`;
-  const prefix = msg.textContent ? `${msg.textContent} — ` : '';
-  msg.textContent = `${prefix}uploading ${size}…`;
-  try {
-    const body = await api.uploadFirmware(file, token);
-    // The endpoint answers JSON for both outcomes; surface the failure as one.
-    msg.textContent = /"error"/.test(body) ? `upload failed: ${body}` : body;
-  } catch (err) {
-    msg.textContent = `upload failed: ${err instanceof Error ? err.message : String(err)}`;
-  }
-}
-
 /* -------------------------------------------------------------- update check */
 
 async function runUpdateCheck(force = false): Promise<void> {
@@ -268,14 +158,11 @@ function setRange(days: number): void {
     const b = child as HTMLElement;
     b.className = Number(b.dataset['d']) === days ? 'on' : '';
   });
-  $('chtitle').textContent = days === 1 ? 'LAST 24 HOURS' : `LAST ${days} DAYS`;
-  // One caption for every range now. It used to say "garage only -- the card
-  // keeps no outdoor series" on 7D/30D, which was true of the old wire format
-  // and became a flat contradiction of the screen once those ranges started
-  // carrying out_f: the outdoor line was drawn, the readout showed `out`, and
-  // the caption underneath said it did not exist.
-  $('tcap').textContent =
-    'band = how much hotter the garage is than the yard · drag across to read any moment';
+  // Title and caption both live in history_view now: the title slot doubles as
+  // the scrub readout, and the caption has to be able to say "this range is
+  // short" or "this range failed" rather than only carrying the standing hint.
+  paintChartTitle();
+  paintCaption();
   void loadHistory();
 }
 
@@ -309,6 +196,61 @@ function endScrub(): void {
   view.scrub = -1;
   drawAll();
   paintHero();
+}
+
+/**
+ * Which way a touch gesture over the plots is going, decided once.
+ *
+ * The touchmove handler used to call preventDefault() unconditionally, so a
+ * vertical swipe that started anywhere over the charts could not scroll the
+ * page: on a phone the plot stack is ~400 px of screen, which made it a dead
+ * zone you had to reach around. A swipe is either a scrub (horizontal -- that
+ * IS the gesture, "drag across to read any moment") or a scroll (vertical),
+ * and the two cannot both win.
+ *
+ * The axis is locked on the first movement past the slop radius and never
+ * revisited for that gesture: a scrub that drifts up must not suddenly hand
+ * the page a scroll under the finger, and a scroll that drifts sideways must
+ * not start rewriting the hero while it flies past.
+ */
+const AXIS_SLOP_PX = 10; // ~1.5 mm; below this a touch has no direction yet
+let touchOrigin: { x: number; y: number } | null = null;
+let touchAxis: 'undecided' | 'scrub' | 'scroll' = 'undecided';
+
+function onTouchStart(e: TouchEvent): void {
+  const t = e.touches[0];
+  touchOrigin = t ? { x: t.clientX, y: t.clientY } : null;
+  touchAxis = 'undecided';
+}
+
+function onTouchMove(e: TouchEvent): void {
+  const t = e.touches[0];
+  if (!t || !touchOrigin) return;
+  if (touchAxis === 'undecided') {
+    const dx = Math.abs(t.clientX - touchOrigin.x);
+    const dy = Math.abs(t.clientY - touchOrigin.y);
+    if (Math.max(dx, dy) < AXIS_SLOP_PX) return;
+    touchAxis = dx > dy ? 'scrub' : 'scroll';
+  }
+  if (touchAxis !== 'scrub') return; // the browser owns this one: let it scroll
+  scrubAt(t.clientX);
+  // Only now, and only for a gesture already committed to scrubbing: this is
+  // what keeps the page still while a finger reads along the chart.
+  e.preventDefault();
+}
+
+/**
+ * End of a touch gesture -- including touchcancel, which is not a rare case.
+ *
+ * The browser fires it whenever it takes the gesture over for scrolling, and
+ * only touchend was handled: a swipe that began as a scrub and turned into a
+ * scroll left the crosshair frozen on the chart and the hero showing a past
+ * temperature under a "NOW"-less stamp, with no touch left to clear it.
+ */
+function onTouchRelease(): void {
+  touchOrigin = null;
+  touchAxis = 'undecided';
+  endScrub();
 }
 
 /* --------------------------------------------------------------------- setup */
@@ -490,19 +432,22 @@ export async function boot(): Promise<void> {
   });
 
   const plots = $('plots');
-  plots.addEventListener('mousemove', (e) => scrubAt((e as MouseEvent).clientX));
-  plots.addEventListener('mouseleave', endScrub);
-  plots.addEventListener(
-    'touchmove',
-    (e) => {
-      const touch = (e as TouchEvent).touches[0];
-      if (!touch) return;
-      scrubAt(touch.clientX);
-      e.preventDefault();
-    },
-    { passive: false },
-  );
-  plots.addEventListener('touchend', endScrub);
+  // Pointer events, not mouse events: a phone browser reports a real mouse or
+  // a stylus only through these, and `mousemove` on a touch device is a
+  // compatibility event that arrives after the fact, at the tap position. The
+  // touch pointers are skipped here because the touch handlers below own them
+  // -- scrubbing from a raw pointermove would bypass the axis lock and bring
+  // the trapped-page bug straight back.
+  plots.addEventListener('pointermove', (e) => {
+    if ((e as PointerEvent).pointerType !== 'touch') scrubAt((e as PointerEvent).clientX);
+  });
+  plots.addEventListener('pointerleave', (e) => {
+    if ((e as PointerEvent).pointerType !== 'touch') endScrub();
+  });
+  plots.addEventListener('touchstart', (e) => onTouchStart(e as TouchEvent), { passive: true });
+  plots.addEventListener('touchmove', (e) => onTouchMove(e as TouchEvent), { passive: false });
+  plots.addEventListener('touchend', onTouchRelease);
+  plots.addEventListener('touchcancel', onTouchRelease);
   window.addEventListener('resize', () => {
     drawAll();
     if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());

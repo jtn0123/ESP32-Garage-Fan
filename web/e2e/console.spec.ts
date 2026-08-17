@@ -162,6 +162,46 @@ test('the page stays interactive without SSE', async ({ page }) => {
   await expect(page.locator('#railnum')).toHaveText('3');
 });
 
+/**
+ * The narrowest phone still in service (iPhone SE, 320 CSS px).
+ *
+ * The header was one `white-space:nowrap` row measuring ~394 px there, so it
+ * overflowed: the document became wider than the screen and the page panned
+ * sideways, and SETTINGS sat past the right edge where nothing could reach it.
+ * From the settings screen the same button is the ONLY way back, so opening
+ * the drawer -- if you managed to -- was a one-way trip.
+ */
+test('every header control is reachable at 320 px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+
+  const onScreen = async (sel: string): Promise<boolean> =>
+    page.evaluate((s) => {
+      const r = document.querySelector(s)?.getBoundingClientRect();
+      const w = document.documentElement.clientWidth;
+      return !!r && r.left >= 0 && r.right <= w && r.width > 0;
+    }, sel);
+
+  expect(await onScreen('#nav'), 'SETTINGS is off screen at 320 px').toBeTruthy();
+  expect(await onScreen('#brand')).toBeTruthy();
+  expect(await onScreen('#hmq')).toBeTruthy();
+  // clientWidth, not innerWidth: it is the layout width in both projects
+  // (mobile emulation keeps reporting the device's own innerWidth after a
+  // resize, and a desk browser's scrollbar is not part of the page either).
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, 'the page pans sideways at 320 px').toBeLessThanOrEqual(1);
+
+  // The way back has to be reachable too, or the drawer is a trap.
+  await page.locator('#nav').click();
+  await expect(page.locator('#settings')).not.toHaveClass(/hide/);
+  expect(await onScreen('#nav'), 'the return control is off screen at 320 px').toBeTruthy();
+  await expect(page.locator('#nav')).toHaveText(/CONSOLE/);
+  await page.locator('#nav').click();
+  await expect(page.locator('#console')).not.toHaveClass(/hide/);
+});
+
 test('the page never scrolls sideways', async ({ page }) => {
   await openConsole(page);
   const overflow = await page.evaluate(

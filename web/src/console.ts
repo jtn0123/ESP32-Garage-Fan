@@ -1,24 +1,20 @@
-// Painters for the console screen: hero numbers, gauge, PWM readouts, the
-// scope, charts, odometer tiles and status bits. Everything reads the shared
-// view-model in state.ts and writes only to the DOM.
+// Painters for the live half of the console screen: hero numbers, gauge, PWM
+// readouts, the scope, odometer tiles and status bits. Everything reads the
+// shared view-model in state.ts and writes only to the DOM.
+//
+// The recorded half -- the charts, their captions and readouts -- lives in
+// history_view.ts, which this file leans on only for the scrub stamp.
 //
 // The one thing this module does NOT know is the settings screen -- that
 // needs the command functions in app.ts, which imports us. app.ts registers
 // its settings painter through setSettingsPainter to keep the dependency one
 // way.
 
-import {
-  SERIES_COLOURS,
-  drawAxis,
-  drawBattery,
-  drawFanSpeed,
-  drawSimple,
-  drawTemperature,
-} from './charts.js';
+import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
-import { ago, airflow, cardTight, clock, hoursMinutes, signed, storage } from './format.js';
+import { ago, airflow, cardTight, hoursMinutes, moment, signed, storage } from './format.js';
+import { minutesBack, paintChartTitle } from './history_view.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
-import type { Series } from './series.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
 import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
 import type { DeviceState } from './types.js';
@@ -155,19 +151,13 @@ export function paintHero(): void {
   const stamp = $('stamp');
   if (scrubbing) {
     const t = series.ts(i);
-    const tNow = series.ts(series.n - 1);
-    // Real timestamp difference, not index * interval: a cache-merged series
-    // has holes, and across one the index arithmetic understates the age.
-    const minutes =
-      t !== null && tNow !== null
-        ? (tNow - t) / 60
-        : ((series.n - 1 - i) * (view.history?.interval_s ?? 300)) / 60;
-    stamp.textContent = `${t === null ? '–' : clock(t)} · ${ago(minutes)}`;
+    stamp.textContent = `${t === null ? '–' : moment(t, view.days)} · ${ago(minutesBack(series, i))}`;
     stamp.className = 'scrub';
   } else {
     stamp.textContent = 'NOW';
     stamp.className = '';
   }
+  paintChartTitle();
 
   $('reason').textContent = reason(delta, scrubbing, i);
 }
@@ -179,7 +169,9 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
 
   if (scrubbing && view.series) {
     const t = view.series.ts(i);
-    const when = t === null ? 'that sample' : clock(t);
+    // Same precision rule as the stamp: on a 60-day chart "At 15:27" names
+    // sixty different moments and answers nothing.
+    const when = t === null ? 'that sample' : moment(t, view.days);
     const histSpeed = view.series.spd.length ? view.series.spd[i] : undefined;
     const fanWas =
       histSpeed === undefined
@@ -284,110 +276,6 @@ export function paintTip(): void {
   title.textContent = bit.title;
   title.style.color = bitValues()[view.tip]?.colour ?? DIM;
   $('tipb').textContent = bit.body;
-}
-
-/** One entry of a series legend: a coloured line sample and the sensor name. */
-function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement {
-  const b = el('b', { textContent: `${dashed ? '╌╌' : '——'} ${name}` });
-  b.style.color = colour;
-  return b;
-}
-
-/** Which line is which sensor, on the rows that carry more than one. */
-function paintLegends(_s: Series): void {
-  $('tleg').replaceChildren(
-    legendEntry('GARAGE', OR, false),
-    legendEntry('OUTSIDE', OUT, true),
-  );
-  $('hleg').replaceChildren(legendEntry('GARAGE', SERIES_COLOURS.humidity, false));
-}
-
-/** "index 93 · raw 30125" / "warming up · raw 29850" / '' -- one gas row. */
-function gasReadout(idx: number | null, raw: number | null): string {
-  if (idx === null && raw === null) return '';
-  const rawPart = raw === null ? '' : ` · raw ${raw.toFixed(0)}`;
-  return idx !== null && idx > 0 ? `index ${idx.toFixed(0)}${rawPart}` : `warming up${rawPart}`;
-}
-
-function paintReadouts(): void {
-  const s = view.series;
-  const i = sampleIndex();
-  if (!s || i < 0) return;
-  const tf = at(s.tf, i);
-  const of = at(s.of, i);
-  $('roT').textContent =
-    (tf === null ? '–' : `${tf.toFixed(1)}°`) + (of === null ? '' : ` · out ${of.toFixed(1)}°`);
-  const spd = s.spd.length ? s.spd[i] : undefined;
-  $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
-  const rhNow = at(s.rh, i);
-  $('roH').textContent = rhNow === null ? '' : `${rhNow.toFixed(0)}%`;
-  const hpa = at(s.hpa, i);
-  $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
-  const bv = at(s.bv, i);
-  $('roB').textContent =
-    bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
-  const w = at(s.w, i);
-  $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
-  $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
-  $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
-}
-
-/**
- * Blank every plot and put the reason in the caption.
- *
- * Used when a range cannot be served: leaving the previous range's picture
- * under the new range's title is the failure the firmware's 503 exists to
- * prevent, and silently keeping it undid that at the last step.
- */
-function clearPlots(reason: string): void {
-  $('tcap').textContent = reason;
-  for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
-    const c = document.getElementById(id) as HTMLCanvasElement | null;
-    const ctx = c?.getContext('2d');
-    if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
-  }
-}
-
-export function drawAll(): void {
-  if (view.screen !== 'console') return;
-  const s = view.series;
-  if (!s) {
-    if (view.historyError) clearPlots(view.historyError);
-    return;
-  }
-  paintLegends(s);
-  drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots);
-  if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
-  if (view.rows.humidity) {
-    drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub);
-  }
-  if (view.rows.pressure) {
-    // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
-    // legible in the labels and does not need flattening.
-    drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
-  }
-  if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
-  if (view.rows.power) {
-    drawSimple($<HTMLCanvasElement>('cv_w'), s, s.w, SERIES_COLOURS.power,
-      (v) => v.toFixed(1), 'no plug data yet', view.scrub);
-  }
-  // Gas rows plot the INDEX once the algorithm produces one, and the raw
-  // ticks before that -- the user asked to watch the warm-up, not to stare at
-  // a flat zero for the hours Sensirion's blackout lasts.
-  if (view.rows.voc) {
-    const warming = !s.voc.some((v) => v !== null && v > 0);
-    drawSimple($<HTMLCanvasElement>('cv_v'), s, warming ? s.vocr : s.voc, SERIES_COLOURS.voc,
-      (v) => v.toFixed(0), 'no VOC sensor data', view.scrub);
-  }
-  if (view.rows.nox) {
-    const warming = !s.nox.some((v) => v !== null && v > 0);
-    drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
-      (v) => v.toFixed(0), 'no NOx sensor data', view.scrub);
-  }
-  drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
-  paintReadouts();
 }
 
 export function paintStats(): void {

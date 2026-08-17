@@ -42,18 +42,53 @@ def console_bytes() -> bytes:
 
 _hist_cache: "tuple[object, Json] | None" = None
 
+# One logged sample every STEP seconds is what the card holds; kGraphMaxPts is
+# how many rows the firmware will hand back for any window (config.h).
+DAY_ROWS = 86400 // STEP
+MAX_PTS = 288
 
-def history() -> Json:
-    # Keyed on the knobs AND the current second: the rows carry timestamps, so a
-    # cache that ignored the clock would freeze the chart's right-hand edge.
+
+def history(days: int = 1) -> Json:
+    # Keyed on the knobs, the RANGE, and the current second: the rows carry
+    # timestamps, so a cache that ignored the clock would freeze the chart's
+    # right-hand edge, and one that ignored `days` served the 24 h window under
+    # every range's label -- which is precisely the bug this mock existed to
+    # catch and instead reproduced.
     global _hist_cache
-    key = (tuple(sorted(SCEN.items())), int(time.time()))
+    key = (tuple(sorted(SCEN.items())), days, int(time.time()))
     cached = _hist_cache
     if cached is not None and cached[0] == key:
         return cached[1]
-    value = _history_uncached()
+    value = _history_uncached(days)
     _hist_cache = (key, value)
     return value
+
+
+def _window(days: int) -> "tuple[int, int]":
+    """Rows returned for `days`, and the seconds between two of them.
+
+    web_history.cpp reads the card from `now - days*86400` and hands the result
+    to sdcard::read_range, which DECIMATES with `stride = rows/max_pts + 1` to
+    fit kGraphMaxPts. So a wider range is a coarser step over a longer window,
+    never more rows: 24 h returns 288 rows 300 s apart, 7 d returns 252 rows
+    2400 s apart, 60 d returns 284 rows ~5 h apart. The `rows` knob is what the
+    card actually HOLDS -- a short card cannot fill any window.
+    """
+    stored = min(int(SCEN["rows"]), days * DAY_ROWS)
+    stride = stored // MAX_PTS + 1 if stored > MAX_PTS else 1
+    return (stored + stride - 1) // stride, STEP * stride
+
+
+def _day_fraction(t: int) -> float:
+    """Where t falls in its own LOCAL day, 0..1.
+
+    Local, not UTC: the console shades night from `new Date().getHours()` and
+    labels the axis the same way, so a mock whose diurnal curve peaked at UTC
+    noon would put the hottest hour of the garage inside the night band on any
+    machine west of Greenwich.
+    """
+    lt = time.localtime(t)
+    return (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec) / 86400.0
 
 
 # Restart marks for the window the last history build produced. Derived there
@@ -69,13 +104,13 @@ def boots(days: int = 60) -> list[Json]:
     It used to ignore `days` entirely and hand back everything, so the mock
     would have certified a console that ignored the selected range.
     """
-    history()  # ensure the current scenario has been built
+    history(days)  # ensure the window this asks about has been built
     cutoff = time.time() - days * 86400
     return [b for b in _boots if float(b["ts"]) >= cutoff]
 
 
-def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario knobs
-    n = int(SCEN["rows"])
+def _history_uncached(days: int) -> Json:  # NOSONAR -- the branches ARE the scenario knobs
+    n, step = _window(days)
     end = int(time.time())
     ts: list[int] = []
     temp: list[float | None] = []
@@ -85,19 +120,37 @@ def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario kno
     batt: list[float] = []
     spd: list[int] = []
     chg: list[int] = []
-    t = end - (n - 1) * STEP
+    t = end - (n - 1) * step
     for i in range(n):
         if SCEN["gap_at"] is not None and i == SCEN["gap_at"]:
-            t += STEP * 40  # a dark stretch
+            t += step * 40  # a dark stretch, always wide enough to read as one
         ts.append(t)
-        t += STEP
-        temp.append(round(24 + math.sin(i / 20) * 2.0, 1))
-        rh.append(40 if SCEN["flat_rh"] else 38 + (i % 5))
-        hpa.append(round(999.9 + math.cos(i / 30) * 0.4, 1))
-        out.append(None if i % 17 == 0 else round(73 + math.sin(i / 25) * 4, 1))
-        batt.append(round(4.20 - (i % 40) * 0.005, 2))
+        t += step
+        # The analog series are functions of TIME, not of row index. Keyed on
+        # the index they aliased into noise the moment a range was decimated:
+        # sin(i/20) is a 10 h cycle at 300 s per row and a 6-DAY one at the
+        # 60-day step, so the long ranges drew a plausible-looking curve that
+        # meant nothing. A diurnal curve samples correctly at every range and
+        # lines up with the console's night shading.
+        frac = _day_fraction(t)
+        swing = math.sin(2 * math.pi * (frac - 0.375))  # peaks mid-afternoon
+        # A little sensor wobble on top. Without it the curve is analytically
+        # smooth and renders as a staircase of the CSV's one decimal, which
+        # reads as a rendering artifact rather than as a reading; with it the
+        # long ranges also decimate into scatter, the way real rows do.
+        wobble = 0.12 * math.sin(i * 1.7)
+        temp.append(round(24 + 2.0 * swing + wobble, 1))
+        # Humidity runs opposite the temperature (same water, warmer air).
+        rh.append(40 if SCEN["flat_rh"] else round(45 - 6 * swing + wobble))
+        hpa.append(round(999.9 + math.cos(2 * math.pi * t / (3 * 86400)) * 0.4, 1))
+        # The yard leads the garage by about an hour and swings wider -- which
+        # is the whole differential story the hero and the band are drawing.
+        out.append(
+            None if i % 17 == 0 else round(73 + 4 * math.sin(2 * math.pi * (frac - 0.333)), 1)
+        )
+        batt.append(round(4.05 + 0.15 * swing, 2))
         spd.append(i % 10)
-        chg.append(1 if i % 3 else 0)
+        chg.append(1 if swing > 0 else 0)
     # The watt meter and the air chain: watts follows the logged fan speed
     # through the baseline table; the SGP41 columns model a sensor that was
     # plugged in mid-history -- nulls (absent), then raws with index 0
@@ -146,6 +199,12 @@ def _history_uncached() -> Json:  # NOSONAR -- the branches ARE the scenario kno
             hpa[7] = None
     return {
         "source": "sd" if SCEN["card"] else "ring",
+        # The device's SAMPLE cadence, not this response's row spacing -- the
+        # firmware reports the same constant for every range ("interval_s is
+        # now only a nominal hint for gap detection; ts[] carries the truth").
+        # A mock that quietly reported the decimated step here would hide the
+        # console bug where trusting it flags every row of a 7-day range as an
+        # outage.
         "interval_s": STEP,
         "ts": ts,
         "watts": watts,

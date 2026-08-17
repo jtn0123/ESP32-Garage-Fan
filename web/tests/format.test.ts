@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, airflow, clock, hoursMinutes, signed, storage } from '../src/format.js';
+import { ago, airflow, clock, hoursMinutes, moment, signed, storage } from '../src/format.js';
 
 describe('hoursMinutes', () => {
   it('formats the uptime style', () => {
@@ -60,5 +60,22 @@ describe('clock', () => {
     // Construct a local-time epoch so the test passes in any timezone.
     const d = new Date(2026, 7, 8, 4, 5);
     expect(clock(d.getTime() / 1000)).toBe('04:05');
+  });
+});
+
+describe('moment: the scrubbed instant', () => {
+  const t = Math.floor(new Date(2026, 7, 16, 15, 27).getTime() / 1000); // a Sunday
+
+  it('is just the clock on the 24 h range', () => {
+    expect(moment(t, 1)).toBe('15:27');
+  });
+
+  it('names the day on a week, where 8/16 takes a beat to place', () => {
+    expect(moment(t, 7)).toBe('SUN 8/16 15:27');
+  });
+
+  it('keeps the date but drops the weekday past a week', () => {
+    // Sixty days back, "SUN" narrows nothing -- there are nine of them.
+    expect(moment(t, 60)).toBe('8/16 15:27');
   });
 });

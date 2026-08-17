@@ -20,6 +20,14 @@ export interface Series {
   /** Epoch seconds for sample i, or null before SNTP has synced. */
   ts: (i: number) => number | null;
   /**
+   * Seconds between two neighbouring rows of THIS response, measured from the
+   * timestamps. Not the device's 300 s sample cadence: a wide range is
+   * decimated to fit the chart, so 7D arrives at ~2400 s per row and 60D at
+   * ~18000. Everything that reasons about resolution -- gap detection, the
+   * axis, the night shading -- has to use this rather than interval_s.
+   */
+  step: number;
+  /**
    * Horizontal position of sample i as a 0..1 fraction, proportional to TIME:
    * an outage occupies its true width on the axis instead of being squeezed
    * to one sample step. Index-proportional before SNTP has synced.
@@ -66,6 +74,35 @@ function pad<T>(a: readonly T[] | undefined, n: number, fill: T): T[] {
   const out = (a ?? []).slice(0, n) as T[];
   while (out.length < n) out.push(fill);
   return out;
+}
+
+/**
+ * The real spacing of these rows, from the stamps themselves.
+ *
+ * interval_s is the device's SAMPLE cadence -- 300 s, always -- and the
+ * firmware says so explicitly ("interval_s is now only a nominal hint; ts[]
+ * carries the truth"). It is not the spacing of the rows in a response:
+ * /api/history reads the whole window off the card and decimates it to fit
+ * kGraphMaxPts=288, so 7 days arrive ~2400 s apart and 60 days ~18300 s apart.
+ * Measuring the step against 300 s therefore declared EVERY row of a long
+ * range to be an outage, which broke every line into invisible one-point
+ * segments and shaded the entire chart red -- the "7D/30D/60D show no data"
+ * report.
+ *
+ * The MEDIAN gap, not the mean: a real outage (or a reboot) is one enormous
+ * delta among hundreds of regular ones, and the mean would let it inflate the
+ * estimate until the next outage stopped registering as one.
+ */
+function medianStep(ts: (i: number) => number | null, n: number, fallback: number): number {
+  const deltas: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const a = ts(i - 1);
+    const b = ts(i);
+    if (a !== null && b !== null && b > a) deltas.push(b - a);
+  }
+  if (!deltas.length) return fallback; // unsynced clock: nothing to measure
+  deltas.sort((x, y) => x - y);
+  return deltas[deltas.length >> 1] ?? fallback;
 }
 
 /**
@@ -121,9 +158,10 @@ export function build(h: History): Series {
   // Real per-row epochs from the device. A 0 means SNTP had not synced when
   // that row was taken, which is "unknown", not 1970.
   const stamps = pad<number>(h.ts, n, 0);
-  const step = Number.isFinite(h.interval_s) && h.interval_s > 0 ? h.interval_s : 300;
+  const nominal = Number.isFinite(h.interval_s) && h.interval_s > 0 ? h.interval_s : 300;
   // A 0 means SNTP had not synced when that row was taken -- unknown, not 1970.
   const ts = (i: number): number | null => stamps[i] || null;
+  const step = medianStep(ts, n, nominal);
 
   const { frac, gap } = timeline(ts, n, step);
   const night = nights(ts, n);
@@ -131,6 +169,7 @@ export function build(h: History): Series {
   return {
     n,
     ts,
+    step,
     frac,
     gap,
     night,

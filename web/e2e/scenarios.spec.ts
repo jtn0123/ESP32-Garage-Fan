@@ -75,6 +75,31 @@ test('an outage mid-history does not break the page', async ({ page }) => {
   await expect(page.locator('#stamp')).not.toHaveText('NOW');
 });
 
+/**
+ * A window the card cannot fill has to SAY so.
+ *
+ * Picking 7D on a device that has only been logging a day drew a day's data
+ * squeezed into the right-hand seventh of the chart with nothing to explain
+ * the empty five sixths -- and on a phone, where the caption is hidden, there
+ * was nowhere for an explanation to appear at all. The `note` class is what
+ * makes an explanation (as opposed to the standing hint) visible at that
+ * width, so this asserts visibility, not just text.
+ */
+test('a range wider than the card explains the empty stretch', async ({ page }) => {
+  await scen(page, { rows: '288' }); // exactly one day on the card
+  await openConsole(page);
+  await page.locator('#ranges button[data-d="7"]').click();
+  await expect(page.locator('#tcap')).toContainText(/only goes back/i);
+  await expect(page.locator('#tcap')).toBeVisible();
+});
+
+test('a range with nothing in it explains the blank', async ({ page }) => {
+  await scen(page, { rows: '0' });
+  await openConsole(page);
+  await expect(page.locator('#tcap')).toContainText(/no samples in this range/i);
+  await expect(page.locator('#tcap')).toBeVisible();
+});
+
 test('null readings in the history do not break the draw', async ({ page }) => {
   await scen(page, { corrupt: 'true' });
   await openConsole(page);
