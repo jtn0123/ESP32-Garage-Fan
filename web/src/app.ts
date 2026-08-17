@@ -21,11 +21,11 @@ import {
 import { $, clear, el, show } from './dom.js';
 import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
 import { buildRail } from './rail.js';
+import { attachScrub, endScrub } from './scrub.js';
 import { drawPreview, drawScope } from './pwm.js';
 import { build } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
-import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 import type { DeviceState } from './types.js';
 import { maintenance, uploadFirmware } from './ota.js';
 import { checkForUpdate } from './update.js';
@@ -154,7 +154,9 @@ function toggleScope(ev?: Event): void {
 
 function setRange(days: number): void {
   view.days = days;
-  view.scrub = -1;
+  // Through the module that owns the crosshair, so the height reserved for the
+  // state sentence during a gesture is released with it (scrub.ts).
+  endScrub();
   Array.from($('ranges').children).forEach((child) => {
     const b = child as HTMLElement;
     b.className = Number(b.dataset['d']) === days ? 'on' : '';
@@ -165,116 +167,6 @@ function setRange(days: number): void {
   paintChartTitle();
   paintCaption();
   void loadHistory();
-}
-
-/* ----------------------------------------------------------------- scrubbing */
-
-/**
- * Hold the layout above the charts still for the duration of a gesture.
- *
- * The plain-English state sentence is re-derived on every scrub sample, and a
- * scrubbed sentence is not the same length as a live one: at 24H it came out
- * one line shorter, which moved #reason, which moved everything below it --
- * including the sticky chart header and the plot itself, 17 px up, WHILE a
- * finger was reading it. Reserving the height it already has costs nothing
- * when idle (the fold budget is why it has no standing min-height) and makes
- * the reflow unobservable during the one moment it would be felt.
- */
-function freezeReason(hold: boolean): void {
-  const reason = $('reason');
-  if (!hold) {
-    reason.style.minHeight = '';
-    return;
-  }
-  if (reason.style.minHeight) return;
-  reason.style.minHeight = `${Math.ceil(reason.getBoundingClientRect().height)}px`;
-}
-
-function scrubAt(clientX: number): void {
-  const s = view.series;
-  if (!s || s.n < 2) return;
-  const rect = $<HTMLCanvasElement>('cv_t').getBoundingClientRect();
-  const fraction = (clientX - rect.left - L) / (rect.width - L - R);
-  // Nearest sample by its time position, not index arithmetic: around a gap
-  // the two disagree, and the crosshair must land on a sample that exists.
-  let i = 0;
-  let best = Infinity;
-  for (let k = 0; k < s.n; k++) {
-    const d = Math.abs((s.frac[k] ?? 0) - fraction);
-    if (d < best) {
-      best = d;
-      i = k;
-    }
-  }
-  const next = fraction < -0.02 || fraction > 1.02 ? -1 : i;
-  if (next === view.scrub) return;
-  freezeReason(next >= 0);
-  view.scrub = next;
-  drawAll();
-  paintHero();
-}
-
-function endScrub(): void {
-  freezeReason(false);
-  if (view.scrub === -1) return;
-  view.scrub = -1;
-  drawAll();
-  paintHero();
-}
-
-/**
- * Which way a touch gesture over the plots is going, decided once.
- *
- * The touchmove handler used to call preventDefault() unconditionally, so a
- * vertical swipe that started anywhere over the charts could not scroll the
- * page: on a phone the plot stack is ~400 px of screen, which made it a dead
- * zone you had to reach around. A swipe is either a scrub (horizontal -- that
- * IS the gesture, "drag across to read any moment") or a scroll (vertical),
- * and the two cannot both win.
- *
- * The axis is locked on the first movement past the slop radius and never
- * revisited for that gesture: a scrub that drifts up must not suddenly hand
- * the page a scroll under the finger, and a scroll that drifts sideways must
- * not start rewriting the hero while it flies past.
- */
-const AXIS_SLOP_PX = 10; // ~1.5 mm; below this a touch has no direction yet
-let touchOrigin: { x: number; y: number } | null = null;
-let touchAxis: 'undecided' | 'scrub' | 'scroll' = 'undecided';
-
-function onTouchStart(e: TouchEvent): void {
-  const t = e.touches[0];
-  touchOrigin = t ? { x: t.clientX, y: t.clientY } : null;
-  touchAxis = 'undecided';
-}
-
-function onTouchMove(e: TouchEvent): void {
-  const t = e.touches[0];
-  if (!t || !touchOrigin) return;
-  if (touchAxis === 'undecided') {
-    const dx = Math.abs(t.clientX - touchOrigin.x);
-    const dy = Math.abs(t.clientY - touchOrigin.y);
-    if (Math.max(dx, dy) < AXIS_SLOP_PX) return;
-    touchAxis = dx > dy ? 'scrub' : 'scroll';
-  }
-  if (touchAxis !== 'scrub') return; // the browser owns this one: let it scroll
-  scrubAt(t.clientX);
-  // Only now, and only for a gesture already committed to scrubbing: this is
-  // what keeps the page still while a finger reads along the chart.
-  e.preventDefault();
-}
-
-/**
- * End of a touch gesture -- including touchcancel, which is not a rare case.
- *
- * The browser fires it whenever it takes the gesture over for scrolling, and
- * only touchend was handled: a swipe that began as a scrub and turned into a
- * scroll left the crosshair frozen on the chart and the hero showing a past
- * temperature under a "NOW"-less stamp, with no touch left to clear it.
- */
-function onTouchRelease(): void {
-  touchOrigin = null;
-  touchAxis = 'undecided';
-  endScrub();
 }
 
 /* --------------------------------------------------------------------- setup */
@@ -468,23 +360,7 @@ export async function boot(): Promise<void> {
     b.onclick = () => setRange(Number(b.dataset['d']));
   });
 
-  const plots = $('plots');
-  // Pointer events, not mouse events: a phone browser reports a real mouse or
-  // a stylus only through these, and `mousemove` on a touch device is a
-  // compatibility event that arrives after the fact, at the tap position. The
-  // touch pointers are skipped here because the touch handlers below own them
-  // -- scrubbing from a raw pointermove would bypass the axis lock and bring
-  // the trapped-page bug straight back.
-  plots.addEventListener('pointermove', (e) => {
-    if ((e as PointerEvent).pointerType !== 'touch') scrubAt((e as PointerEvent).clientX);
-  });
-  plots.addEventListener('pointerleave', (e) => {
-    if ((e as PointerEvent).pointerType !== 'touch') endScrub();
-  });
-  plots.addEventListener('touchstart', (e) => onTouchStart(e as TouchEvent), { passive: true });
-  plots.addEventListener('touchmove', (e) => onTouchMove(e as TouchEvent), { passive: false });
-  plots.addEventListener('touchend', onTouchRelease);
-  plots.addEventListener('touchcancel', onTouchRelease);
+  attachScrub($('plots'));
   window.addEventListener('resize', () => {
     drawAll();
     if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());

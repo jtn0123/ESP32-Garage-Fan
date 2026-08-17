@@ -27,13 +27,22 @@ let onPick: ((speed: number) => void) | null = null;
 /** Set while a drag is committing, so the click it also produces is ignored. */
 let swallowClick = false;
 
-/** Which block sits under this x, 1..12, or null when the pointer is off-rail. */
-function stepAt(clientX: number): number | null {
+/**
+ * Which block the pointer is over, 1..12, or null when it is off the rail.
+ *
+ * Orientation-aware because the rail has two of them: a row on a phone, and a
+ * bottom-up column on a desk (`flex-direction:column-reverse`, speed 1 at the
+ * bottom). Reading x in both would have made every desktop sweep return the
+ * step under the wrong axis.
+ */
+function stepAt(clientX: number, clientY: number): number | null {
   const stack = $('stack');
   const rect = stack.getBoundingClientRect();
-  if (rect.width <= 0) return null;
   const n = stack.children.length;
-  const k = Math.floor(((clientX - rect.left) / rect.width) * n);
+  if (rect.width <= 0 || rect.height <= 0 || n === 0) return null;
+  const vertical = rect.height > rect.width;
+  const along = vertical ? (rect.bottom - clientY) / rect.height : (clientX - rect.left) / rect.width;
+  const k = Math.floor(along * n);
   if (k < 0 || k >= n) return null;
   return k + 1;
 }
@@ -72,7 +81,7 @@ function onPointerDown(e: PointerEvent): void {
   // released yet is a question ("this one?"), and answering it on screen is
   // what lets a thumb that landed one block off slide over and fix it instead
   // of changing the fan speed and then changing it back.
-  preview(stepAt(e.clientX));
+  preview(stepAt(e.clientX, e.clientY));
 }
 
 function onPointerMove(e: PointerEvent): void {
@@ -80,16 +89,19 @@ function onPointerMove(e: PointerEvent): void {
   if (!sweeping) {
     const dx = Math.abs(e.clientX - dragFrom.x);
     const dy = Math.abs(e.clientY - dragFrom.y);
-    // Same axis rule as the charts: a vertical swipe that happens to start on
-    // the rail is someone scrolling the page, not someone setting a speed.
     if (Math.max(dx, dy) < DRAG_SLOP_PX) return;
-    if (dy > dx) {
+    // Same axis rule as the charts, along the rail's OWN axis: a swipe across
+    // the phone's horizontal rail is someone scrolling the page, not someone
+    // setting a speed. On the desk column it is the other way round.
+    const rect = $('stack').getBoundingClientRect();
+    const across = rect.height > rect.width ? dx > dy : dy > dx;
+    if (across) {
       dragFrom = null;
       return;
     }
     sweeping = true;
   }
-  const step = stepAt(e.clientX);
+  const step = stepAt(e.clientX, e.clientY);
   if (step !== null) preview(step);
   e.preventDefault();
 }

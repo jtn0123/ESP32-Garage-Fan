@@ -48,12 +48,12 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 /* ---- console hero ---- */
 #conmain{display:grid;grid-template-columns:1fr 164px;gap:28px;align-items:start}
 #hero{display:flex;align-items:flex-start;gap:44px;flex-wrap:wrap}
-#stamp{font:500 10px var(--mono);letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:var(--pop);color:var(--dim)}
-#stamp.scrub{background:rgba(232,131,74,.16);color:var(--or);font-size:11px}
+#stamp{font:500 11px var(--mono);letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:var(--pop);color:var(--dim)}
+#stamp.scrub{background:rgba(232,131,74,.16);color:var(--or)}
 /* Not current, and not yet declared unreachable: the badge carries the age of
    the last answer instead of the word NOW. Amber rather than red -- one missed
    poll is not a verdict. */
-#stamp.stale{background:rgba(232,131,74,.10);color:var(--or);font-size:11px}
+#stamp.stale{background:rgba(232,131,74,.10);color:var(--or)}
 .t1{font:600 92px/.82 var(--sans);letter-spacing:-.045em;color:var(--or);margin-top:4px}
 .t2{font:600 62px/.82 var(--sans);letter-spacing:-.04em;margin-top:6px}
 .deg{opacity:.42}
@@ -136,11 +136,14 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #charts{margin-top:36px}
 #chead{display:flex;align-items:center;gap:12px;padding-bottom:2px}
 #chctl{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ln);padding-bottom:2px;flex-wrap:wrap}
-#chead .ct{flex:1 1 100%;font:600 11px var(--mono);letter-spacing:.1em;color:var(--mut);padding-bottom:6px}
+#chead .ct{flex:1 1 100%;font:600 12px var(--mono);letter-spacing:.1em;color:var(--mut);padding-bottom:6px}
 /* The title slot IS the scrub readout (see history_view.ts::paintChartTitle):
    it sits directly above the plots and never under the hand, which the
    crosshair and the hero stamp cannot both claim on a phone. */
-#chead .ct.scrub{color:var(--or);font-size:12px}
+/* Colour changes, size does not: at 11 px idle and 12 px scrubbing this line
+   grew by a pixel the instant a finger touched the chart, and everything below
+   it -- including the plot being read -- moved with it. */
+#chead .ct.scrub{color:var(--or)}
 #chctl .cl{font:500 10px var(--mono);letter-spacing:.1em;color:var(--fai);padding-bottom:6px}
 #chips{display:flex;gap:12px}
 #chips button{background:none;padding:4px 0 6px;cursor:pointer;font:500 10px var(--mono);letter-spacing:.1em;border:0;border-bottom:2px solid transparent;color:var(--fai)}
@@ -235,7 +238,7 @@ body{padding:0 16px 32px}
 #gauge{margin-top:16px}
 #reason{margin-top:12px;min-height:0}
 #acts{margin-top:14px}
-.crow{flex-wrap:wrap;margin-top:8px}
+.crow{flex-wrap:wrap;margin:4px 0 2px}
 /* The prose hint is desktop-only, but an EXPLANATION is not decoration: a
    failed load, an empty range or a card that cannot cover the window has to
    say so on the screen where it is most likely to be seen. */
@@ -255,10 +258,10 @@ body{padding:0 16px 32px}
    it gained the weekday at 7D it no longer fitted beside ADD ROW: that pushed
    ADD ROW onto its own line and shoved the whole sticky plot stack 32 px DOWN
    mid-gesture -- the chart moving out from under the finger reading it. */
-#chead{position:sticky;top:0;z-index:4;background:var(--bg);padding-top:6px;padding-bottom:4px}
-/* 12 px in BOTH states: the scrub readout used to step up from 11 px, which
-   moved the plot by a pixel every time a finger touched it. */
-#chead .ct{font-size:12px}
+#chead{position:sticky;top:0;z-index:4;background:var(--bg);padding-top:2px;padding-bottom:2px}
+/* Two 44 px control rows are worth 24 px of gap elsewhere: the targets are the
+   requirement, the padding around them was not. */
+#chctl{gap:8px;padding-bottom:0}
 /* ADD ROW is a label, not a control, and at phone width it was a 2.03:1 grey
    crowding the readout. The chips underneath say the same thing by being
    tappable. */
@@ -301,7 +304,7 @@ body{padding:0 16px 32px}
    with it: when the scope is open you are looking at the scope.) */
 #pwmhint{display:none}
 #metrics>div{min-width:0}
-#charts{margin-top:16px}
+#charts{margin-top:8px}
 /* 11 px of ink was the entire hit area for `7D` -- and this row is how you
    reach the 7-day chart. The glyph stays small; the target does not. The row
    had 180 px of empty space to its left, so the padding is free. */

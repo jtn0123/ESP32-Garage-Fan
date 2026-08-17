@@ -16,9 +16,36 @@ test('loads, paints live data, and reports no errors', async ({ page }) => {
 
 test('the status bar fills in from /api/state', async ({ page }) => {
   await openConsole(page);
+  // The broker chip is on the header line at every width: whether the
+  // controller is answering is the one header fact a phone still needs.
   await expect(page.locator('#hmq')).toContainText('BROKER');
+});
+
+test('the header carries firmware and battery on a wide screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openConsole(page);
   await expect(page.locator('#hfw')).not.toHaveText('FW —');
   await expect(page.locator('#hbat')).toBeVisible(); // mock reports a battery
+});
+
+/**
+ * ...and files them in the diagnostics footer on a phone.
+ *
+ * The header was a single nowrap row that overflowed 320 px, so it now drops
+ * these two at that width -- which is only acceptable because they have a home:
+ * the footer strip that already carries SLOT, UPTIME and VBAT. Asserting the
+ * home, not the hiding, is what keeps the information from quietly vanishing in
+ * some later trim.
+ */
+test('a phone finds firmware and battery in the diagnostics footer', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  await expect(page.locator('#hbits')).toBeHidden();
+  const strip = page.locator('#stats');
+  await expect(strip).toContainText('FW');
+  await expect(strip).toContainText(/\d+\.\d+\.\d+/); // the running version
+  await expect(strip).toContainText('VBAT');
+  await expect(strip).toContainText(/\d+% · \d\.\d+ V/); // percentage AND volts
 });
 
 test('the hero shows garage, outside and differential', async ({ page }) => {
@@ -223,6 +250,10 @@ test('the page never scrolls sideways', async ({ page }) => {
  * pixels rather than the CSS that produces it.
  */
 test('the speed rail is a thumb-sized target', async ({ page }) => {
+  // At phone width, where the rail is a row and a thumb is the input. On a desk
+  // it is a narrow vertical column driven by a mouse, which is a different
+  // control with different rules.
+  await page.setViewportSize({ width: 320, height: 568 });
   await openConsole(page);
   const stack = await page.locator('#stack').boundingBox();
   expect(stack, '#stack has no box').not.toBeNull();
@@ -241,10 +272,11 @@ test('sweeping the rail previews every step and commands once', async ({ page })
   const from = await page.locator('#stack button').nth(2).boundingBox();
   const to = await page.locator('#stack button').nth(7).boundingBox();
   if (!from || !to) return;
-  const y = from.y + from.height / 2;
-  await page.mouse.move(from.x + from.width / 2, y);
+  // Centre to centre, so the same drag works on the phone's row and the desk's
+  // bottom-up column without the test knowing which it is.
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
-  await page.mouse.move(to.x + to.width / 2, y, { steps: 10 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 10 });
   // Held, not released: the preview is the whole point of the gesture, and it
   // must show the pending step before anything is sent to the fan.
   await expect(page.locator('#railnum')).toHaveText('8');
