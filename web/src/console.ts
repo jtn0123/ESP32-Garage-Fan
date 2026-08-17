@@ -166,7 +166,7 @@ export function paintHero(): void {
     // A poll has failed but the verdict has not landed yet. The reading on
     // screen is as old as the last answer, so the badge says so instead of
     // asserting NOW for the next 20 seconds.
-    const age = view.lastOk ? (Date.now() - view.lastOk) / 60_000 : NaN;
+    const age = view.lastOk ? (Date.now() - view.lastOk) / 60_000 : Number.NaN;
     stamp.textContent = view.lastOk ? ago(age) : 'NO CONTACT';
     stamp.className = 'stale';
   } else {
@@ -196,7 +196,12 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
           ? `running at ${histSpeed}`
           : 'off';
     const gap = delta === null ? '–' : delta.toFixed(1);
-    return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}. Move off the chart to return to now.`;
+    // No "move off the chart to return to now" tail any more. It was 36
+    // characters of instruction for a gesture the reader has already performed,
+    // and this sentence has to fit inside the box reserved for the live one it
+    // replaces (scrub.ts::freezeReason) -- the live sentences are never shorter
+    // than three lines at 320 px, and this is at most three.
+    return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}.`;
   }
   if (delta === null) {
     const topic = view.info?.topic_out ? ` on ${view.info.topic_out}` : '';
@@ -213,6 +218,52 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     return `Garage is only ${gap}°F hotter than the yard — under the +${s.off_f}° release point, so auto has dropped the fan to ${rest}. It engages speed ${s.auto_max} again above +${s.on_f}°.`;
   }
   return `Gap is ${gap}°F, inside the +${s.off_f}°/+${s.on_f}° deadband — auto is holding ${s.speed > 0 ? `speed ${s.speed}` : 'off'} until it crosses a threshold, so the fan does not chatter.`;
+}
+
+/**
+ * Link quality, in the three bands that mean something operationally.
+ *
+ * Around -61 dBm is solid; past -80 the MQTT session starts dropping and gaps
+ * appear in the charts, which is the failure this colour is warning about.
+ */
+function rssiColour(dbm: number): string {
+  if (dbm > -70) return OK;
+  if (dbm > -80) return OR;
+  return '#e0a9a9';
+}
+
+/** "⚡ 100% · 4.195 V" / "3.71 V" / "no pack" -- the VBAT bit. */
+function battBit(batt: DeviceState['batt']): string {
+  if (!batt) return 'no pack';
+  const bolt = batt.chg ? '⚡ ' : '';
+  const pct = batt.pct === null ? '' : `${batt.pct}% · `;
+  return `${bolt}${pct}${batt.v.toFixed(3)} V`;
+}
+
+/** "20.3 W · 120.9 V" / "20.3 W" / "no meter" -- the PLUG bit. */
+function plugBit(plug: DeviceState['plug']): string {
+  if (!plug) return 'no meter';
+  const volts = plug.v === null ? '' : ` · ${plug.v.toFixed(1)} V`;
+  return `${plug.w.toFixed(1)} W${volts}`;
+}
+
+/** Red only for a MEASURED disagreement; absent hardware is not a fault. */
+function plugColour(plug: DeviceState['plug']): string {
+  if (!plug) return DIM;
+  return plug.verdict === -1 ? '#e0a9a9' : OK;
+}
+
+/**
+ * The broker chip's state class.
+ *
+ * Three states, in priority order: we cannot reach the DEVICE (which outranks
+ * anything the device would have told us about the broker), we have not heard
+ * from it yet at all, or the device's own view of the broker.
+ */
+function brokerClass(stale: boolean, s: DeviceState | null): string {
+  if (stale) return 'stale';
+  if (!s) return '';
+  return s.mqtt ? 'up' : '';
 }
 
 /** The GAS status bit: off (dim), armed (quiet), or actively boosting (loud). */
@@ -237,21 +288,12 @@ function bitValues(): { value: string; colour: string }[] {
   if (!s.sd_total_mb) cardColour = DIM;
   else if (cardTense) cardColour = OR;
   return [
-    { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
+    { value: `${s.rssi} dBm`, colour: rssiColour(s.rssi) },
     { value: card, colour: cardColour },
-    // Percentage and the charging bolt ride along, because on a phone this is
-    // the only place they appear (the header chip is desktop-only now).
+    { value: battBit(s.batt), colour: s.batt ? PU : DIM },
     {
-      value: s.batt
-        ? `${s.batt.chg ? '⚡ ' : ''}${s.batt.pct !== null ? `${s.batt.pct}% · ` : ''}${s.batt.v.toFixed(3)} V`
-        : 'no pack',
-      colour: s.batt ? PU : DIM,
-    },
-    {
-      value: s.plug
-        ? `${s.plug.w.toFixed(1)} W${s.plug.v !== null ? ` · ${s.plug.v.toFixed(1)} V` : ''}`
-        : 'no meter',
-      colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
+      value: plugBit(s.plug),
+      colour: plugColour(s.plug),
     },
     gasBit(s),
     { value: s.fw, colour: OUT },
@@ -398,7 +440,7 @@ export function paint(next?: DeviceState): void {
       : s.mqtt
         ? '● BROKER UP'
         : '● BROKER DOWN';
-  mqtt.className = stale ? 'stale' : !s ? '' : s.mqtt ? 'up' : '';
+  mqtt.className = brokerClass(stale, s);
   document.body.classList.toggle('offline', stale);
   if (!s) {
     if (stale) {

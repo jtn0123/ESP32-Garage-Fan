@@ -105,6 +105,59 @@ export async function resetScen(page: Page): Promise<void> {
 }
 
 /**
+ * Serve the Google-hosted webfonts from Node, when asked for by REAL_FONTS=1.
+ *
+ * Off by default, and that default is deliberate: routing these makes every
+ * test depend on outbound network, which is not a property a unit-of-behaviour
+ * suite should have. But the fallback font is not a neutral choice either --
+ * this sandbox cannot reach fonts.googleapis.com (Chromium does not trust the
+ * agent proxy's CA, so the `media="print"` link never fires its onload and the
+ * stylesheet stays print-only), while CI fetches it fine and renders in
+ * Instrument Sans / JetBrains Mono. Every local measurement in this repo has
+ * therefore been taken in the WRONG metrics, and one layout bug (the hero
+ * rewrapping when the scrub badge widened) was reachable only in CI.
+ *
+ * Node's fetch does trust the proxy CA, so with this on, the browser gets
+ * exactly the bytes CI gets:  REAL_FONTS=1 npx playwright test --workers=2
+ *
+ * The tests themselves assert font-independent invariants ("this box is the
+ * same size before and after"), which is what actually catches that class. This
+ * is the reproduction tool, not the guard.
+ */
+const fontCache = new Map<string, { body: Buffer; type: string }>();
+
+async function serveWebfonts(page: Page): Promise<void> {
+  const fetchOnce = async (url: string): Promise<{ body: Buffer; type: string }> => {
+    const hit = fontCache.get(url);
+    if (hit) return hit;
+    const res = await fetch(url, {
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151 Safari/537.36',
+      },
+    });
+    const fresh = {
+      body: Buffer.from(await res.arrayBuffer()),
+      type: res.headers.get('content-type') ?? 'application/octet-stream',
+    };
+    fontCache.set(url, fresh);
+    return fresh;
+  };
+  for (const pattern of ['https://fonts.googleapis.com/**', 'https://fonts.gstatic.com/**']) {
+    await page.route(pattern, async (route) => {
+      try {
+        const { body, type } = await fetchOnce(route.request().url());
+        await route.fulfill({ status: 200, contentType: type, body });
+      } catch {
+        // No network: fall through to the browser's own (failing) request, which
+        // is the normal local behaviour anyway.
+        await route.continue();
+      }
+    });
+  }
+}
+
+/**
  * The base fixture: fails a test if the page logged an error or threw.
  *
  * Deliberately not an afterEach in each spec -- attached here it cannot be
@@ -136,6 +189,7 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
   },
 
   errors: async ({ page }, use) => {
+    if (process.env['REAL_FONTS']) await serveWebfonts(page);
     const errors: string[] = [];
     page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);

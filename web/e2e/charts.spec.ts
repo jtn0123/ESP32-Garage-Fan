@@ -279,26 +279,69 @@ test('a controller with no restart marks still draws its charts', async ({ page 
 /**
  * The chart must not move while a finger is reading it.
  *
- * Both halves of the round-1 regression: the sticky readout grew when it gained
- * a weekday at 7D (pushing everything below it 32 px down), and the state
- * sentence above the charts re-wraps to a different line count when it
- * describes a scrubbed moment (17 px at 24H). Either one slides the plot out
- * from under the touch that caused it.
+ * Four separate causes so far, all the same shape -- something above the plots
+ * re-measures when the scrub content replaces the live content:
+ *
+ *  1. the sticky readout grew when it gained a weekday at 7D (+32 px);
+ *  2. the state sentence wraps to a different line count when it describes a
+ *     past moment (-17 px at 412, +19 px at 320);
+ *  3. the hero badge went from `NOW` to `19:33 · 13H20 AGO`, which widened the
+ *     hero's first column until the third column wrapped to a second row
+ *     (+79 px) -- CI caught this one and local runs could not, because the
+ *     webfonts do not load here and the fallback metrics are narrower;
+ *  4. the same badge at 7D, 25 characters wide.
+ *
+ * These assertions are deliberately font-INDEPENDENT: each one says "this box
+ * is the same size before and after", which is true in any font, rather than
+ * naming pixel values that only hold in one. Both phone widths, because 320 and
+ * 412 wrap the hero differently and (2) only showed up at 320.
  */
-for (const days of ['1', '7', '30'] as const) {
-  test(`starting a scrub does not move the ${days}-day plot`, async ({ page }) => {
-    await openConsole(page);
-    if (days !== '1') await page.locator(`#ranges button[data-d="${days}"]`).click();
-    await page.locator('#cv_t').scrollIntoViewIfNeeded();
-    const pageTop = () =>
-      page.evaluate(() => document.getElementById('cv_t')!.getBoundingClientRect().top + scrollY);
-    const before = await pageTop();
-    const box = await page.locator('#cv_t').boundingBox();
-    if (!box) return;
-    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
-    await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}:\d{2}/);
-    expect(Math.abs((await pageTop()) - before), 'the plot moved under the scrub').toBeLessThanOrEqual(1);
-  });
+for (const width of [320, 412] as const) {
+  for (const days of ['1', '7', '30'] as const) {
+    test(`starting a scrub moves nothing at ${width}px on the ${days}-day range`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 320 ? 568 : 839 });
+      await openConsole(page);
+      if (days !== '1') await page.locator(`#ranges button[data-d="${days}"]`).click();
+      await page.locator('#cv_t').scrollIntoViewIfNeeded();
+
+      const shape = () =>
+        page.evaluate(() => {
+          const box = (sel: string) => {
+            const el = document.querySelector(sel);
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { top: +(r.top + scrollY).toFixed(1), h: +r.height.toFixed(1), w: +r.width.toFixed(1) };
+          };
+          const hero = document.getElementById('hero')!;
+          return {
+            plotTop: box('#cv_t')!.top,
+            hero: box('#hero'),
+            // Column tops, so a rewrap is caught even if the height did not
+            // happen to change with it.
+            heroCols: [...hero.children].map((c) => +(c.getBoundingClientRect().top + scrollY).toFixed(1)),
+            reason: box('#reason'),
+            chead: box('#chead'),
+            stampW: box('#stamp')!.w,
+          };
+        });
+
+      const before = await shape();
+      const plot = await page.locator('#cv_t').boundingBox();
+      if (!plot) return;
+      await page.mouse.move(plot.x + plot.width * 0.5, plot.y + plot.height * 0.5);
+      await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}:\d{2}/);
+      const after = await shape();
+
+      // The badge's fixed footprint is the MECHANISM behind the hero half: a
+      // constant-width box cannot re-measure the column it sits in.
+      expect(after.stampW, 'the hero badge changed width on scrub').toBe(before.stampW);
+      expect(after.hero, 'the hero re-measured on scrub').toEqual(before.hero);
+      expect(after.heroCols, 'a hero column moved on scrub').toEqual(before.heroCols);
+      expect(after.reason, 'the state sentence re-measured on scrub').toEqual(before.reason);
+      expect(after.chead, 'the sticky readout re-measured on scrub').toEqual(before.chead);
+      expect(after.plotTop, 'the plot moved under the scrub').toBe(before.plotTop);
+    });
+  }
 }
 
 test('the row chips are thumb-sized and say the strip continues', async ({ page }) => {

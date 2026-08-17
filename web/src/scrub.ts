@@ -15,24 +15,37 @@ import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 
 
 /**
- * Hold the layout above the charts still for the duration of a gesture.
+ * Pin the state sentence's box for the duration of a gesture.
  *
- * The plain-English state sentence is re-derived on every scrub sample, and a
- * scrubbed sentence is not the same length as a live one: at 24H it came out
- * one line shorter, which moved #reason, which moved everything below it --
- * including the sticky chart header and the plot itself, 17 px up, WHILE a
- * finger was reading it. Reserving the height it already has costs nothing
- * when idle (the fold budget is why it has no standing min-height) and makes
- * the reflow unobservable during the one moment it would be felt.
+ * The plain-English sentence is re-derived on every scrub sample and a scrubbed
+ * sentence never wraps to the same number of lines as a live one -- one line
+ * SHORTER at 412 (24H), one line LONGER at 320 (7D). Either way #reason changes
+ * height, and everything below it moves: the pills, the metric strip, the rail,
+ * the sticky chart header and the plot itself, by 17-19 px, while a finger is
+ * reading that plot.
+ *
+ * `height`, not `min-height`: the first attempt reserved a minimum, which stops
+ * the box shrinking and does nothing about the case where the new sentence is
+ * TALLER -- which is exactly what 320/7D turned out to be. A fixed box with
+ * `overflow:hidden` cannot move in either direction, in any font, at any width.
+ * The scrub sentence is written to fit inside the shortest live sentence this
+ * screen can show (see console.ts::reason), so the clip is a backstop rather
+ * than something a reader meets; a truncated tail would still be better than a
+ * chart that slides out from under the thumb that touched it.
+ *
+ * Costs nothing when idle -- the fold budget is why there is no standing
+ * min-height on this element.
  */
 function freezeReason(hold: boolean): void {
   const reason = $('reason');
   if (!hold) {
-    reason.style.minHeight = '';
+    reason.style.height = '';
+    reason.style.overflow = '';
     return;
   }
-  if (reason.style.minHeight) return;
-  reason.style.minHeight = `${Math.ceil(reason.getBoundingClientRect().height)}px`;
+  if (reason.style.height) return;
+  reason.style.height = `${Math.ceil(reason.getBoundingClientRect().height)}px`;
+  reason.style.overflow = 'hidden';
 }
 
 function scrubAt(clientX: number): void {

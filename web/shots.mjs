@@ -178,11 +178,26 @@ async function shootFooterAndSettings(page, name) {
   await page.waitForTimeout(300);
   await shoot(page, `${name}-08-bottom`);
 
+  /*
+   * TAP, not click. The bits have toggled their tip on click for a long time,
+   * and `.click()` moves the pointer in first -- which OPENS the tip on hover,
+   * so the click that follows closes it again and the shot comes out empty.
+   * Three review rounds read that empty frame as "tooltips never appear on
+   * touch" and filed it as a product bug; it was this line. A tap dispatches
+   * touch without a preceding hover, which is what a phone actually does.
+   */
   const bit = page.locator('#stats span.bit').first();
   if (await bit.count()) {
-    await bit.click().catch(() => {});
+    await bit.tap().catch(() => bit.dispatchEvent('click'));
     await page.waitForTimeout(300);
-    await shoot(page, `${name}-09-tip`);
+    /*
+     * fullPage, because #tip is anchored to the BOTTOM of #statwrap and grows
+     * upward. Scrolling the status strip into view therefore puts the tip
+     * itself above the frame, and a viewport shot of it is blank whether the
+     * tip opened or not -- which is the other half of why three rounds read
+     * this as "tooltips never appear on touch".
+     */
+    await shoot(page, `${name}-09-tip`, { fullPage: true });
   }
 
   // Clicked through the DOM: if the header overflows on a narrow phone the
@@ -232,7 +247,7 @@ async function run() {
   await page.goto('/');
   await page.waitForSelector('#railnum:not(:has-text("–"))', { timeout: 15000 });
   await page.waitForTimeout(800);
-  await page.request.get('/_scen?down=true');
+  await fetch(`${BASE}/_scen?down=true`);
   try {
     await page.waitForFunction(() => document.body.classList.contains('offline'), null, {
       timeout: 70000,
@@ -242,8 +257,57 @@ async function run() {
   }
   await shoot(page, 'se-12-offline', { fullPage: true });
   await shoot(page, 'se-13-offline-header', { clip: { x: 0, y: 0, width: 320, height: 70 } });
-  await page.request.get('/_scen?down=false');
   await ctx.close();
+
+  /*
+   * COLD: the device is already dead when the page loads.
+   *
+   * A different path from the warm one and the more common one in a garage --
+   * you walk in, open the console, and the fan has been down for hours, so
+   * there is no last-known anything to decay from. It was a real bug (the
+   * offline guard measured from a lastOk that is 0 until a poll succeeds) and
+   * the sweep could not show it either way, because it always loaded against a
+   * live mock first.
+   */
+  const coldCtx = await browser.newContext({ ...devices['iPhone SE'], baseURL: BASE });
+  const cold = await coldCtx.newPage();
+  await cold.goto('/');
+  try {
+    await cold.waitForFunction(() => document.body.classList.contains('offline'), null, {
+      timeout: 70000,
+    });
+  } catch {
+    console.log('  !! the cold page never entered the offline state -- shooting it anyway');
+  }
+  await shoot(cold, 'se-14-offline-cold', { fullPage: true });
+  await coldCtx.close();
+  // Reset the knob from NODE, not through a page: the contexts that set it are
+  // closed by now, and `page.request` on a closed context fails silently -- which
+  // left `down=true` set and made every later shot a picture of a dead device.
+  await fetch(`${BASE}/_scen?down=false`);
+
+  /*
+   * The sticky chart header, photographed while it is actually doing its job.
+   * Every other chart shot has #chead near the top of the viewport anyway, so
+   * they cannot show whether it pins -- three rounds of review could only note
+   * that the claim was unverified. Scroll the plot's middle to the top of the
+   * screen and the header is either still there or it is not.
+   */
+  const stickyCtx = await browser.newContext({ ...devices['iPhone SE'], baseURL: BASE });
+  const sticky = await stickyCtx.newPage();
+  await sticky.goto('/');
+  await sticky.waitForSelector('#railnum:not(:has-text("–"))', { timeout: 15000 });
+  await sticky.waitForTimeout(900);
+  await sticky.evaluate(() => {
+    const cv = document.getElementById('cv_t');
+    if (cv) {
+      const mid = cv.getBoundingClientRect().top + scrollY + cv.getBoundingClientRect().height / 2;
+      window.scrollTo(0, mid);
+    }
+  });
+  await sticky.waitForTimeout(400);
+  await shoot(sticky, 'se-15-charts-scrolled');
+  await stickyCtx.close();
 
   await browser.close();
 }

@@ -289,3 +289,26 @@ test('sweeping the rail previews every step and commands once', async ({ page })
   await expect(page.locator('#railnum')).toHaveText('8');
   await expect(page.locator('#railnum')).not.toHaveClass(/pick/);
 });
+
+/**
+ * The whole speed rail on the first screen of the smallest phone.
+ *
+ * This is the fold budget as an assertion rather than a claim in a report: at
+ * 320x568 the rail used to start 19 px below the fold and end 52 px below it,
+ * so the primary control needed a scroll. It now ends at ~546 with about 20 px
+ * to spare, which is little enough that anything added above it needs to know.
+ */
+test('the speed rail is on the first screen at 320x568', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  const geometry = await page.evaluate(() => {
+    const bottom = (sel: string) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect();
+      return +(r.bottom + scrollY).toFixed(1);
+    };
+    return { scrollY: window.scrollY, stack: bottom('#stack'), acts: bottom('#acts') };
+  });
+  expect(geometry.scrollY, 'the page was already scrolled').toBe(0);
+  expect(geometry.acts, 'the auto/off pills are below the fold').toBeLessThanOrEqual(568);
+  expect(geometry.stack, 'the speed rail is below the fold').toBeLessThanOrEqual(568);
+});

@@ -54,17 +54,33 @@ function stepAt(clientX: number, clientY: number): number | null {
  * own speed for as long as the gesture lasts, otherwise a poll landing
  * mid-sweep would snap the rail back to what the fan is still doing.
  */
+/** "off" / "raw" / "7" -- the big number over the rail. */
+function railLabel(speed: number): string {
+  if (speed === 0) return 'off';
+  // Negative means the fan is on a raw duty this table cannot name: the
+  // controller accepts one over MQTT, and printing a step number for it would
+  // be a guess.
+  if (speed < 0) return 'raw';
+  return String(speed);
+}
+
+/** Border of block `n`: the selected step, a lit one below it, or unlit. */
+function blockBorder(n: number, shown: number): string {
+  if (n === shown) return AC;
+  return n <= shown && shown > 0 ? 'rgba(59,130,246,.4)' : '#1a2029';
+}
+
 export function paintRail(speed: number): void {
   const shown = view.railPick ?? speed;
   const num = $('railnum');
-  num.textContent = shown === 0 ? 'off' : shown < 0 ? 'raw' : String(shown);
+  num.textContent = railLabel(shown);
   num.className = view.railPick === null ? '' : 'pick';
   Array.from($('stack').children).forEach((child, k) => {
     const b = child as HTMLElement;
     const n = k + 1;
     const lit = n <= shown && shown > 0;
     b.style.background = lit ? `rgba(59,130,246,${0.2 + 0.055 * n})` : '#12161d';
-    b.style.borderColor = n === shown ? AC : lit ? 'rgba(59,130,246,.4)' : '#1a2029';
+    b.style.borderColor = blockBorder(n, shown);
   });
 }
 

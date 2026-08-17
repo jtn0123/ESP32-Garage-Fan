@@ -52,7 +52,8 @@ export function ago(minutes: number): string {
   if (hours >= 48) {
     const days = Math.floor(hours / 24);
     const rem = hours % 24;
-    return `${days}D${rem ? `${rem}H` : ''} AGO`;
+    const tail = rem === 0 ? '' : `${rem}H`;
+    return `${days}D${tail} AGO`;
   }
   const rem = m % 60;
   return `${hours}H${rem ? String(rem).padStart(2, '0') : ''} AGO`;
