@@ -6,16 +6,9 @@
  * RAM-ring data as if it were the card's), and the 7/30-day branch used to
  * return three series instead of seven.
  */
-import {
-  expect,
-  hasTouch,
-  inkedColumns,
-  openConsole,
-  recordRequests,
-  test,
-  touchDrag,
-  touchRelease,
-} from './harness';
+// Touch gestures live in touch.spec.ts: they need a touchscreen, which the
+// desk project does not have.
+import { expect, inkedColumns, openConsole, recordRequests, test } from './harness';
 
 test('the four ranges are offered and 24H starts selected', async ({ page }) => {
   await openConsole(page);
@@ -193,49 +186,6 @@ test('a scrubbed moment on a multi-day range carries its date', async ({ page })
   await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}\/\d{1,2} \d{1,2}:\d{2}/);
 });
 
-// ------------------------------------------------------------ touch gestures
-
-/**
- * The charts used to be a trap. touchmove called preventDefault() on every
- * move, so a vertical swipe that started anywhere over ~400 px of plots could
- * not scroll the page at all -- on a phone you had to reach around the charts
- * to get past them.
- */
-test('a vertical swipe over the charts scrolls the page', async ({ page }) => {
-  await openConsole(page);
-  test.skip(!(await hasTouch(page)), 'no touchscreen on the desk project');
-  await page.locator('#cv_t').scrollIntoViewIfNeeded();
-  const box = await page.locator('#cv_t').boundingBox();
-  if (!box) return;
-  const before = await page.evaluate(() => window.scrollY);
-  const x = box.x + box.width * 0.5;
-  await touchDrag(page, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.8 - 200 });
-  await expect
-    .poll(() => page.evaluate(() => window.scrollY), {
-      message: 'a vertical swipe over the plots did not scroll the page',
-    })
-    .toBeGreaterThan(before);
-  // And it must not have scrubbed on the way past.
-  await expect(page.locator('#stamp')).toHaveText('NOW');
-});
-
-test('a horizontal drag scrubs without moving the page', async ({ page }) => {
-  await openConsole(page);
-  test.skip(!(await hasTouch(page)), 'no touchscreen on the desk project');
-  await page.locator('#cv_t').scrollIntoViewIfNeeded();
-  const box = await page.locator('#cv_t').boundingBox();
-  if (!box) return;
-  const before = await page.evaluate(() => window.scrollY);
-  const y = box.y + box.height * 0.5;
-  await touchDrag(page, { x: box.x + box.width * 0.25, y }, { x: box.x + box.width * 0.75, y }, {
-    hold: true, // releasing ends the scrub, so read it with the finger still down
-  });
-  await expect(page.locator('#stamp')).not.toHaveText('NOW');
-  expect(await page.evaluate(() => window.scrollY), 'the page moved under the scrub').toBe(before);
-  await touchRelease(page);
-  await expect(page.locator('#stamp')).toHaveText('NOW');
-});
-
 // The explanations behind the status strip. Note the handlers sit on .bit, not
 // on the value span inside it -- a selector that lands on the child silently
 // clicks nothing, which is how this test failed the first time.
@@ -324,4 +274,71 @@ test('a controller with no restart marks still draws its charts', async ({ page 
   await openConsole(page);
   await expect(page.locator('#cv_t')).toBeVisible();
   await expect(page.locator('#tcap')).not.toContainText(/could not load/i);
+});
+
+/**
+ * The chart must not move while a finger is reading it.
+ *
+ * Both halves of the round-1 regression: the sticky readout grew when it gained
+ * a weekday at 7D (pushing everything below it 32 px down), and the state
+ * sentence above the charts re-wraps to a different line count when it
+ * describes a scrubbed moment (17 px at 24H). Either one slides the plot out
+ * from under the touch that caused it.
+ */
+for (const days of ['1', '7', '30'] as const) {
+  test(`starting a scrub does not move the ${days}-day plot`, async ({ page }) => {
+    await openConsole(page);
+    if (days !== '1') await page.locator(`#ranges button[data-d="${days}"]`).click();
+    await page.locator('#cv_t').scrollIntoViewIfNeeded();
+    const pageTop = () =>
+      page.evaluate(() => document.getElementById('cv_t')!.getBoundingClientRect().top + scrollY);
+    const before = await pageTop();
+    const box = await page.locator('#cv_t').boundingBox();
+    if (!box) return;
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await expect(page.locator('#chtitle')).toHaveText(/\d{1,2}:\d{2}/);
+    expect(Math.abs((await pageTop()) - before), 'the plot moved under the scrub').toBeLessThanOrEqual(1);
+  });
+}
+
+test('the row chips are thumb-sized and say the strip continues', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  const chips = page.locator('#chips');
+  // Seven chips need 332 px in a 288 px column, so at this width the strip
+  // MUST advertise itself as scrollable -- a silent clip reads as a bug.
+  await expect(chips).toHaveClass(/more/);
+  for (const i of [0, 3, 6]) {
+    const b = await page.locator('#chips button').nth(i).boundingBox();
+    expect(b!.height, `chip ${i} is under 44 px tall`).toBeGreaterThanOrEqual(44);
+  }
+  // NOX is the last one and the one that used to be unreachable.
+  await chips.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+  await expect(chips).not.toHaveClass(/more/);
+  const inView = await page.evaluate(() => {
+    const host = document.getElementById('chips')!;
+    const nox = host.querySelector('[data-key="nox"]')!.getBoundingClientRect();
+    const box = host.getBoundingClientRect();
+    return nox.left >= box.left - 1 && nox.right <= box.right + 1;
+  });
+  expect(inView, 'NOX is still not on screen after scrolling to the end').toBeTruthy();
+  await page.locator('#chips button[data-key="nox"]').click();
+  await expect(page.locator('#sub_n')).not.toHaveClass(/hide/);
+});
+
+test('the range chips are thumb-sized and separated', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  const boxes = await page.locator('#ranges button').evaluateAll((els) =>
+    els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, w: r.width, h: r.height }; }),
+  );
+  expect(boxes).toHaveLength(4);
+  for (const [i, b] of boxes.entries()) {
+    expect(b.w, `range chip ${i} is ${b.w} px wide`).toBeGreaterThanOrEqual(44);
+    expect(b.h, `range chip ${i} is ${b.h} px tall`).toBeGreaterThanOrEqual(44);
+  }
+  // Adjacent chips must not share an edge, or one thumb hits two ranges.
+  for (let i = 1; i < boxes.length; i++) {
+    expect(boxes[i]!.x - (boxes[i - 1]!.x + boxes[i - 1]!.w)).toBeGreaterThanOrEqual(4);
+  }
 });

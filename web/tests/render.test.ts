@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { limits } from '../src/charts.js';
 import { isNewer } from '../src/console.js';
+import { battReadout, speedReadout } from '../src/history_view.js';
 import { axisLabel, cardTight, storage } from '../src/format.js';
 import type { DeviceState } from '../src/types.js';
 
@@ -132,5 +133,21 @@ describe('axisLabel: one format per range', () => {
     // long axis unreadable at phone width.
     expect(axisLabel(t, 30)).toBe('8/16');
     expect(axisLabel(t, 60)).toBe('8/16');
+  });
+});
+
+describe('the scrub readouts each say one thing', () => {
+  it('distinguishes a stopped fan from an unlogged one', () => {
+    // Not the same fact: rows written before the speed column existed have no
+    // speed at all, and rendering those as "off" invents a reading.
+    expect(speedReadout(7)).toBe('speed 7');
+    expect(speedReadout(0)).toBe('off');
+    expect(speedReadout(undefined)).toBe('');
+  });
+
+  it('names the charger only while it was actually running', () => {
+    expect(battReadout(4.187, false)).toBe('4.19 V');
+    expect(battReadout(4.187, true)).toBe('4.19 V ⚡ charging');
+    expect(battReadout(null, true)).toBe('');
   });
 });

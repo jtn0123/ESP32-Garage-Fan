@@ -14,9 +14,10 @@ import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
 import { ago, airflow, cardTight, hoursMinutes, moment, signed, storage } from './format.js';
 import { minutesBack, paintChartTitle } from './history_view.js';
+import { paintRail } from './rail.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, STATUS_BITS, sampleIndex, view, type RowKey } from './state.js';
-import { AC, DIM, OK, OR, OUT, PU, TX } from './theme.js';
+import { AC, DIM, FAI, OK, OR, OUT, PU, TX } from './theme.js';
 import type { DeviceState } from './types.js';
 
 let settingsPainter: (() => void) | null = null;
@@ -153,6 +154,13 @@ export function paintHero(): void {
     const t = series.ts(i);
     stamp.textContent = `${t === null ? '–' : moment(t, view.days)} · ${ago(minutesBack(series, i))}`;
     stamp.className = 'scrub';
+  } else if (view.pollFail > 0) {
+    // A poll has failed but the verdict has not landed yet. The reading on
+    // screen is as old as the last answer, so the badge says so instead of
+    // asserting NOW for the next 20 seconds.
+    const age = view.lastOk ? (Date.now() - view.lastOk) / 60_000 : NaN;
+    stamp.textContent = view.lastOk ? ago(age) : 'NO CONTACT';
+    stamp.className = 'stale';
   } else {
     stamp.textContent = 'NOW';
     stamp.className = '';
@@ -223,7 +231,14 @@ function bitValues(): { value: string; colour: string }[] {
   return [
     { value: `${s.rssi} dBm`, colour: s.rssi > -70 ? OK : s.rssi > -80 ? OR : '#e0a9a9' },
     { value: card, colour: cardColour },
-    { value: s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack', colour: s.batt ? PU : DIM },
+    // Percentage and the charging bolt ride along, because on a phone this is
+    // the only place they appear (the header chip is desktop-only now).
+    {
+      value: s.batt
+        ? `${s.batt.chg ? '⚡ ' : ''}${s.batt.pct !== null ? `${s.batt.pct}% · ` : ''}${s.batt.v.toFixed(3)} V`
+        : 'no pack',
+      colour: s.batt ? PU : DIM,
+    },
     {
       value: s.plug
         ? `${s.plug.w.toFixed(1)} W${s.plug.v !== null ? ` · ${s.plug.v.toFixed(1)} V` : ''}`
@@ -231,6 +246,7 @@ function bitValues(): { value: string; colour: string }[] {
       colour: !s.plug ? DIM : s.plug.verdict === -1 ? '#e0a9a9' : OK,
     },
     gasBit(s),
+    { value: s.fw, colour: OUT },
     { value: hoursMinutes(s.uptime_s), colour: OUT },
     {
       value: `${s.slot} · ${s.confirmed ? 'confirmed' : 'unconfirmed'}`,
@@ -310,7 +326,7 @@ export function paintChips(): void {
     const b = child as HTMLElement;
     const key = b.dataset['key'] as RowKey;
     const on = view.rows[key];
-    b.style.color = on ? TX : '#4d5765';
+    b.style.color = on ? TX : FAI;
     b.style.borderColor = on ? SERIES_COLOURS[key] : 'transparent';
     show($(ROW_IDS[key].sub), on);
   });
@@ -332,10 +348,25 @@ export function isNewer(next: DeviceState, cur: DeviceState | null): boolean {
   return next.uptime_s >= cur.uptime_s;
 }
 
+/**
+ * What the page says when it has never reached the controller at all.
+ *
+ * The cold-load case: you walk into the garage, the fan is not running, you
+ * open the console -- and it used to sit on "Connecting to the controller…"
+ * indefinitely, because the whole offline path was gated on having had one
+ * successful poll to go stale from. A first-fetch failure is as much
+ * information as a later one.
+ */
+const NO_CONTACT_REASON =
+  'No answer from the controller. The page keeps retrying every 15 seconds — ' +
+  'if this persists, check that the board has power and is on the network ' +
+  '(garage-fan.local). Nothing below is a live reading.';
+
 export function paint(next?: DeviceState): void {
   if (next) {
     view.lastOk = Date.now();
     view.offline = false;
+    view.pollFail = 0;
     // A straggler still proves the device is reachable, so it clears `offline`
     // -- but it must not be allowed to skip the repaint, or the page keeps
     // showing "● NO CONTACT" and stays dimmed while the state says otherwise,
@@ -343,16 +374,36 @@ export function paint(next?: DeviceState): void {
     if (isNewer(next, view.state)) view.state = next;
   }
   const s = view.state;
-  if (!s) return;
-
   const stale = view.offline;
+
+  // The broker chip and the body tint are painted BEFORE the no-state guard:
+  // "we cannot reach it" is precisely the case with no frame to read, and the
+  // old early return meant a cold failure repainted nothing at all. Offline
+  // also outranks every field below -- they are all last-known values, and the
+  // broker flag in particular would otherwise keep asserting a green "UP"
+  // about a device that has not answered in minutes.
   const mqtt = $('hmq');
-  // Offline outranks every field in here: they are all last-known values, and
-  // the broker flag in particular would otherwise keep asserting "UP" about a
-  // device we have not heard from in minutes.
-  mqtt.textContent = stale ? '● NO CONTACT' : s.mqtt ? '● BROKER UP' : '● BROKER DOWN';
-  mqtt.className = stale ? 'stale' : s.mqtt ? 'up' : '';
+  mqtt.textContent = stale
+    ? '● NO CONTACT'
+    : !s
+      ? '● BROKER —'
+      : s.mqtt
+        ? '● BROKER UP'
+        : '● BROKER DOWN';
+  mqtt.className = stale ? 'stale' : !s ? '' : s.mqtt ? 'up' : '';
   document.body.classList.toggle('offline', stale);
+  if (!s) {
+    if (stale) {
+      $('reason').textContent = NO_CONTACT_REASON;
+      // The badge cannot be left saying NOW over an en dash: there is no
+      // reading, current or otherwise.
+      const stamp = $('stamp');
+      stamp.textContent = 'NO CONTACT';
+      stamp.className = 'stale';
+    }
+    return;
+  }
+
   const batt = $('hbat');
   if (s.batt) {
     show(batt, true);
@@ -364,14 +415,7 @@ export function paint(next?: DeviceState): void {
   }
   $('hfw').textContent = `FW ${s.fw}`;
 
-  $('railnum').textContent = s.speed === 0 ? 'off' : s.speed < 0 ? 'raw' : String(s.speed);
-  Array.from($('stack').children).forEach((child, k) => {
-    const b = child as HTMLElement;
-    const n = k + 1;
-    const lit = n <= s.speed && s.speed > 0;
-    b.style.background = lit ? `rgba(59,130,246,${0.2 + 0.055 * n})` : '#12161d';
-    b.style.borderColor = n === s.speed ? AC : lit ? 'rgba(59,130,246,.4)' : '#1a2029';
-  });
+  paintRail(s.speed);
 
   $('bauto').className = `pill${s.auto ? ' on' : ''}`;
   $('bauto').textContent = s.auto ? 'auto on' : 'auto off';

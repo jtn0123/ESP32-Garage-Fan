@@ -36,13 +36,26 @@ export function moment(epochSeconds: number, days = 1): string {
   return days <= 7 ? `${WEEKDAYS[d.getDay()]} ${date} ${time}` : `${date} ${time}`;
 }
 
-/** Minutes elapsed -> "45 MIN AGO" / "17H30 AGO", for the scrub stamp. */
+/**
+ * Minutes elapsed -> "45 MIN AGO" / "17H30 AGO" / "3D14H AGO".
+ *
+ * Days past 48 h, because hours stop being a unit anyone can read there: a
+ * 7-day scrub said `86H40 AGO` (three days? four?) and a 30-day one `372H AGO`,
+ * which left the date beside it doing all the work. The 48 h threshold keeps
+ * "yesterday afternoon" in hours, where hours are still the natural answer.
+ */
 export function ago(minutes: number): string {
   if (!Number.isFinite(minutes)) return 'AGE UNKNOWN';
   const m = Math.max(0, Math.round(minutes));
   if (m < 60) return `${m} MIN AGO`;
+  const hours = Math.floor(m / 60);
+  if (hours >= 48) {
+    const days = Math.floor(hours / 24);
+    const rem = hours % 24;
+    return `${days}D${rem ? `${rem}H` : ''} AGO`;
+  }
   const rem = m % 60;
-  return `${Math.floor(m / 60)}H${rem ? String(rem).padStart(2, '0') : ''} AGO`;
+  return `${hours}H${rem ? String(rem).padStart(2, '0') : ''} AGO`;
 }
 
 /** Always-signed one-decimal number, for the differential readout. */

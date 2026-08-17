@@ -79,3 +79,19 @@ describe('moment: the scrubbed instant', () => {
     expect(moment(t, 60)).toBe('8/16 15:27');
   });
 });
+
+describe('ago: the unit follows the distance', () => {
+  it('keeps minutes and hours where they read naturally', () => {
+    expect(ago(45)).toBe('45 MIN AGO');
+    expect(ago(17 * 60 + 30)).toBe('17H30 AGO');
+    expect(ago(47 * 60)).toBe('47H AGO');
+  });
+
+  it('switches to days past 48 h', () => {
+    // A 7-day scrub used to read "86H40 AGO" and a 30-day one "372H AGO",
+    // leaving the date beside it to do all the work.
+    expect(ago(86 * 60 + 40)).toBe('3D14H AGO');
+    expect(ago(372 * 60)).toBe('15D12H AGO');
+    expect(ago(15 * 24 * 60)).toBe('15D AGO');
+  });
+});

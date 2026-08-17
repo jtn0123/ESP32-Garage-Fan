@@ -52,7 +52,15 @@ export default defineConfig({
   },
 
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'desktop',
+      use: { ...devices['Desktop Chrome'] },
+      // A desk browser has no touchscreen, so the gesture specs cannot run
+      // here at all. Excluded rather than skipped at runtime: a skip that can
+      // never become a pass is noise in every report, and noise in the skip
+      // count is where a real skip would hide.
+      testIgnore: /touch\.spec\.ts/,
+    },
     // The console is used from a phone in the garage at least as often as from
     // a desk, and the layout has a real breakpoint. Running the whole suite in
     // both catches the "works until you shrink it" class of bug.

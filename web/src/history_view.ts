@@ -72,7 +72,11 @@ export function paintChartTitle(): void {
     title.className = 'ct';
     return;
   }
-  title.textContent = `◂ ${moment(t, view.days)} · ${ago(minutesBack(s, i))} ▸`;
+  // No arrows around it. `◂ 20:09 ▸` drew a 7 px glyph pair that read as a
+  // prev/next stepper for the sample, 13 px from a real control, and stepped
+  // nothing -- the drag already does that job. Bracketing a RANGE (the deadband
+  // labels) is what that glyph is for; bracketing a value invents a button.
+  title.textContent = `${moment(t, view.days)} · ${ago(minutesBack(s, i))}`;
   title.className = 'ct scrub';
 }
 
@@ -122,6 +126,24 @@ function gasReadout(idx: number | null, raw: number | null): string {
   return idx !== null && idx > 0 ? `index ${idx.toFixed(0)}${rawPart}` : `warming up${rawPart}`;
 }
 
+/**
+ * "speed 7" / "off" / '' -- the fan row.
+ *
+ * Three outcomes, and the empty one is not the same as "off": a range whose
+ * rows carry no speed column at all (the pre-1.14.23 CSV width) must say
+ * nothing rather than claim the fan was stopped.
+ */
+export function speedReadout(spd: number | undefined): string {
+  if (spd === undefined) return '';
+  return spd > 0 ? `speed ${spd}` : 'off';
+}
+
+/** "4.19 V" / "4.19 V ⚡ charging" / '' -- the battery row. */
+export function battReadout(volts: number | null, charging: boolean): string {
+  if (volts === null) return '';
+  return `${volts.toFixed(2)} V${charging ? ' ⚡ charging' : ''}`;
+}
+
 function paintReadouts(): void {
   const s = view.series;
   const i = sampleIndex();
@@ -130,15 +152,12 @@ function paintReadouts(): void {
   const of = at(s.of, i);
   $('roT').textContent =
     (tf === null ? '–' : `${tf.toFixed(1)}°`) + (of === null ? '' : ` · out ${of.toFixed(1)}°`);
-  const spd = s.spd.length ? s.spd[i] : undefined;
-  $('roS').textContent = spd === undefined ? '' : spd > 0 ? `speed ${spd}` : 'off';
+  $('roS').textContent = speedReadout(s.spd.length ? s.spd[i] : undefined);
   const rhNow = at(s.rh, i);
   $('roH').textContent = rhNow === null ? '' : `${rhNow.toFixed(0)}%`;
   const hpa = at(s.hpa, i);
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
-  const bv = at(s.bv, i);
-  $('roB').textContent =
-    bv === null ? '' : `${bv.toFixed(2)} V${s.chg[i] === 1 ? ' ⚡ charging' : ''}`;
+  $('roB').textContent = battReadout(at(s.bv, i), s.chg[i] === 1);
   const w = at(s.w, i);
   $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
   $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));

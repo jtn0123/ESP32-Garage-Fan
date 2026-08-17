@@ -163,6 +163,34 @@ async function run() {
       await page.mouse.up();
     }
 
+    // 7b. The long ranges. A wide window is not the 24 h chart with different
+    // numbers on it: the axis has to carry dates, the row step is hours rather
+    // than minutes, and gap detection has to survive both -- which is exactly
+    // where "7D shows no data" lived. Captured per range so the axis tiers can
+    // be read rather than assumed.
+    for (const days of [7, 30]) {
+      const range = page.locator(`#ranges button[data-d="${days}"]`);
+      if (!(await range.count())) continue;
+      await range.click();
+      await page.waitForTimeout(1200);
+      await page.locator('#charts').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await shoot(page, `${name}-07b-range${days}d`);
+      // And the same range under a finger, since the scrub label gains a date
+      // here and that is the part with no room to spare at 320.
+      const rbox = await page.locator('#cv_t').boundingBox();
+      if (rbox) {
+        await page.mouse.move(rbox.x + rbox.width * 0.4, rbox.y + rbox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(rbox.x + rbox.width * 0.55, rbox.y + rbox.height / 2, { steps: 6 });
+        await page.waitForTimeout(300);
+        await shoot(page, `${name}-07c-scrub${days}d`);
+        await page.mouse.up();
+      }
+    }
+    await page.locator('#ranges button[data-d="1"]').click();
+    await page.waitForTimeout(800);
+
     // 8. Odometer + status bar at the very bottom.
     await page.locator('#stats').scrollIntoViewIfNeeded();
     await page.waitForTimeout(300);
@@ -187,14 +215,34 @@ async function run() {
     await ctx.close();
   }
 
-  // Offline / degraded, on the small phone only.
+  /**
+   * Offline / degraded, on the small phone only.
+   *
+   * Waits past app.ts's OFFLINE_AFTER_MS (45 s) rather than a few seconds. The
+   * first version waited 6 s and photographed a page that had not yet decided
+   * it was offline, so the shot showed a fully live-looking screen and the
+   * review recorded "the offline state is identical to the live state" without
+   * being able to tell a missing state from an unphotographed one. A sweep that
+   * cannot distinguish those two is worse than no sweep: it produces confident
+   * findings about code it never reached. It also asserts the state actually
+   * arrived, so a future regression fails here loudly instead of quietly
+   * yielding a screenshot of the wrong thing.
+   */
   const ctx = await browser.newContext({ ...devices['iPhone SE'], baseURL: BASE });
   const page = await ctx.newPage();
   await page.goto('/');
+  await page.waitForSelector('#railnum:not(:has-text("–"))', { timeout: 15000 });
   await page.waitForTimeout(800);
   await page.request.get('/_scen?down=true');
-  await page.waitForTimeout(6000);
+  try {
+    await page.waitForFunction(() => document.body.classList.contains('offline'), null, {
+      timeout: 70000,
+    });
+  } catch {
+    console.log('  !! the page never entered the offline state -- shooting it anyway');
+  }
   await shoot(page, 'se-12-offline', { fullPage: true });
+  await shoot(page, 'se-13-offline-header', { clip: { x: 0, y: 0, width: 320, height: 70 } });
   await page.request.get('/_scen?down=false');
   await ctx.close();
 

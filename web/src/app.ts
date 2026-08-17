@@ -20,6 +20,7 @@ import {
 } from './console.js';
 import { $, clear, el, show } from './dom.js';
 import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
+import { buildRail } from './rail.js';
 import { drawPreview, drawScope } from './pwm.js';
 import { build } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
@@ -168,6 +169,27 @@ function setRange(days: number): void {
 
 /* ----------------------------------------------------------------- scrubbing */
 
+/**
+ * Hold the layout above the charts still for the duration of a gesture.
+ *
+ * The plain-English state sentence is re-derived on every scrub sample, and a
+ * scrubbed sentence is not the same length as a live one: at 24H it came out
+ * one line shorter, which moved #reason, which moved everything below it --
+ * including the sticky chart header and the plot itself, 17 px up, WHILE a
+ * finger was reading it. Reserving the height it already has costs nothing
+ * when idle (the fold budget is why it has no standing min-height) and makes
+ * the reflow unobservable during the one moment it would be felt.
+ */
+function freezeReason(hold: boolean): void {
+  const reason = $('reason');
+  if (!hold) {
+    reason.style.minHeight = '';
+    return;
+  }
+  if (reason.style.minHeight) return;
+  reason.style.minHeight = `${Math.ceil(reason.getBoundingClientRect().height)}px`;
+}
+
 function scrubAt(clientX: number): void {
   const s = view.series;
   if (!s || s.n < 2) return;
@@ -186,12 +208,14 @@ function scrubAt(clientX: number): void {
   }
   const next = fraction < -0.02 || fraction > 1.02 ? -1 : i;
   if (next === view.scrub) return;
+  freezeReason(next >= 0);
   view.scrub = next;
   drawAll();
   paintHero();
 }
 
 function endScrub(): void {
+  freezeReason(false);
   if (view.scrub === -1) return;
   view.scrub = -1;
   drawAll();
@@ -255,18 +279,23 @@ function onTouchRelease(): void {
 
 /* --------------------------------------------------------------------- setup */
 
-function buildSpeedStack(): void {
-  const stack = $('stack');
-  stack.replaceChildren(
-    ...Array.from({ length: 12 }, (_, k) => {
-      const n = k + 1;
-      return el('button', { title: `set speed ${n}`, onclick: () => setSpeed(n) });
-    }),
-  );
+/**
+ * Does the chip strip continue past the right edge?
+ *
+ * The class drives the edge fade. Kept in sync from the scroll position rather
+ * than assumed from the width, because the answer changes as you scroll and a
+ * fade that stays put once you have reached NOX is a lie about there being
+ * more.
+ */
+function markChipOverflow(host: HTMLElement): void {
+  const more = host.scrollLeft + host.clientWidth < host.scrollWidth - 2;
+  host.classList.toggle('more', more);
 }
 
 function buildChips(): void {
   const host = $('chips');
+  host.addEventListener('scroll', () => markChipOverflow(host));
+  window.addEventListener('resize', () => markChipOverflow(host));
   host.replaceChildren(
     ...(Object.keys(ROW_IDS) as RowKey[]).map((key) => {
       const b = el('button', { textContent: key.toUpperCase() });
@@ -280,6 +309,7 @@ function buildChips(): void {
     }),
   );
   paintChips();
+  markChipOverflow(host);
 }
 
 
@@ -363,10 +393,13 @@ async function refreshClimate(): Promise<void> {
   paintHero();
 }
 
-// Three missed polls. Long enough that one dropped request or a brief WiFi
-// flap does not cry wolf, short enough that a page left open on a dead
-// controller stops presenting its last readings as current.
-const OFFLINE_AFTER_MS = 45_000;
+// Two missed polls plus a margin. 45 s was three missed polls, which meant a
+// page resumed from background in front of a dead controller showed a
+// confident 74.9 under a `NOW` badge for most of a minute -- and in a garage
+// that is exactly the reading someone acts on. The decay is visible before the
+// verdict lands: the badge switches to the age of the last answer on the FIRST
+// failure (paintHero), so nothing claims to be current in the meantime.
+const OFFLINE_AFTER_MS = 20_000;
 
 async function poll(): Promise<void> {
   try {
@@ -374,10 +407,14 @@ async function poll(): Promise<void> {
   } catch {
     // The catch used to be entirely empty, which is how a dead device kept
     // rendering as a live one. Failing is information; record it.
-    if (view.lastOk && Date.now() - view.lastOk > OFFLINE_AFTER_MS && !view.offline) {
-      view.offline = true;
-      paint();
-    }
+    view.pollFail += 1;
+    // `lastOk || startedAt`: the old guard was `if (view.lastOk && ...)`, and
+    // lastOk is 0 until a poll succeeds -- so a console opened COLD against a
+    // dead controller could never reach the offline state at all. Measuring
+    // from page load instead makes the cold case reach a stated failure.
+    const since = view.lastOk || view.startedAt;
+    if (Date.now() - since > OFFLINE_AFTER_MS) view.offline = true;
+    paint();
   }
 }
 
@@ -414,7 +451,7 @@ async function loadDevice(attempt = 0): Promise<void> {
 
 export async function boot(): Promise<void> {
   setSettingsPainter(paintSettings);
-  buildSpeedStack();
+  buildRail(setSpeed);
   buildChips();
 
   $('nav').onclick = () => setScreen();

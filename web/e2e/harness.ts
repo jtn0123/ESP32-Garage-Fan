@@ -270,11 +270,6 @@ export async function touchRelease(page: Page): Promise<void> {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
-/** True on the phone project; the desk project has no touchscreen to drive. */
-export async function hasTouch(page: Page): Promise<boolean> {
-  return page.evaluate(() => 'ontouchstart' in window);
-}
-
 /** Record every request the console makes to a path, for "did it actually call?" */
 export function recordRequests(page: Page, match: RegExp): Request[] {
   const seen: Request[] = [];

@@ -209,3 +209,51 @@ test('the page never scrolls sideways', async ({ page }) => {
   );
   expect(overflow, 'the layout overflows horizontally').toBeLessThanOrEqual(1);
 });
+
+// ------------------------------------------------------------- the speed rail
+
+/**
+ * The one control you use standing in a garage, and the one where a mis-tap
+ * has a consequence: it changes the fan speed. Twelve 20x34 px blocks was
+ * under half a fingertip.
+ *
+ * Twelve 44 px-WIDE targets cannot fit in 288 px, so the fix is the gesture:
+ * the row is 44 px tall, a press previews the step under the finger, and the
+ * command goes out once on release. What is asserted here is the hit box in
+ * pixels rather than the CSS that produces it.
+ */
+test('the speed rail is a thumb-sized target', async ({ page }) => {
+  await openConsole(page);
+  const stack = await page.locator('#stack').boundingBox();
+  expect(stack, '#stack has no box').not.toBeNull();
+  expect(stack!.height, 'the rail is shorter than a fingertip').toBeGreaterThanOrEqual(44);
+  const blocks = page.locator('#stack button');
+  await expect(blocks).toHaveCount(12);
+  for (const i of [0, 5, 11]) {
+    const b = await blocks.nth(i).boundingBox();
+    expect(b!.height, `block ${i} is under 44 px tall`).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test('sweeping the rail previews every step and commands once', async ({ page }) => {
+  await openConsole(page);
+  const sets = recordRequests(page, /\/api\/set/);
+  const from = await page.locator('#stack button').nth(2).boundingBox();
+  const to = await page.locator('#stack button').nth(7).boundingBox();
+  if (!from || !to) return;
+  const y = from.y + from.height / 2;
+  await page.mouse.move(from.x + from.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, y, { steps: 10 });
+  // Held, not released: the preview is the whole point of the gesture, and it
+  // must show the pending step before anything is sent to the fan.
+  await expect(page.locator('#railnum')).toHaveText('8');
+  await expect(page.locator('#railnum')).toHaveClass(/pick/);
+  expect(sets.length, 'the fan was commanded mid-sweep').toBe(0);
+
+  await page.mouse.up();
+  await expect.poll(() => sets.length).toBe(1);
+  expect(sets[0]!.url()).toMatch(/speed=8\b/);
+  await expect(page.locator('#railnum')).toHaveText('8');
+  await expect(page.locator('#railnum')).not.toHaveClass(/pick/);
+});

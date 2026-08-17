@@ -227,3 +227,46 @@ test('no meter means the estimate and no banner, not a crash', async ({ page }) 
   // The estimate path still fills DRAW from /api/stats.
   await expect(page.locator('#mW')).toHaveText(/W$/);
 });
+
+/**
+ * The device stops answering, and the page has to stop looking live.
+ *
+ * The CSS for this existed for a round without ever being reachable: the
+ * verdict was gated on `view.lastOk`, the threshold was 45 s (three missed
+ * polls), and nothing repainted between the failure and the verdict. A garage
+ * console that shows a confident 74.9 under a `NOW` badge while the controller
+ * is dark is the one failure mode that gets acted on.
+ */
+test('a controller that stops answering stops looking live', async ({ page }) => {
+  // Real wall-clock behaviour, so it needs real wall clock: the badge decays on
+  // the first missed poll (~15 s) and the verdict lands on the second (~30 s),
+  // which is past the suite's default 30 s budget on its own.
+  test.setTimeout(90_000);
+  await openConsole(page);
+  await expect(page.locator('#hmq')).toContainText('BROKER');
+  await scen(page, { down: 'true' });
+
+  await expect(page.locator('#hmq')).toHaveText('● NO CONTACT', { timeout: 40_000 });
+  await expect(page.locator('#hmq')).toHaveClass(/stale/);
+  await expect(page.locator('body')).toHaveClass(/offline/);
+  // The badge stops asserting NOW on the FIRST failed poll, before the verdict,
+  // so the reading's age is visible while it decays.
+  await expect(page.locator('#stamp')).not.toHaveText('NOW');
+  await expect(page.locator('#stamp')).toHaveText(/AGO|NO CONTACT/);
+});
+
+test('a console opened cold against a dead controller says so', async ({ page }) => {
+  test.setTimeout(90_000);
+  // The realistic case: the fan is down, so you open the page to find out why.
+  // Nothing has ever succeeded here, which is exactly what used to leave it on
+  // "Connecting to the controller…" forever.
+  await scen(page, { down: 'true' });
+  await page.goto('/');
+  await expect(page.locator('#reason')).toContainText(/No answer from the controller/i, {
+    timeout: 40_000,
+  });
+  await expect(page.locator('#hmq')).toHaveText('● NO CONTACT');
+  await expect(page.locator('body')).toHaveClass(/offline/);
+  // And it must not claim a reading it never had.
+  await expect(page.locator('#stamp')).not.toHaveText('NOW');
+});

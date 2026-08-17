@@ -1,0 +1,143 @@
+// The speed rail: twelve blocks that are one control, not twelve.
+//
+// Split from app.ts/console.ts because the rail stopped being a row of buttons
+// the moment it became draggable, and because app.ts was at the 500-line
+// ceiling. It owns three things: the blocks, the gesture, and painting them
+// (the paint has to read a PENDING selection that no device frame knows about).
+//
+// Why a drag at all: at 320 px the twelve blocks measure 20x34, which is under
+// half a fingertip on the one control you reach for while standing in a garage
+// -- and a mis-tap here changes the fan speed. Grown to 44 px tall they are
+// still only 24 px wide, and twelve 44 px-wide targets cannot fit in 288 px
+// without overlapping, so target size alone cannot solve it. A drag can: the
+// thumb sweeps, the number follows it live, and you correct before letting go.
+//
+// The command is sent ONCE, on release. Sending per step would have pushed nine
+// speed changes at the fan during one sweep -- the fan's own controller ramps,
+// so that is both noise on the wire and audible chatter in the garage.
+
+import { $, el } from './dom.js';
+import { view } from './state.js';
+import { AC } from './theme.js';
+
+/** Movement that turns a press into a sweep. Below it, the tap wins. */
+const DRAG_SLOP_PX = 8;
+
+let onPick: ((speed: number) => void) | null = null;
+/** Set while a drag is committing, so the click it also produces is ignored. */
+let swallowClick = false;
+
+/** Which block sits under this x, 1..12, or null when the pointer is off-rail. */
+function stepAt(clientX: number): number | null {
+  const stack = $('stack');
+  const rect = stack.getBoundingClientRect();
+  if (rect.width <= 0) return null;
+  const n = stack.children.length;
+  const k = Math.floor(((clientX - rect.left) / rect.width) * n);
+  if (k < 0 || k >= n) return null;
+  return k + 1;
+}
+
+/**
+ * Paint the blocks and the big number.
+ *
+ * `view.railPick` is the speed under a live finger: it outranks the device's
+ * own speed for as long as the gesture lasts, otherwise a poll landing
+ * mid-sweep would snap the rail back to what the fan is still doing.
+ */
+export function paintRail(speed: number): void {
+  const shown = view.railPick ?? speed;
+  const num = $('railnum');
+  num.textContent = shown === 0 ? 'off' : shown < 0 ? 'raw' : String(shown);
+  num.className = view.railPick === null ? '' : 'pick';
+  Array.from($('stack').children).forEach((child, k) => {
+    const b = child as HTMLElement;
+    const n = k + 1;
+    const lit = n <= shown && shown > 0;
+    b.style.background = lit ? `rgba(59,130,246,${0.2 + 0.055 * n})` : '#12161d';
+    b.style.borderColor = n === shown ? AC : lit ? 'rgba(59,130,246,.4)' : '#1a2029';
+  });
+}
+
+function preview(speed: number | null): void {
+  if (view.railPick === speed) return;
+  view.railPick = speed;
+  paintRail(view.state?.speed ?? 0);
+}
+
+function onPointerDown(e: PointerEvent): void {
+  dragFrom = { x: e.clientX, y: e.clientY };
+  sweeping = false;
+  // Preview immediately, before any movement: a press that has not been
+  // released yet is a question ("this one?"), and answering it on screen is
+  // what lets a thumb that landed one block off slide over and fix it instead
+  // of changing the fan speed and then changing it back.
+  preview(stepAt(e.clientX));
+}
+
+function onPointerMove(e: PointerEvent): void {
+  if (!dragFrom) return;
+  if (!sweeping) {
+    const dx = Math.abs(e.clientX - dragFrom.x);
+    const dy = Math.abs(e.clientY - dragFrom.y);
+    // Same axis rule as the charts: a vertical swipe that happens to start on
+    // the rail is someone scrolling the page, not someone setting a speed.
+    if (Math.max(dx, dy) < DRAG_SLOP_PX) return;
+    if (dy > dx) {
+      dragFrom = null;
+      return;
+    }
+    sweeping = true;
+  }
+  const step = stepAt(e.clientX);
+  if (step !== null) preview(step);
+  e.preventDefault();
+}
+
+function onPointerUp(e: PointerEvent): void {
+  const picked = sweeping ? view.railPick : null;
+  dragFrom = null;
+  sweeping = false;
+  preview(null);
+  if (picked === null) return; // a tap: the button's own click handler owns it
+  swallowClick = true;
+  onPick?.(picked);
+  e.preventDefault();
+}
+
+function onPointerCancel(): void {
+  // The browser took the gesture (a scroll). Nothing was chosen, so nothing is
+  // sent -- and the rail goes back to showing what the fan is actually doing.
+  dragFrom = null;
+  sweeping = false;
+  preview(null);
+}
+
+let dragFrom: { x: number; y: number } | null = null;
+let sweeping = false;
+
+/** Build the twelve blocks and wire both ways of choosing a speed. */
+export function buildRail(pick: (speed: number) => void): void {
+  onPick = pick;
+  const stack = $('stack');
+  stack.replaceChildren(
+    ...Array.from({ length: 12 }, (_, k) => {
+      const n = k + 1;
+      return el('button', {
+        title: `set speed ${n}`,
+        onclick: () => {
+          if (swallowClick) {
+            swallowClick = false;
+            return;
+          }
+          pick(n);
+        },
+      });
+    }),
+  );
+  stack.addEventListener('pointerdown', (e) => onPointerDown(e as PointerEvent));
+  stack.addEventListener('pointermove', (e) => onPointerMove(e as PointerEvent));
+  stack.addEventListener('pointerup', (e) => onPointerUp(e as PointerEvent));
+  stack.addEventListener('pointercancel', onPointerCancel);
+  stack.addEventListener('pointerleave', onPointerCancel);
+}
