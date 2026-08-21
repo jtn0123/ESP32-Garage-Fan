@@ -29,7 +29,12 @@ import {
  *    only asserts on visible text passes while the app is broken underneath.
  */
 
-/** First port of the per-worker block; worker N listens on BASE + N. */
+/**
+ * First port of the per-worker block; worker N listens on BASE + 2N. Two
+ * ports per worker, not one: the mock serves the console on its port and the
+ * SSE live stream one above it (mirroring the device's 80/8081 split), so
+ * consecutive workers would otherwise fight over each other's stream port.
+ */
 const MOCK_PORT_BASE = Number(process.env['MOCK_PORT'] ?? 8100);
 
 /**
@@ -175,7 +180,7 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
   // every test that worker runs, torn down when the worker exits.
   mockPort: [
     async ({}, use, workerInfo) => {
-      const port = MOCK_PORT_BASE + workerInfo.parallelIndex;
+      const port = MOCK_PORT_BASE + workerInfo.parallelIndex * 2;
       const proc = spawn(PYTHON, ['../scripts/mock_device.py'], {
         env: { ...process.env, MOCK_PORT: String(port) },
         stdio: ['ignore', 'pipe', 'pipe'],

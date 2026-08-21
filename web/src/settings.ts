@@ -74,7 +74,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
     {
       title: 'AUTO MODE',
       blurb:
-        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles.',
+        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles. Engaging is instant; once running, auto commits for at least 15 minutes before it may drop back.',
       rows: [
         step(
           'Engage above',
@@ -116,7 +116,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
         {
           kind: 'toggle',
           label: 'Gas boost',
-          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger. Needs the SGP41 warmed up — the boost simply stays off without it.',
+          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger, and never before 15 minutes of boosting. Needs the SGP41 warmed up — the boost simply stays off without it.',
           on: s.gas_on,
           toggle: () => d.setConfig(`gason=${s.gas_on ? 0 : 1}`),
         },
