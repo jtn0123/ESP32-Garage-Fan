@@ -403,3 +403,23 @@ def test_every_scenario_knob_is_in_the_playwright_reset(mock):
         f"missing from the reset: {sorted(set(SCEN_SPEC) - reset_keys)}, "
         f"unknown to the mock: {sorted(reset_keys - set(SCEN_SPEC))}"
     )
+
+
+def test_an_accepted_update_reboots_onto_the_knobbed_version(mock):
+    """The one-click install watches boots/fw/confirmed after /update; the mock
+    must move them the way the board does, and only for the right token."""
+    before = get_json("/api/state")
+    scen(ota_fw="9.9.9")
+    try:
+        r = urllib.request.Request(
+            BASE + "/update?token=iliving-ota", method="POST", data=b"fake-image"
+        )
+        with urllib.request.urlopen(r, timeout=5) as f:
+            assert f.status == 200
+        after = get_json("/api/state")
+        assert after["boots"] == before["boots"] + 1
+        assert after["fw"] == "9.9.9" and after["confirmed"] is True
+        assert after["slot"] != before["slot"]
+    finally:
+        scen(ota_fw="none", fw=before["fw"])  # put the board back for the neighbours
+    assert get_json("/api/state")["fw"] == before["fw"], "the fw knob must restore it"

@@ -101,6 +101,14 @@ SCEN: Json = {
     # The panel before its first refresh: the firmware answers ready:false
     # until then, and the console has a branch for it that nothing could reach.
     "panel_ready": True,
+    # What a token-accepted POST /update "flashes": the fw the mock reports
+    # afterwards (boots+1, other slot, confirmed). None = the upload is taken
+    # and the board "reboots" onto the SAME version, which is what a rolled-back
+    # image looks like from the console. Drives the one-click install specs.
+    "ota_fw": None,
+    # The fw the board reports. A knob so a worker's mock can be put back after
+    # an /update "flashed" it; applying it writes STATE["fw"] directly.
+    "fw": "1.14.23",
     # "ok" agree, "bad" sustained disagreement, "none" no meter at all
     "plug": "ok",
 }
@@ -126,12 +134,23 @@ SCEN_SPEC: dict[str, ScenSpec] = {
     "down": bool,
     "panel_ready": bool,
     "plug": ("choice", "ok", "bad", "none"),
+    "ota_fw": ("version",),  # X.Y.Z or none
+    "fw": ("version",),  # what the board reports; resets after an /update
 }
 
 
 def coerce_scen(key: str, raw: str) -> bool | int | str | None:
     """Whitelisted parse of one knob. Raises ValueError on anything else."""
     spec = SCEN_SPEC[key]
+    if isinstance(spec, tuple) and spec[0] == "version":
+        if raw == "none":
+            return None
+        # Split-and-isdigit rather than a regex: the value is caller-supplied,
+        # and `\d+\.\d+\.\d+` is the classic polynomial-backtracking shape.
+        parts = raw.split(".")
+        if len(raw) > 32 or len(parts) != 3 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"{key} takes X.Y.Z or none")
+        return raw
     if isinstance(spec, tuple) and spec[0] == "choice":
         choices = tuple(str(c) for c in spec[1:])
         if raw not in choices:

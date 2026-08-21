@@ -12,6 +12,7 @@ import { el, show } from './dom.js';
 import { hoursMinutes, storage } from './format.js';
 import { view } from './state.js';
 import { provisionControl } from './provision.js';
+import { DEFAULT_TOKEN, installUpdate } from './updater.js';
 import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
@@ -271,7 +272,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
     {
       title: 'UPDATE',
       blurb:
-        'Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.',
+        'One click: the newest release is downloaded by your browser, checked against its published checksum and handed to the controller. Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.',
       rows: [
         {
           kind: 'update',
@@ -283,7 +284,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
         {
           kind: 'ota',
           label: 'Upload firmware',
-          hint: 'Pick the firmware.bin from a release (or from make build), enter the update token, and the board reboots into it.',
+          hint: 'The manual route, for a locally built image or a specific older release: pick the firmware.bin, enter the update token, and the board reboots into it. The token field here also serves the one-click install above.',
         },
       ],
     },
@@ -365,6 +366,49 @@ function control(r: Row): HTMLElement {
   }
 }
 
+/**
+ * The one-click install: a button and a progress line that OUTLIVE the paint
+ * cycle. The update row is rebuilt on every state repaint; the OTA row below
+ * learned the hard way that a progress line inside a rebuilt node goes dark
+ * mid-upload. Same fix: built once, reused, and the running install keeps
+ * writing to the same #updmsg.
+ */
+let installBox: HTMLElement | null = null;
+let installing = false;
+
+function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): HTMLElement {
+  if (installBox) return installBox;
+  const box = el('span', { className: 'updinstall' });
+  const go = el('button', { className: 'updbtn', id: 'upd_go', textContent: `Update now` });
+  const msg = el('span', { id: 'updmsg' });
+  go.onclick = () => {
+    if (installing) return;
+    const repo = view.info?.repo;
+    if (!repo) return;
+    const field = document.getElementById('ota_t') as HTMLInputElement | null;
+    const token = field?.value || DEFAULT_TOKEN;
+    installing = true;
+    go.disabled = true;
+    void installUpdate(status, repo, token, {
+      fetch: (u) => fetch(u),
+      upload: api.uploadFirmware,
+      getState: api.getState,
+      state: () => view.state,
+      askToken: () => window.prompt('The controller refused the update token. Enter it to retry:'),
+      say: (t) => (msg.textContent = t),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    })
+      .then((final) => (msg.textContent = final))
+      .finally(() => {
+        installing = false;
+        go.disabled = false;
+      });
+  };
+  box.append(go, msg);
+  installBox = box;
+  return box;
+}
+
 function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLElement {
   const box = el('div', { className: 'upd' });
   const line = el('div', { className: 'updline' });
@@ -383,13 +427,14 @@ function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLEl
   } else if (status.kind === 'available') {
     line.append(el('span', { className: 'updnew', textContent: `${status.latest} available` }));
     line.append(notes(status.release));
-    // Downloads the image to the machine running the browser; installing it
-    // is still the deliberate OTA upload below.
+    // Downloads the image to the machine running the browser, for the manual
+    // route below; the button beside it is the one-click install.
     line.append(el('a', {
       className: 'updlink',
       textContent: 'download .bin',
       href: status.asset.browser_download_url,
     }));
+    line.append(installControl(status));
   } else if (status.kind === 'no-binary') {
     // Not shown as "available": there is nothing the operator can install.
     line.append(el('span', {

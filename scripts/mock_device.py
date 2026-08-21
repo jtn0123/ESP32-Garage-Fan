@@ -170,6 +170,8 @@ class H(BaseHTTPRequestHandler):
                 SCEN[key] = coerce_scen(key, values[0])
             except ValueError as exc:
                 return self._json(400, {"error": str(exc)})
+            if key == "fw" and SCEN["fw"]:
+                STATE["fw"] = SCEN["fw"]  # the one knob that is state, not scenery
             applied += 1
         # Deliberately does NOT echo the knob state back.
         #
@@ -417,6 +419,24 @@ class H(BaseHTTPRequestHandler):
                 DEVICE[k] = given[k]
         return self._json(200, {"ok": True, "note": "rebooting with the new credentials"})
 
+    def _update(self, query: Query) -> None:
+        # Drain the multipart body either way: HTTP/1.1 keep-alive means an
+        # unread body becomes the next request's first bytes.
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        if not self._token_ok(query):
+            return self._json(403, {"error": "bad token"})
+        # The board "reboots": a new boot, the other slot, and -- when the
+        # ota_fw knob names a version -- that version, confirmed. Without the
+        # knob it comes back on the SAME fw, which is what a rollback looks like.
+        STATE["boots"] = int(STATE["boots"]) + 1
+        STATE["slot"] = "ota_1" if STATE.get("slot") == "ota_0" else "ota_0"
+        if SCEN["ota_fw"]:
+            STATE["fw"] = SCEN["ota_fw"]
+            STATE["confirmed"] = True
+        return self._json(200, {"ok": True, "note": "rebooting into new slot"})
+
     def _needs_token(self, _query: Query) -> None:
         # Token-guarded on the real device; the mock always refuses, which is
         # what the console's error path should be exercised against.
@@ -448,7 +468,7 @@ class H(BaseHTTPRequestHandler):
         "/api/restart": _needs_token,
         "/api/sdformat": _needs_token,
         "/api/sdpurge": _needs_token,
-        "/update": _needs_token,
+        "/update": _update,
     }
 
 
