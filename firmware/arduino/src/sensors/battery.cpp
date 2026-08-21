@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "sensors/battery_logic.h"
+#include "sensors/rolling.h"
 
 namespace battery {
 namespace {
@@ -19,6 +20,10 @@ Adafruit_MAX17048 g_max;
 Adafruit_LC709203F g_lc;
 Preferences* g_prefs = nullptr;
 uint8_t g_kind = 0;
+// Mean of the last 3 reads (30 s cadence -> ~90 s): one glitched I2C read of
+// the fuel gauge must not spike the reported pack state.
+sensors::RollingAvg<3> g_v_avg;
+sensors::RollingAvg<3> g_p_avg;
 float g_volts = NAN, g_percent = NAN;
 Window g_win;        // 5-min points; all the judgment calls live in battery_logic.h
 bool g_chg = false;  // sticky charging verdict, NVS-persisted
@@ -119,9 +124,12 @@ void read() {
     p = g_kind == 1 ? g_max.cellPercent() : g_lc.cellPercent();
   }
   if (v > 2.0f && v < 5.0f) {
-    g_volts = v;
-    if (!isnan(p))
-      g_percent = p > 100 ? 100 : p;
+    g_v_avg.push(v);
+    g_volts = g_v_avg.avg();
+    if (!isnan(p)) {
+      g_p_avg.push(p > 100 ? 100 : p);
+      g_percent = g_p_avg.avg();
+    }
   }
 }
 
