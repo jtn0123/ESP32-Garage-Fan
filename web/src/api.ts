@@ -93,12 +93,16 @@ export async function uploadFirmware(file: File, token: string): Promise<string>
 }
 
 /**
- * Live state over server-sent events on port 8081.
+ * Live state over server-sent events, one port above the page's own.
  *
  * Separate port because the firmware serves SSE from its own WiFiServer rather
- * than the WebServer -- see sse_accept(). Failure is silent on purpose: the
- * 15 s poll is the fallback and already covers it.
+ * than the WebServer -- see sse_accept(). The device serves the console on 80
+ * and the stream on 8081; the mock serves the console on an arbitrary port and
+ * the stream one above it, which is what lets the e2e suite cover this path at
+ * all. Failure is silent on purpose: the 15 s poll is the fallback and already
+ * covers it.
  */
+const SSE_PORT = location.port ? Number(location.port) + 1 : 8081;
 let stream: EventSource | null = null;
 
 export function subscribe(onState: (s: DeviceState) => void): void {
@@ -107,7 +111,7 @@ export function subscribe(onState: (s: DeviceState) => void): void {
   // running and both kept reconnecting forever.
   stream?.close();
   try {
-    const es = new EventSource(`http://${location.hostname}:8081/`);
+    const es = new EventSource(`http://${location.hostname}:${SSE_PORT}/`);
     stream = es;
     es.onmessage = (ev) => {
       try {

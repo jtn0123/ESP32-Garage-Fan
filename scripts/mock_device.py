@@ -383,8 +383,48 @@ class H(BaseHTTPRequestHandler):
     }
 
 
+class SSE(BaseHTTPRequestHandler):
+    """The live-state stream, mirrored from net/sse.cpp: the device serves the
+    console on 80 and SSE on 8081, the mock serves the console on PORT and SSE
+    on PORT+1 (api.ts derives the offset from location.port). Same CORS rule
+    as the firmware: echo an allowlisted Origin, never *, and drop a foreign
+    one without streaming a byte. One state frame per second; a client that
+    goes away is just a closed socket, not an error worth logging."""
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+    def do_GET(self) -> None:
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in SELF_ORIGINS:
+            self.close_connection = True
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        self.end_headers()
+        try:
+            while not SCEN["down"]:  # /_die silences the stream like the device dying
+                self.wfile.write(b"data: " + json.dumps(STATE).encode() + b"\n\n")
+                self.wfile.flush()
+                time.sleep(1.0)
+        except OSError:
+            pass  # client closed the tab; EventSource cleanup, not a failure
+
+
 if __name__ == "__main__":
     # Loopback only, and plain HTTP by design: the device this stands in for
     # serves plain HTTP and cannot do otherwise. NOSONAR (S5332), matching the
     # decision already documented in scripts/deploy.sh.
+    import threading
+
+    try:
+        _sse_srv = ThreadingHTTPServer(("127.0.0.1", PORT + 1), SSE)  # NOSONAR
+        threading.Thread(target=_sse_srv.serve_forever, daemon=True).start()
+    except OSError:
+        # A neighbour owns PORT+1. The console's poll covers state anyway, so
+        # say so and keep serving rather than refusing to start.
+        print(f"port {PORT + 1} busy; live SSE stream disabled", file=_sys.stderr)
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()  # NOSONAR
