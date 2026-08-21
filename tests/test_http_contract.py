@@ -160,6 +160,32 @@ def test_out_of_range_speed_is_refused(mock):
         assert status == 400, f"speed={bad!r} should be refused"
 
 
+def test_a_cycling_fan_is_reported_distinctly_from_a_disagreement(mock):
+    """The cycling profile's wire shape (net/plug_cycle.h via PlugState).
+
+    `cycling` and `flips` ride beside the verdict so the console can say "the
+    fan is switching itself on and off" instead of "the meter does not match",
+    which is what the 2026-08-20 night looked like through the verdict alone.
+    """
+    try:
+        scen(plug="cycling")
+        plug = get_json("/api/state")["plug"]
+        assert plug["cycling"] is True
+        assert plug["flips"] >= 4  # onset needs four confirmed flips
+        assert plug["verdict"] == -1
+        # The history carries the per-bucket count so the chart can tint it.
+        h = get_json("/api/history?days=1")
+        assert len(h["flips"]) == len(h["ts"])
+        assert any((f or 0) > 0 for f in h["flips"][-24:])
+        assert all(f is None or f >= 0 for f in h["flips"])
+    finally:
+        scen(plug="ok")
+    plug = get_json("/api/state")["plug"]
+    assert plug["cycling"] is False
+    assert plug["flips"] == 0
+    assert all(not (f or 0) for f in get_json("/api/history?days=1")["flips"])
+
+
 # ------------------------------------------------------------------ history
 
 

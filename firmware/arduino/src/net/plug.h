@@ -48,6 +48,25 @@ int verdict();
 float expected_w(int speed);
 
 /**
+ * The cycling profile (net/plug_cycle.h): true while the meter shows the fan
+ * switching itself on and off -- four or more confirmed run/stop flips in ten
+ * minutes -- with ONE speed held the whole time. Distinct from verdict -1,
+ * which is "steadily wrong": on 2026-08-20 the fan cycled all night at a
+ * held speed 10 and the verdict only flapped.
+ */
+bool cycling();
+
+/** Confirmed run/stop flips inside the last ten minutes; 0 when steady. */
+uint8_t flips();
+
+/**
+ * Flips counted since the previous call -- the 5-minute history row's
+ * `flips` column, so the chart can show cycling the snapshot aliases away.
+ * -1 when the meter is disabled or has never answered.
+ */
+int8_t take_bucket_flips();
+
+/**
  * The retained kTopicAlert payload for the CURRENT verdict:
  * {"kind":"plug_disagree","speed":N,"expect_w":X,"measured_w":Y} or
  * {"kind":"ok"}. Published on both verdict edges and re-asserted on every

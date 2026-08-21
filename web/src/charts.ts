@@ -413,6 +413,50 @@ export function drawSimple(
   crosshair(surf, s, index);
 }
 
+/**
+ * The plug watts, with the buckets the meter saw the fan cycling in tinted.
+ *
+ * The watts column is one snapshot per five minutes. On 2026-08-20 the fan
+ * stopped and restarted every minute or two all night at a held speed 10, and
+ * that column drew it as jitter between 4 and 45 W -- technically visible,
+ * readable as nothing. `flips` is the firmware's own count of confirmed
+ * run/stop edges per bucket; any bucket with one gets the outage-red tint
+ * under the line, so a cycling night reads as a red block, not noise.
+ */
+export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): void {
+  const surf = surface(canvas);
+  if (!surf) return;
+  const { c, W, H } = surf;
+  if (!hasData(s.w)) {
+    placeholder(surf, 'no plug data yet');
+    return;
+  }
+  const sc = limits(s.w, MIN_SPAN);
+  if (!sc) {
+    placeholder(surf, 'no plug data yet');
+    return;
+  }
+  frame(surf, s, sc, (v) => v.toFixed(1), false);
+  c.fillStyle = 'rgba(224,169,169,.22)';
+  let i = 0;
+  while (i < s.n) {
+    const f = at(s.flips, i);
+    if (f !== null && f > 0) {
+      let j = i;
+      // A run ends at an outage gap, the same rule as the battery tint: the
+      // shading must not claim the fan cycled while the device was dark.
+      while (j < s.n && (at(s.flips, j) ?? 0) > 0 && (j === i || !s.gap[j])) j++;
+      const x0 = xAt(s, i, W);
+      c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1.5, H - 2);
+      i = j;
+    } else {
+      i++;
+    }
+  }
+  line(surf, s, sc, s.w, SERIES_COLOURS.power, false, 2);
+  crosshair(surf, s, index);
+}
+
 export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number): void {
   const surf = surface(canvas);
   if (!surf) return;

@@ -52,6 +52,12 @@ export interface Series {
   noxr: (number | null)[];
   voc: (number | null)[];  // gas indices; 0 = warming
   nox: (number | null)[];
+  /**
+   * Plug run/stop flips the meter confirmed inside each bucket; null = no
+   * meter or a pre-1.21.0 row. The watts snapshot aliases a cycling fan into
+   * jitter; this is the column that says it happened (net/plug_cycle.h).
+   */
+  flips: (number | null)[];
 }
 
 /**
@@ -187,6 +193,7 @@ export function build(h: History): Series {
     noxr: pad<number | null>(h.nox_raw, n, null),
     voc: pad<number | null>(h.voc, n, null),
     nox: pad<number | null>(h.nox, n, null),
+    flips: pad<number | null>(h.flips, n, null),
   };
 }
 

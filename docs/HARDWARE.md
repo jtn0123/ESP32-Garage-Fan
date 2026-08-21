@@ -152,6 +152,49 @@ reflashing.
 - Bench configuration: **USB-C from computer + battery, fan VBUS
   disconnected** (iron law #2).
 
+## When the fan cycles on and off by itself
+
+Seen 2026-08-20: nine hours with the firmware holding speed 10 (zero speed
+changes on the tape, across two reboots) while the plug meter read ~4 W most
+of the time with bursts at ~45 W -- the *speed-12* level, not speed 10's
+30 W. The fan was stopping and restarting every minute or two and ignoring
+the duty entirely; the only witness was the meter. It began the moment the
+plug was switched back on after being off for two hours, with the Feather
+already driving a speed-10 waveform into the unpowered fan.
+
+What the firmware does now (1.21.0, `net/plug_cycle.h`):
+
+- Classes every 15 s meter poll as RUN (>= 65 % of the speed's baseline) or
+  STOP (<= 35 %); four confirmed flips inside ten minutes at one held speed
+  is **CYCLING**. The tape gets one `plug CYCLING ...` line, a `fan cycling
+  pad ...` read-back of the control pad (high % and edges -- a live pad at
+  speed 10 is ~84 % / 6 edges per 30 ms; a dead one is 0 or 100 / 0), five
+  minutes of per-poll `plug trace` lines, a half-hourly heartbeat, and one
+  `cycling ended` line with the totals. The DISAGREE/agree flapping is muted
+  while an episode lasts.
+- `/api/state` carries `plug.cycling` and `plug.flips`; the console banner
+  and the PLUG status bit say CYCLING; the e-ink banner reads FAN CYCLING;
+  the retained MQTT alert is `{"kind":"plug_cycling",...}`.
+- Every 5-minute history row records `flips` (CSV column 14), and the power
+  chart tints those buckets red, so a bad night is a red block and not the
+  jitter the watts snapshot drew on 08-20.
+
+What to try, in order, with the tape open (`/events.log`):
+
+1. Read the `cycling pad` line. Pad dead (0/100 %, no edges) = the chip
+   stopped driving the line: reboot the controller. Pad alive = the fan side.
+2. Set the fan **OFF** in the console (the line goes solid LOW), power-cycle
+   the fan at the plug, wait for the fan's own controller to come up, then set
+   the speed. A fan that is powered up while the line already carries a duty
+   is the one sequence the original wall controller (powered BY the fan) can
+   never produce, and it is the sequence the 08-20 episode started with.
+3. If it returns: reseat the USB-A cable at the fan port, check the shifter's
+   HV supply and ground, and measure the duty on the pad (`/api/pinprobe`).
+
+Blind spot: the meter reports an average, so a fan cycling faster than the
+meter's window (a few seconds on, a few off) reads as a steady mid-band draw
+and the profile cannot see it. That case still shows as a plain DISAGREE.
+
 ## Reproducing the decode (if a new fan/firmware revision appears)
 
 1. Power the wall controller from a bench 5 V USB source into its **fan 1**

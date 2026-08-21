@@ -100,13 +100,16 @@ void state_json(char* out, size_t cap) {
   }
   // The watt meter on the fan's supply, or null when the poller is disabled
   // or has never read. verdict: 1 agree, -1 disagree, 0 cannot say.
-  char plugs[112];
+  char plugs[160];
   if (plug::enabled() && plug::age_s() >= 0) {
     char vs[16] = "null";
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
-    snprintf(plugs, sizeof(plugs), "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d}",
-             plug::watts(), vs, (long)plug::age_s(), plug::verdict());
+    snprintf(plugs, sizeof(plugs),
+             "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d," WK_CYCLING "%s," WK_FLIPS
+             "%u}",
+             plug::watts(), vs, (long)plug::age_s(), plug::verdict(),
+             plug::cycling() ? "true" : "false", plug::flips());
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }

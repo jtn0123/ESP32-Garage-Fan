@@ -219,6 +219,34 @@ test('a plug disagreement raises the warning banner', async ({ page }) => {
   await expect(page.locator('#plugwarn')).toContainText(/does not match/i);
 });
 
+test('a cycling fan raises the cycling banner, not the plain disagreement', async ({ page }) => {
+  // The 2026-08-20 night: one speed held for nine hours while the meter saw
+  // the fan stop and restart every minute or two. The banner has to name
+  // THAT -- the plain "does not match" is what it showed, and it read as a
+  // noisy meter.
+  await scen(page, { plug: 'cycling' });
+  await openConsole(page);
+  await expect(page.locator('#plugwarn')).toBeVisible();
+  await expect(page.locator('#plugwarn')).toContainText(/cycling on and off/i);
+  await expect(page.locator('#plugwarn')).toContainText(/5 times in the last 10 minutes/);
+  await expect(page.locator('#plugwarn')).not.toContainText(/does not match/i);
+  await expect(page.locator('#stats')).toContainText('CYCLING ×5');
+});
+
+test('the power row tints the buckets the meter saw the fan cycling in', async ({ page }) => {
+  await scen(page, { plug: 'cycling' });
+  await openConsole(page);
+  await page.locator('#chips button[data-key="power"]').click();
+  await expect(page.locator('#sub_w')).not.toHaveClass(/hide/);
+  // The newest rows under this scenario carry a flip count, so the readout
+  // (pinned to the latest sample until a scrub) names it.
+  await expect(page.locator('#roW')).toContainText(/cycling ×\d/, { timeout: 15_000 });
+  // And the canvas is drawn: the mock's last two hours are flagged, so the
+  // row must have inked columns (the tint's exact pixels are not asserted --
+  // see inkedColumns on what a canvas probe can and cannot resolve).
+  await expect.poll(() => inkedColumns(page, 'cv_w'), { timeout: 15_000 }).toBeGreaterThan(0);
+});
+
 test('no meter means the estimate and no banner, not a crash', async ({ page }) => {
   await scen(page, { plug: 'none' });
   await openConsole(page);

@@ -87,13 +87,16 @@ static void sample_climate() {
     row.nox_raw = air::nox_raw();
     row.voc = static_cast<int16_t>(air::voc_index());
     row.nox = static_cast<int16_t>(air::nox_index());
+    // Flips the meter confirmed since the previous row: the cycling profile's
+    // column, so the chart can show what the watts snapshot above aliases.
+    row.flips = plug::take_bucket_flips();
     history::append(row, time_synced());
     if (time_synced())
       // row.speed, not fan::speed(): the ring stores the clamped value and the
       // CSV used to store the raw one, so a sample taken during an /api/raw
       // sweep left the two records of the same instant disagreeing (0 vs -1).
       sdcard::log_sample(time(nullptr), t, h, p, row.out_f, row.speed, row.batt_v, row.chg,
-                         row.watts, row.voc_raw, row.nox_raw, row.voc, row.nox);
+                         row.watts, row.voc_raw, row.nox_raw, row.voc, row.nox, row.flips);
     t_sd = millis();
     mqtt_link::publish_climate(t, h, p);
   }

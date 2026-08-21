@@ -45,7 +45,7 @@ STATE: Json = {
     # The Tapo watt meter on the fan's supply, as net/plug reports it. The
     # SCEN plug knob swaps in the disagreement case; "none" serves null, the
     # no-meter build.
-    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
+    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1, "cycling": False, "flips": 0},
     # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
     "gas_on": True,
     "gas_spd": 6,
@@ -109,7 +109,9 @@ SCEN: Json = {
     # The fw the board reports. A knob so a worker's mock can be put back after
     # an /update "flashed" it; applying it writes STATE["fw"] directly.
     "fw": "1.14.23",
-    # "ok" agree, "bad" sustained disagreement, "none" no meter at all
+    # "ok" agree, "bad" sustained disagreement, "cycling" the fan switching
+    # itself on and off at a held speed (the 2026-08-20 night), "none" no
+    # meter at all
     "plug": "ok",
 }
 
@@ -133,7 +135,7 @@ SCEN_SPEC: dict[str, ScenSpec] = {
     "flat_rh": bool,
     "down": bool,
     "panel_ready": bool,
-    "plug": ("choice", "ok", "bad", "none"),
+    "plug": ("choice", "ok", "bad", "cycling", "none"),
     "ota_fw": ("version",),  # X.Y.Z or none
     "fw": ("version",),  # what the board reports; resets after an /update
 }

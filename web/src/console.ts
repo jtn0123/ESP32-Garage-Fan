@@ -379,7 +379,21 @@ export function paint(next?: DeviceState): void {
   // the fan is not doing what it was told (it ran at full power for a day
   // while everything here honestly said OFF, 2026-08-13).
   const warn = $('plugwarn');
-  if (s.plug && s.plug.verdict === -1 && !stale) {
+  if (s.plug && s.plug.cycling && !stale) {
+    // The more specific finding outranks the plain disagreement: the meter
+    // saw the fan stop and restart repeatedly while ONE speed was held (the
+    // 2026-08-20 night: nine hours at a held speed 10, ~4 W most of the time
+    // with bursts at the speed-12 level). The controller's output did not
+    // change; the fan is not honouring it.
+    warn.textContent =
+      `The fan is cycling on and off: the watt meter saw it stop and restart ` +
+      `${s.plug.flips} times in the last 10 minutes while ` +
+      `${s.speed > 0 ? `speed ${s.speed}` : 'off'} was held steady (reading ${s.plug.w.toFixed(1)} W now). ` +
+      'The controller did not change its output — the fan is not following it. ' +
+      'Set the fan OFF here, power-cycle it at the plug, then set the speed again; ' +
+      'if it comes back, the control cable or the fan\'s own controller needs a look.';
+    show(warn, true);
+  } else if (s.plug && s.plug.verdict === -1 && !stale) {
     warn.textContent =
       `The watt meter reads ${s.plug.w.toFixed(1)} W, which does not match ` +
       `${s.speed > 0 ? `speed ${s.speed}` : 'off'} — the fan may not be following commands. ` +

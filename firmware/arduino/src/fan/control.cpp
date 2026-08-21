@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "fan/auto_logic.h"
+#include "soc/gpio_periph.h"
 #include "system/eventlog.h"
 #include "sensors/air.h"
 #include "sensors/climate.h"
@@ -19,6 +20,7 @@ namespace {
 Preferences* g_prefs = nullptr;
 Notify g_notify = nullptr;
 bool g_ledc_ready = false;
+uint16_t g_high_us = 0;  // what set_wave last drove, for probe_pad's "want"
 int g_speed = 0;
 bool g_auto_on = false;
 int g_auto_max = 9;
@@ -58,6 +60,7 @@ void set_wave(uint16_t high_us) {
     }
     g_ledc_ready = true;
   }
+  g_high_us = high_us;
   // duty 0 = solid LOW; duty 2^bits = solid HIGH, no one-tick glitch.
   uint32_t duty;
   if (high_us == 0)
@@ -166,6 +169,34 @@ void raw_high_us(uint16_t high_us) {
 }
 
 int speed() { return g_speed; }
+
+uint16_t commanded_high_us() { return g_high_us; }
+
+void probe_pad(float* high_pct, uint32_t* transitions) {
+  // Input buffer ONLY, straight at the IO_MUX. gpio_set_direction() looked
+  // right and was a trap: it reroutes the pad's output select to simple
+  // GPIO, silently disconnecting LEDC/RMT -- the probe then reports the
+  // stuck-low line the probe itself just created.
+  REG_SET_BIT(GPIO_PIN_MUX_REG[FAN_PWM_PIN], FUN_IE);
+  uint32_t edges = 0;
+  uint32_t highs = 0;
+  uint32_t n = 0;
+  int last = digitalRead(FAN_PWM_PIN);
+  const uint32_t t0 = micros();
+  while (micros() - t0 < 30000) {
+    const int v = digitalRead(FAN_PWM_PIN);
+    highs += v;
+    ++n;
+    if (v != last) {
+      ++edges;
+      last = v;
+    }
+  }
+  if (high_pct)
+    *high_pct = n ? 100.0f * highs / n : 0.0f;
+  if (transitions)
+    *transitions = edges;
+}
 
 float watts(int speed) {
   if (speed <= 0)

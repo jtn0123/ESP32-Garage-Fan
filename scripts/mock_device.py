@@ -196,11 +196,33 @@ class H(BaseHTTPRequestHandler):
             STATE["plug"] = None
         elif mode == "bad":
             # The failure this exists to catch: commanded off, meter says full.
-            STATE["plug"] = {"w": 43.5, "v": 120.9, "age_s": 3, "verdict": -1}
+            STATE["plug"] = {
+                "w": 43.5, "v": 120.9, "age_s": 3, "verdict": -1, "cycling": False, "flips": 0
+            }  # fmt: skip
+        elif mode == "cycling":
+            # The 2026-08-20 night: one speed held, the meter alternating between
+            # the fan stopped (~4 W) and flat out (~45 W). The reading flips
+            # every 30 s of wall clock so a watching console sees it move.
+            running = int(time.time() / 30) % 2 == 0
+            STATE["plug"] = {
+                "w": 45.1 if running else 4.3,
+                "v": 120.9,
+                "age_s": 3,
+                "verdict": -1,
+                "cycling": True,
+                "flips": 5,
+            }
         else:
             speed = max(0, int(STATE["speed"]))
             base = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
-            STATE["plug"] = {"w": base[min(speed, 12)], "v": 120.9, "age_s": 3, "verdict": 1}
+            STATE["plug"] = {
+                "w": base[min(speed, 12)],
+                "v": 120.9,
+                "age_s": 3,
+                "verdict": 1,
+                "cycling": False,
+                "flips": 0,
+            }
         return self._json(200, STATE)
 
     def _device(self, _query: Query) -> None:
