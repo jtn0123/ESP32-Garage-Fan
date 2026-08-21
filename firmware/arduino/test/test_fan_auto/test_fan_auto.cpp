@@ -171,6 +171,72 @@ static void test_gas_boost_full_story() {
   TEST_ASSERT_EQUAL(0, s);
 }
 
+// ------------------------------------------------------------- min-run dwell
+
+static void test_min_run_blocks_early_thermostat_release() {
+  // Engage, then drop straight through the release threshold: the latch must
+  // hold until the dwell is served, then release on the very next tick.
+  bool high = false;
+  uint16_t run = 0;
+  int s = 0;
+  const uint16_t kDwell = 30;  // 15 min of 30 s ticks
+  for (int i = 0; i < 12; i++)
+    s = fan_auto_decide(25.0f + kAbove, 25.0f, s, &high, kCfg, &run, kDwell);
+  TEST_ASSERT_EQUAL(kCfg.max_speed, s);
+  for (int i = 12; i < 30; i++) {  // cold again, but dwell not served
+    s = fan_auto_decide(25.0f + kBelow, 25.0f, s, &high, kCfg, &run, kDwell);
+    TEST_ASSERT_TRUE(high);
+    TEST_ASSERT_EQUAL(kCfg.max_speed, s);
+  }
+  s = fan_auto_decide(25.0f + kBelow, 25.0f, s, &high, kCfg, &run, kDwell);
+  TEST_ASSERT_FALSE(high);  // tick 31: dwell served, release goes through
+  TEST_ASSERT_EQUAL(kCfg.max_speed - 1, s);
+}
+
+static void test_min_run_does_not_delay_engage() {
+  bool high = false;
+  uint16_t run = 0;
+  int s = 0;
+  s = fan_auto_decide(25.0f + kAbove, 25.0f, s, &high, kCfg, &run, 30);
+  TEST_ASSERT_TRUE(high);  // first hot tick latches immediately
+  TEST_ASSERT_EQUAL(1, s);
+}
+
+static void test_min_run_blocks_early_gas_release() {
+  bool gh = false;
+  uint16_t run = 0;
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(400, &gh, kGas, &run, 30));
+  for (int i = 1; i < 30; i++) {  // air already reads clean: boost holds anyway
+    TEST_ASSERT_EQUAL(6, fan_gas_floor(150, &gh, kGas, &run, 30));
+    TEST_ASSERT_TRUE(gh);
+  }
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(150, &gh, kGas, &run, 30));  // dwell served
+  TEST_ASSERT_FALSE(gh);
+}
+
+static void test_min_run_never_outlives_the_sensor() {
+  // The dwell must not hold a boost on a dead sensor: index <= 0 clears the
+  // latch unconditionally, exactly as before the dwell existed.
+  bool gh = false;
+  uint16_t run = 0;
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(400, &gh, kGas, &run, 30));
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(-1, &gh, kGas, &run, 30));
+  TEST_ASSERT_FALSE(gh);
+  TEST_ASSERT_EQUAL(0, run);  // and the next engage starts a fresh dwell
+}
+
+static void test_min_run_reengage_restarts_the_clock() {
+  bool gh = false;
+  uint16_t run = 0;
+  const uint16_t kDwell = 4;
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(300, &gh, kGas, &run, kDwell));
+  for (int i = 1; i < kDwell; i++) fan_gas_floor(150, &gh, kGas, &run, kDwell);
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(150, &gh, kGas, &run, kDwell));  // released
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(300, &gh, kGas, &run, kDwell));  // round 2
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(150, &gh, kGas, &run, kDwell));  // held again
+  TEST_ASSERT_TRUE(gh);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_hot_garage_ramps_to_max_one_step_per_tick);
@@ -187,5 +253,10 @@ int main(int, char**) {
   RUN_TEST(test_gas_floor_disabled_clears_latch);
   RUN_TEST(test_gas_floor_merges_under_thermostat);
   RUN_TEST(test_gas_boost_full_story);
+  RUN_TEST(test_min_run_blocks_early_thermostat_release);
+  RUN_TEST(test_min_run_does_not_delay_engage);
+  RUN_TEST(test_min_run_blocks_early_gas_release);
+  RUN_TEST(test_min_run_never_outlives_the_sensor);
+  RUN_TEST(test_min_run_reengage_restarts_the_clock);
   return UNITY_END();
 }

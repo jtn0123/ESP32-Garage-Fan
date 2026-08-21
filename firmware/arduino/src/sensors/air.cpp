@@ -10,6 +10,7 @@
 
 #include <cmath>
 
+#include "sensors/rolling.h"
 #include "system/eventlog.h"
 
 namespace air {
@@ -33,6 +34,14 @@ int32_t g_voc = -1;
 int32_t g_nox = -1;
 uint8_t g_sht_fail = 0;
 uint8_t g_sgp_fail = 0;
+
+// 30 samples at the 1 Hz tick = a 30 s mean. The raw g_t/g_h stay for the
+// SGP41's compensation input (instantaneous is correct there); everything
+// outside this module sees the mean. NOx is deliberately not smoothed --
+// nothing decides on it.
+sensors::RollingAvg<30> g_t_avg;
+sensors::RollingAvg<30> g_h_avg;
+sensors::RollingAvg<30> g_voc_avg;
 
 }  // namespace
 
@@ -60,6 +69,8 @@ void tick() {
     if (g_sht.getEvent(&hum, &temp)) {
       g_t = temp.temperature;
       g_h = hum.relative_humidity;
+      g_t_avg.push(g_t);
+      g_h_avg.push(g_h);
       g_sht_fail = 0;
     } else if (++g_sht_fail >= 10) {
       // Ten straight misses is a detached cable, not a glitch. Say so once
@@ -68,6 +79,8 @@ void tick() {
       g_sht_ok = false;
       g_t = NAN;
       g_h = NAN;
+      g_t_avg.reset();
+      g_h_avg.reset();
     }
   }
 
@@ -113,15 +126,24 @@ void tick() {
   g_nox_raw = nox;
   g_voc = g_voc_algo.process(voc);
   g_nox = g_nox_algo.process(nox);
+  // 0 is the index algorithm's warm-up blackout, not a reading.
+  if (g_voc > 0)
+    g_voc_avg.push(static_cast<float>(g_voc));
 }
 
 bool sht_ok() { return g_sht_ok; }
 bool sgp_ok() { return g_sgp_ok; }
-float temp_c() { return g_sht_ok ? g_t : NAN; }
-float rh() { return g_sht_ok ? g_h : NAN; }
+float temp_c() { return g_sht_ok ? g_t_avg.avg() : NAN; }
+float rh() { return g_sht_ok ? g_h_avg.avg() : NAN; }
 int32_t voc_raw() { return g_sgp_ok ? g_voc_raw : -1; }
 int32_t nox_raw() { return g_sgp_ok ? g_nox_raw : -1; }
-int32_t voc_index() { return g_sgp_ok ? g_voc : -1; }
+int32_t voc_index() {
+  if (!g_sgp_ok)
+    return -1;
+  // Before the first real index lands the raw value carries the warm-up
+  // sentinel (0, or -1 while conditioning) unchanged.
+  return g_voc_avg.empty() ? g_voc : static_cast<int32_t>(lroundf(g_voc_avg.avg()));
+}
 int32_t nox_index() { return g_sgp_ok ? g_nox : -1; }
 
 }  // namespace air

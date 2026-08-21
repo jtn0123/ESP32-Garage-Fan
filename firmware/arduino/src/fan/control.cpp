@@ -30,6 +30,13 @@ int g_gas_spd = kFanGasDefaults.boost_speed;
 int g_gas_voc = kFanGasDefaults.on_index;
 bool g_gas_high = false;  // hysteresis latch for fan_gas_floor
 
+// Minimum-run dwell (auto_logic.h owns the why and the 15-min sizing): once
+// a latch engages it may not release for this many 30 s ticks. Engage stays
+// instant; only early surrender waits.
+constexpr uint16_t kMinRunTicks = 15 * 60 * 1000 / kAutoTickMs;
+uint16_t g_auto_run_ticks = 0;  // ticks the thermostat latch has been high
+uint16_t g_gas_run_ticks = 0;   // ticks the gas latch has been high
+
 // LEDC, not RMT. On 2026-08-13 the fan ignored an entire 0..12 calibration
 // sweep against a watt meter: rmtWriteLooping() reported success at every
 // step while /api/pinprobe showed the pad stuck LOW with zero transitions --
@@ -131,8 +138,8 @@ void tick_auto() {
   cfg.on_delta_c = g_auto_onf * 5 / 9;  // user thinks in F; logic runs in C
   cfg.off_delta_c = g_auto_offf * 5 / 9;
   const int prev = g_speed < 0 ? 0 : g_speed;
-  int next =
-      fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(), prev, &g_auto_high, cfg);
+  int next = fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(), prev, &g_auto_high,
+                             cfg, &g_auto_run_ticks, kMinRunTicks);
   // The gas floor layers under the thermostat: bad air forces a minimum
   // speed, it never lowers what the thermostat wanted. The release edge of
   // the latch goes to the flight recorder so "why did the fan spin up at
@@ -143,7 +150,8 @@ void tick_auto() {
   gcfg.on_index = g_gas_voc;
   gcfg.off_index = g_gas_voc - 50 > 0 ? g_gas_voc - 50 : 1;
   const bool was_high = g_gas_high;
-  const int floor_speed = fan_gas_floor(static_cast<int>(air::voc_index()), &g_gas_high, gcfg);
+  const int floor_speed = fan_gas_floor(static_cast<int>(air::voc_index()), &g_gas_high, gcfg,
+                                        &g_gas_run_ticks, kMinRunTicks);
   if (g_gas_high != was_high)
     eventlog::log("gas", "boost %s voc=%ld floor=%d", g_gas_high ? "ON" : "off",
                   (long)air::voc_index(), floor_speed);
@@ -185,8 +193,10 @@ void set_auto(bool on) {
 
 void set_gas_boost(bool on) {
   g_gas_on = on;
-  if (!on)
+  if (!on) {
     g_gas_high = false;  // releasing the feature releases the latch too
+    g_gas_run_ticks = 0;
+  }
   if (g_prefs)
     g_prefs->putBool("gason", on);
 }
