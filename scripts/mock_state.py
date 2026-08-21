@@ -62,6 +62,9 @@ DEVICE: Json = {
     # carry the real broker address or the site's actual SSID.
     "broker": "192.0.2.10:1883",
     "ssid": "example-wifi",
+    "mqtt_user": "fan",
+    "lat": "",
+    "lon": "",
     "topic_set": "garage/fan/set",
     "topic_out": "home/outdoor/temp_f",
     "period_us": 9934,

@@ -65,6 +65,21 @@ export const setSpeed = (speed: number): Promise<DeviceState> =>
 export const setConfig = (query: string): Promise<DeviceState> =>
   json<DeviceState>(`/api/config?${query}`, 'POST');
 
+/** POST /api/provision?fields...&token=... -- see provision.ts. */
+export async function provision(
+  query: string,
+  token: string,
+): Promise<{ ok: boolean; error?: string; note?: string }> {
+  const res = await fetch(`/api/provision?${query}&token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; note?: string };
+  const out: { ok: boolean; error?: string; note?: string } = { ok: res.ok && body.ok === true };
+  if (body.error) out.error = body.error;
+  if (body.note) out.note = body.note;
+  return out;
+}
+
 /** Token-guarded maintenance. Returns the raw body so the caller can show it. */
 async function guarded(path: string, token: string): Promise<string> {
   // POST to match the firmware: these routes reboot the board or erase the

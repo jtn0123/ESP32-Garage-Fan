@@ -297,9 +297,32 @@ def test_uptime_and_boots_allow_frame_ordering(mock):
 
 
 def test_token_guarded_routes_refuse_without_one(mock):
-    for path in ("/api/restart", "/api/sdformat", "/api/sdpurge", "/update"):
+    for path in ("/api/restart", "/api/sdformat", "/api/sdpurge", "/update", "/api/provision"):
         status, _ = req(path, "POST")
         assert status == 403, f"{path} must not act without a token"
+
+
+def test_provisioning_applies_only_what_it_was_given(mock):
+    """The credentials form: changed fields only, validated before applied,
+    and the device info afterwards reports what was stored -- never a password."""
+    before = get_json("/api/device")
+    status, body = req("/api/provision?mqtt_port=99999&token=iliving-ota", "POST")
+    assert status == 400 and b"mqtt_port" in body
+    status, body = req("/api/provision?ssid=&token=iliving-ota", "POST")
+    assert status == 400, "an empty SSID must be refused, not stored"
+    status, body = req(
+        "/api/provision?ssid=new-net&pass=s3cret&mqtt_user=fan2&token=iliving-ota", "POST"
+    )
+    assert status == 200, body
+    after = get_json("/api/device")
+    assert after["ssid"] == "new-net" and after["mqtt_user"] == "fan2"
+    assert after["broker"] == before["broker"], "untouched fields must stay"
+    assert "s3cret" not in json.dumps(after), "a password must never come back down"
+    # put it back for the neighbours
+    req(
+        f"/api/provision?ssid={before['ssid']}&mqtt_user={before['mqtt_user']}&token=iliving-ota",
+        "POST",
+    )
 
 
 def test_core_dump_reads_require_a_token(mock):

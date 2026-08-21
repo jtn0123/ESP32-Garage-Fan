@@ -30,6 +30,7 @@
 #include "config.h"
 #include "esp_task_wdt.h"
 #include "fan/control.h"
+#include "net/creds.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
 #include "sensors/air.h"
@@ -140,6 +141,7 @@ void setup() {
   eventlog::capture_esp_logs();
   ota_rollback_check_at_boot();
   g_prefs.begin("fanctl", false);
+  creds::restore(&g_prefs);  // before wifi_link::begin / mqtt_link::init
   battery::restore(&g_prefs);
   climate::restore(&g_prefs);
   // Announce speed changes over whatever transports are up. Registered before

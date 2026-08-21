@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "net/creds.h"
 #include "fan/control.h"
 #include "net/plug.h"
 #include "sensors/climate.h"
@@ -130,7 +131,8 @@ static void ensure_connected() {
   // that is the prime suspect for the ~16 s device-wide freeze measured from
   // the network on 1.14.8, which no sample or SD-flush timing accounted for.
   const uint32_t t_connect = millis();
-  const bool ok = g_mqtt.connect(id, MQTT_USER, MQTT_PASS, kTopicAvail, 0, true, "offline");
+  const bool ok =
+      g_mqtt.connect(id, creds::mqtt_user(), creds::mqtt_pass(), kTopicAvail, 0, true, "offline");
   const uint32_t connect_ms = millis() - t_connect;
   if (ok) {
     eventlog::log("mqtt", "up (down %lums rc=%d connect=%lums)", (unsigned long)down_ms, why,
@@ -177,7 +179,8 @@ void note_link_state() {
 }  // namespace
 
 void init() {
-  g_mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  // PubSubClient keeps the POINTER, not a copy; creds' buffers are static.
+  g_mqtt.setServer(creds::mqtt_host(), creds::mqtt_port());
   g_mqtt.setCallback(on_message);
   // 60 s, not PubSubClient's 15 s default. The e-ink refresh blocks the loop
   // for ~17 s every 5 minutes, and no keepalive can be sent while it runs; the

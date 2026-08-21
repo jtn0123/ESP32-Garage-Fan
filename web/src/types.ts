@@ -98,8 +98,11 @@ export interface DeviceInfo {
   id: string;
   host: string;
   repo: string; // "owner/name" on GitHub -- drives the update check
-  broker: string;
+  broker: string; // "host:port", from the NVS-backed creds store
   ssid: string;
+  mqtt_user: string; // never the password -- the provisioning form pre-fills from these
+  lat: string; // weather coordinates as stored ("" = weather poller off)
+  lon: string;
   topic_set: string;
   topic_out: string;
   period_us: number; // PWM frame, measured: 9934
