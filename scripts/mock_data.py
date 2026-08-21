@@ -74,7 +74,11 @@ def _window(days: int) -> "tuple[int, int]":
     2400 s apart, 60 d returns 284 rows ~5 h apart. The `rows` knob is what the
     card actually HOLDS -- a short card cannot fill any window.
     """
-    stored = min(int(SCEN["rows"]), days * DAY_ROWS)
+    # `rows=none` is the documented way to put the knob back to "full card"
+    # (coerce_scen stores None); int(None) here crashed every history request
+    # after that reset (found 2026-08-20, dogfooding the knobs themselves).
+    rows_knob = SCEN["rows"] if SCEN["rows"] is not None else 60 * DAY_ROWS
+    stored = min(int(rows_knob), days * DAY_ROWS)
     stride = stored // MAX_PTS + 1 if stored > MAX_PTS else 1
     return (stored + stride - 1) // stride, STEP * stride
 

@@ -213,6 +213,20 @@ def test_a_range_the_card_cannot_answer_is_503_not_substituted_data(mock):
         scen(card=True)
 
 
+def test_resetting_the_rows_knob_does_not_break_history(mock):
+    """rows=none is the documented reset; it crashed every later history and
+    boots request with int(None) until 2026-08-20 (found dogfooding the
+    knobs). A reset knob must behave exactly like an untouched one."""
+    scen(rows=3)
+    scen(rows="none")
+    try:
+        h = get_json("/api/history?days=1")
+        assert len(h["ts"]) > 3, "reset card still answering like a 3-row one"
+        get_json("/api/boots?days=1")
+    finally:
+        scen(rows=60 * 288)
+
+
 def test_an_outage_is_visible_as_a_gap_in_the_timestamps(mock):
     scen(card=True, gap_at=50)
     try:
