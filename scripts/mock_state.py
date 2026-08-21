@@ -5,7 +5,6 @@ one process-wide state machine."""
 
 from __future__ import annotations
 
-import re
 import time
 from typing import Any, Tuple, Union
 
@@ -146,7 +145,10 @@ def coerce_scen(key: str, raw: str) -> bool | int | str | None:
     if isinstance(spec, tuple) and spec[0] == "version":
         if raw == "none":
             return None
-        if not re.fullmatch(r"\d+\.\d+\.\d+", raw):
+        # Split-and-isdigit rather than a regex: the value is caller-supplied,
+        # and `\d+\.\d+\.\d+` is the classic polynomial-backtracking shape.
+        parts = raw.split(".")
+        if len(raw) > 32 or len(parts) != 3 or not all(p.isdigit() for p in parts):
             raise ValueError(f"{key} takes X.Y.Z or none")
         return raw
     if isinstance(spec, tuple) and spec[0] == "choice":
