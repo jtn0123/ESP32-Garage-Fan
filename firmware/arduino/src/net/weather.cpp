@@ -21,6 +21,7 @@
 #include <ctime>
 
 #include "config.h"
+#include "net/creds.h"
 #include "generated_config.h"
 #include "sensors/climate.h"
 #include "system/eventlog.h"
@@ -46,12 +47,18 @@ float fetch_f(uint32_t* dur_ms, char* err, size_t err_cap) {
   float out = NAN;
   snprintf(err, err_cap, "connect failed");
   if (net.connect("api.open-meteo.com", 80)) {
-    net.print("GET /v1/forecast?latitude=" WEATHER_LAT "&longitude=" WEATHER_LON
-              "&current=temperature_2m&temperature_unit=fahrenheit HTTP/1.1\r\n"
-              "Host: api.open-meteo.com\r\n"
-              "User-Agent: garage-fan/" FW_VERSION
-              "\r\n"
-              "Connection: close\r\n\r\n");
+    // Coordinates are runtime values now (creds.h), so the request line is
+    // assembled rather than concatenated at compile time.
+    char req[256];
+    snprintf(req, sizeof(req),
+             "GET /v1/forecast?latitude=%s&longitude=%s"
+             "&current=temperature_2m&temperature_unit=fahrenheit HTTP/1.1\r\n"
+             "Host: api.open-meteo.com\r\n"
+             "User-Agent: garage-fan/" FW_VERSION
+             "\r\n"
+             "Connection: close\r\n\r\n",
+             creds::weather_lat(), creds::weather_lon());
+    net.print(req);
     // Small bounded read: headers + body fit comfortably; anything beyond the
     // buffer is truncated, and the field either parses or it does not.
     char buf[1536];
@@ -97,7 +104,7 @@ float fetch_f(uint32_t* dur_ms, char* err, size_t err_cap) {
 
 }  // namespace
 
-bool enabled() { return WEATHER_LAT[0] != '\0' && WEATHER_LON[0] != '\0'; }
+bool enabled() { return creds::weather_lat()[0] != '\0' && creds::weather_lon()[0] != '\0'; }
 
 void tick() {
   if (!enabled() || WiFi.status() != WL_CONNECTED)

@@ -10,7 +10,7 @@ import * as api from './api.js';
 import { view } from './state.js';
 import { parseChecksum, sha256Hex } from './update.js';
 
-function tokenFromFieldOrPrompt(question: string): string | null {
+export function tokenFromFieldOrPrompt(question: string): string | null {
   const field = document.getElementById('ota_t') as HTMLInputElement | null;
   if (field?.value) return field.value;
   return window.prompt(question);

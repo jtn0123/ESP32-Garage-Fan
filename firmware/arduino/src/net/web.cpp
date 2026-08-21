@@ -18,6 +18,7 @@
 #include "fan/control.h"
 #include "generated_page.h"
 #include "generated_wire.h"
+#include "net/creds.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
@@ -27,6 +28,7 @@
 #include "net/web_history.h"
 #include "net/web_maint.h"
 #include "net/web_ota.h"
+#include "net/web_provision.h"
 #include "net/wifi_link.h"
 #include "sensors/air.h"
 #include "sensors/battery.h"
@@ -167,17 +169,25 @@ static void handle_device() {
     n += snprintf(high + n, sizeof(high) - n, i ? ",%u" : "%u", kHighUs[i]);
   uint8_t mac[6] = {0};
   WiFi.macAddress(mac);
-  char ssid[80], host[80];
-  json_str(ssid, sizeof(ssid), WIFI_SSID);
-  json_str(host, sizeof(host), MQTT_HOST);
-  char out[512];
+  // Identity strings come from creds (NVS-backed) so the page shows what the
+  // board is actually using, not what some build once compiled in. Secrets
+  // (passwords) are never emitted; the user name and coordinates are what the
+  // provisioning form needs to pre-fill.
+  char ssid[80], host[80], user[80], lat[24], lon[24];
+  json_str(ssid, sizeof(ssid), creds::wifi_ssid());
+  json_str(host, sizeof(host), creds::mqtt_host());
+  json_str(user, sizeof(user), creds::mqtt_user());
+  json_str(lat, sizeof(lat), creds::weather_lat());
+  json_str(lon, sizeof(lon), creds::weather_lon());
+  char out[640];
   snprintf(out, sizeof(out),
            "{" WK_ID "\"%s-%02x%02x%02x\"," WK_HOST "\"%s\"," WK_REPO "\"%s\"," WK_BROKER
-           "\"%s:%d\"," WK_SSID "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US
-           "%u," WK_SAMPLE_S "%lu," WK_HIGH_US "[%s]}",
-           FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host, MQTT_PORT,
-           ssid, kTopicSet, kTopicOutdoor, (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000),
-           high);
+           "\"%s:%u\"," WK_SSID "\"%s\"," WK_MQTT_USER "\"%s\"," WK_LAT "\"%s\"," WK_LON
+           "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US "%u," WK_SAMPLE_S
+           "%lu," WK_HIGH_US "[%s]}",
+           FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host,
+           (unsigned)creds::mqtt_port(), ssid, user, lat, lon, kTopicSet, kTopicOutdoor,
+           (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000), high);
   g_http.send(200, "application/json", out);
 }
 
@@ -348,6 +358,7 @@ void begin(Preferences* prefs) {
   web_maint::register_routes(g_http, g_token);
   web_debug::register_routes(g_http, g_token);
   web_ota::register_routes(g_http, g_token);
+  web_provision::register_routes(g_http, g_token);
   g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
 }
 

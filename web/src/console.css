@@ -396,3 +396,8 @@ body{padding:0 16px 32px}
   background: #e8e4dc;
 }
 .pnlmsg { font-size: 11px; color: var(--dim); }
+.prov{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.provgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;max-width:420px}
+.provgrid .fld{max-width:100%;width:100%;box-sizing:border-box}
+#prov_go{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
+#provmsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;min-height:1em}

@@ -349,6 +349,60 @@ class H(BaseHTTPRequestHandler):
     def _display_refresh(self, _query: Query) -> None:
         return self._json(200, {"ok": True})
 
+    # The firmware's OTA token default (config.h FAN_OTA_TOKEN). Routes that
+    # must be exercisable END TO END -- provisioning, and the update path --
+    # accept exactly this value, so a spec can drive the success path as well
+    # as the refusal. The older destructive routes stay refuse-only below: a
+    # mock that can be asked to "format the card" and says yes teaches nothing.
+    DEFAULT_TOKEN = "iliving-ota"
+
+    def _token_ok(self, query: Query) -> bool:
+        return query.get("token", [""])[0] == self.DEFAULT_TOKEN
+
+    # Every argument handle_provision() in net/web_provision.cpp accepts, in
+    # the same order. tests/test_web_contract.py pins the two lists together.
+    PROVISION_KEYS = (
+        "ssid",
+        "pass",
+        "mqtt_host",
+        "mqtt_port",
+        "mqtt_user",
+        "mqtt_pass",
+        "lat",
+        "lon",
+    )
+
+    def _provision(self, query: Query) -> None:
+        if not self._token_ok(query):
+            return self._json(403, {"error": "bad token"})
+        given = {k: query[k][0] for k in self.PROVISION_KEYS if k in query}
+        if not given:
+            return self._json(400, {"error": "no fields"})
+        caps = {
+            "ssid": 32,
+            "pass": 64,
+            "mqtt_host": 64,
+            "mqtt_user": 64,
+            "mqtt_pass": 64,
+            "lat": 16,
+            "lon": 16,
+        }
+        for k, v in given.items():
+            if k == "mqtt_port":
+                if not v.isdigit() or not (1 <= int(v) <= 65535):
+                    return self._json(400, {"error": "bad mqtt_port"})
+            elif len(v) > caps[k] or (k == "ssid" and not v):
+                return self._json(400, {"error": f"bad {k}"})
+        # Mirror what the device would come back reporting after its reboot;
+        # passwords are stored nowhere and echoed nowhere, same as the firmware.
+        host, _, port = DEVICE["broker"].rpartition(":")
+        DEVICE["ssid"] = given.get("ssid", DEVICE["ssid"])
+        DEVICE["broker"] = f"{given.get('mqtt_host', host)}:{given.get('mqtt_port', port)}"
+        for k in ("mqtt_user", "lat", "lon"):
+            if k in given:
+                DEVICE[k] = given[k]
+        return self._json(200, {"ok": True, "note": "rebooting with the new credentials"})
+
     def _needs_token(self, _query: Query) -> None:
         # Token-guarded on the real device; the mock always refuses, which is
         # what the console's error path should be exercised against.
@@ -375,6 +429,7 @@ class H(BaseHTTPRequestHandler):
         "/api/set": _set,
         "/api/config": _config,
         "/api/display/refresh": _display_refresh,
+        "/api/provision": _provision,
         "/api/raw": _needs_token,
         "/api/restart": _needs_token,
         "/api/sdformat": _needs_token,

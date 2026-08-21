@@ -11,6 +11,7 @@ import * as api from './api.js';
 import { el, show } from './dom.js';
 import { hoursMinutes, storage } from './format.js';
 import { view } from './state.js';
+import { provisionControl } from './provision.js';
 import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
@@ -22,7 +23,8 @@ export type Row =
   | { kind: 'actions'; label: string; hint: string; actions: Action[] }
   | { kind: 'update'; label: string; hint: string; status: UpdateStatus | null; recheck: () => void }
   | { kind: 'ota'; label: string; hint: string }
-  | { kind: 'panel'; label: string; hint: string };
+  | { kind: 'panel'; label: string; hint: string }
+  | { kind: 'provision'; label: string; hint: string; info: () => DeviceInfo | null };
 
 export interface Action {
   text: string;
@@ -177,6 +179,12 @@ export function buildGroups(d: SettingsDeps): Group[] {
           `${s.ip || '–'}${info ? ` · ${info.host}.local` : ''}`),
         text('Command topic', 'Publish a speed 0–12 here to drive the fan from anywhere.',
           info?.topic_set ?? '–'),
+        {
+          kind: 'provision',
+          label: 'Connection',
+          hint: 'WiFi, MQTT and the weather coordinates, stored on the board itself — so a published release image, built without anyone’s passwords, still comes up on your network. Passwords are write-only: blank means unchanged. Saving reboots the controller.',
+          info: () => view.info,
+        },
       ],
     },
     {
@@ -352,6 +360,8 @@ function control(r: Row): HTMLElement {
       return otaControl();
     case 'panel':
       return panelControl();
+    case 'provision':
+      return provisionControl(r.info);
   }
 }
 
