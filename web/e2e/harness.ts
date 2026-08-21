@@ -108,6 +108,8 @@ export const SCEN_DEFAULTS = {
   // the ordering held, which is the worst way for a test to pass.
   panel_ready: 'true',
   plug: 'ok',
+  ota_fw: 'none',
+  fw: '1.14.23',
 } as const;
 
 /** Flip scenario knobs on the mock. */
