@@ -47,8 +47,7 @@ struct RollingAvg {
     if (count == 0)
       return NAN;
     float sum = 0;
-    for (int i = 0; i < count; i++)
-      sum += buf[i];
+    for (int i = 0; i < count; i++) sum += buf[i];
     return sum / count;
   }
 };

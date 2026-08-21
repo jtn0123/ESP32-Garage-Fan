@@ -47,8 +47,7 @@ static void test_one_outlier_cannot_swing_a_full_window() {
   // The point of the whole file: a single faulty reading moves a 30-sample
   // mean by at most outlier/30, nowhere near an auto-mode threshold jump.
   RollingAvg<30> a;
-  for (int i = 0; i < 30; i++)
-    a.push(30.0f);
+  for (int i = 0; i < 30; i++) a.push(30.0f);
   a.push(45.0f);  // one 15-degree glitch
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.5f, a.avg());
 }
@@ -69,10 +68,8 @@ static void test_long_run_tracks_a_step_change_fully() {
   // After a real (sustained) change the mean must converge on it exactly,
   // not hover -- smoothing delays truth, it must never distort it.
   RollingAvg<30> a;
-  for (int i = 0; i < 100; i++)
-    a.push(200.0f);
-  for (int i = 0; i < 30; i++)
-    a.push(260.0f);
+  for (int i = 0; i < 100; i++) a.push(200.0f);
+  for (int i = 0; i < 30; i++) a.push(260.0f);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 260.0f, a.avg());
 }
 
