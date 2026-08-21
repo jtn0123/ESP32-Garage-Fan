@@ -180,7 +180,7 @@ void compose() {
   // ---- banner ---------------------------------------------------------------
   // "FAN FAULT" outranks the mode: it is the watt meter catching the fan not
   // obeying (plug verdict -1), the one condition this panel exists to shout.
-  banner_status_text(fan::auto_on(), plug::verdict(), buf, sizeof(buf));
+  banner_status_text(fan::auto_on(), plug::verdict(), plug::cycling(), buf, sizeof(buf));
   if (tricolor()) {
     g_red->fillRect(0, 0, kWidth, 20, 1);
     draw_ftext(g_red, &FreeSansBold9pt7b, 5, 15, "GARAGE FAN", 0);

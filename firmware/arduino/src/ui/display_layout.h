@@ -143,10 +143,15 @@ inline void mode_text(bool auto_on, char* out, size_t cap) {
  * panel could say -- it is the panel's whole reason to be glanced at.
  * Mono-safe by the tricolor rule: the banner text is black-plane on mono.
  */
-inline void banner_status_text(bool auto_on, int plug_verdict, char* out, size_t cap) {
+inline void banner_status_text(bool auto_on, int plug_verdict, bool cycling, char* out,
+                               size_t cap) {
   if (!out || cap == 0)
     return;
-  if (plug_verdict == -1)
+  // Cycling outranks the plain fault: it is the more specific finding, and
+  // the verdict underneath it flaps every minute while a fan cycles.
+  if (cycling)
+    snprintf(out, cap, "FAN CYCLING");
+  else if (plug_verdict == -1)
     snprintf(out, cap, "FAN FAULT");
   else
     mode_text(auto_on, out, cap);

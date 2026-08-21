@@ -58,7 +58,7 @@ void on_network_up();
  * widths and reports the missing columns as absent rather than as zero.
  */
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox);
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox, int flips);
 
 /**
  * Append one flight-recorder line (newline added) to /events.log, rotating
@@ -96,6 +96,7 @@ struct Samples {
   int32_t* nox_raw;
   int16_t* voc;
   int16_t* nox;
+  int8_t* flips;  // plug run/stop flips in the bucket; -1 on pre-1.21.0 rows / no meter
 };
 
 /**

@@ -25,6 +25,7 @@ static Sample row(float t, int8_t speed = 3) {
   s.batt_v = 3.7f;
   s.speed = speed;
   s.chg = 1;
+  s.flips = (int8_t)(speed + 1);  // distinct again, for the column-moves test
   return s;
 }
 
@@ -57,6 +58,7 @@ static void test_all_columns_move_together() {
     TEST_ASSERT_EQUAL_FLOAT(r.t[i] + 900, r.p[i]);
     TEST_ASSERT_EQUAL_FLOAT(r.t[i] + 60, r.o[i]);
     TEST_ASSERT_EQUAL_INT8((int8_t)(r.t[i] - 10), r.s[i]);
+    TEST_ASSERT_EQUAL_INT8((int8_t)(r.s[i] + 1), r.f[i]);
   }
 }
 

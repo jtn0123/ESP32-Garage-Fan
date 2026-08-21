@@ -20,10 +20,20 @@ const h = (over: Partial<History> = {}): History => ({
   nox_raw: [null, 15800, 15810],
   voc: [null, 0, 87],
   nox: [null, 0, 1],
+  flips: [null, 0, 3],
   ...over,
 });
 
 describe('build', () => {
+  it('carries the plug flip count per row, null where the meter had none', () => {
+    // The cycling profile's column; the power chart tints any bucket > 0.
+    expect(build(h()).flips).toEqual([null, 0, 3]);
+    // A pre-1.21.0 firmware sends no flips at all: every row is null, not a throw.
+    const old = h();
+    delete (old as Partial<History>).flips;
+    expect(build(old).flips).toEqual([null, null, null]);
+  });
+
   it('converts garage temperature to Fahrenheit', () => {
     const s = build(h());
     expect(s.tf[0]).toBeCloseTo(68);

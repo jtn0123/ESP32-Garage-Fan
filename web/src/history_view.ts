@@ -12,6 +12,7 @@ import {
   drawAxis,
   drawBattery,
   drawFanSpeed,
+  drawPower,
   drawSimple,
   drawTemperature,
 } from './charts.js';
@@ -139,6 +140,16 @@ export function speedReadout(spd: number | undefined): string {
 }
 
 /** "4.19 V" / "4.19 V ⚡ charging" / '' -- the battery row. */
+/**
+ * "45.1 W", or "45.1 W · cycling ×3" when the meter confirmed run/stop flips
+ * inside this bucket -- the scrub readout's half of what the red tint says.
+ */
+export function powerReadout(w: number | null, flips: number | null): string {
+  if (w === null) return '';
+  const base = `${w.toFixed(1)} W`;
+  return flips !== null && flips > 0 ? `${base} · cycling ×${flips}` : base;
+}
+
 export function battReadout(volts: number | null, charging: boolean): string {
   if (volts === null) return '';
   return `${volts.toFixed(2)} V${charging ? ' ⚡ charging' : ''}`;
@@ -159,7 +170,7 @@ function paintReadouts(): void {
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   $('roB').textContent = battReadout(at(s.bv, i), s.chg[i] === 1);
   const w = at(s.w, i);
-  $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
+  $('roW').textContent = powerReadout(w, at(s.flips, i));
   $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
   $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
 }
@@ -202,10 +213,7 @@ export function drawAll(): void {
       (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
-  if (view.rows.power) {
-    drawSimple($<HTMLCanvasElement>('cv_w'), s, s.w, SERIES_COLOURS.power,
-      (v) => v.toFixed(1), 'no plug data yet', view.scrub);
-  }
+  if (view.rows.power) drawPower($<HTMLCanvasElement>('cv_w'), s, view.scrub);
   // Gas rows plot the INDEX once the algorithm produces one, and the raw
   // ticks before that -- the user asked to watch the warm-up, not to stare at
   // a flat zero for the hours Sensirion's blackout lasts.

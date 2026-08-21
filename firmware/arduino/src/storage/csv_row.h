@@ -31,8 +31,9 @@ struct CsvRow {
   int32_t nox_raw = -1;
   int16_t voc = -1;  // gas indices; 0 = algorithm was warming
   int16_t nox = -1;
-  float bme_t = NAN;  // the BME280 beside the SHT41 (1.14.48+ rows)
+  float bme_t = NAN;  // the BME280 beside the SHT41 (1.14.48-1.15.1 rows)
   float bme_rh = NAN;
+  int8_t flips = -1;  // plug run/stop flips in the bucket (1.21.0+ rows)
   int8_t spd = 0;
   int8_t chg = -1;
   bool valid = false;  // false when the line is not a usable sample
@@ -45,8 +46,11 @@ constexpr float kAbsentBelow = -100.0f;
  * Decode one CSV line.
  *
  * Accepts every width this firmware has ever written: 6 fields (pre-1.14.23),
- * 8 (batt_v/chg), 13 (watts + the four SGP41 columns, 1.14.47) and 15
- * (bme_t/bme_rh, the second thermometer, 1.14.48). A line is valid only with
+ * 8 (batt_v/chg), 13 (watts + the four SGP41 columns, 1.14.47), 15
+ * (bme_t/bme_rh, the second thermometer, 1.14.48-1.15.1) and 14 (the plug
+ * meter's flip count, 1.21.0). The 14th field is the ONLY ambiguity: in a
+ * 15-field row it is bme_t, in a 14-field row it is flips -- the width
+ * decides, and the two never share a card era. A line is valid only with
  * at least epoch + the three always-present readings; anything shorter (a
  * torn tail row, a stray blank, a header) is rejected rather than half-read.
  */
@@ -83,8 +87,14 @@ inline CsvRow parse_csv_row(const char* line) {
   r.nox_raw = got >= 10 ? static_cast<int32_t>(nr) : -1;
   r.voc = got >= 11 ? static_cast<int16_t>(vi) : -1;
   r.nox = got >= 12 ? static_cast<int16_t>(ni) : -1;
-  r.bme_t = (got >= 13 && btv > kAbsentBelow) ? btv : NAN;
-  r.bme_rh = (got >= 14 && bhv > kAbsentBelow) ? bhv : NAN;
+  if (got == 13) {
+    // 14 fields: the 1.21.0 shape, field 14 is the flip count (-1 = no meter).
+    r.flips = (btv >= 0.0f && btv <= 127.0f) ? static_cast<int8_t>(btv) : -1;
+  } else if (got >= 14) {
+    // 15 fields: the 1.14.48-1.15.1 BME pair.
+    r.bme_t = btv > kAbsentBelow ? btv : NAN;
+    r.bme_rh = bhv > kAbsentBelow ? bhv : NAN;
+  }
   r.valid = true;
   return r;
 }

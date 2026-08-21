@@ -50,6 +50,39 @@ static void a_card_spanning_the_change_reads_whole() {
   for (const char* line : rows) TEST_ASSERT_TRUE(parse_csv_row(line).valid);
 }
 
+// The 1.21.0 width: field 14 is the plug meter's flip count for the bucket.
+static void reads_a_fourteen_field_row_with_flips() {
+  const auto r = parse_csv_row(
+      "1787300000,27.10,41.2,1001.0,70.50,10,4.20,1,45.1,30125,15800,87,1,3");
+  TEST_ASSERT_TRUE(r.valid);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 45.1, r.watts);
+  TEST_ASSERT_EQUAL_INT(3, r.flips);
+  TEST_ASSERT_TRUE(isnan(r.bme_t));  // field 14 is NOT a thermometer here
+  // -1 = no meter, the same sentinel the gas columns use.
+  const auto none = parse_csv_row(
+      "1787300000,27.10,41.2,1001.0,70.50,10,4.20,1,-999.0,30125,15800,87,1,-1");
+  TEST_ASSERT_EQUAL_INT(-1, none.flips);
+}
+
+// The 1.14.48-1.15.1 width: fields 14-15 are the BME pair, and flips is
+// absent. Width decides which; the two never share a card era.
+static void a_fifteen_field_bme_row_keeps_its_thermometer() {
+  const auto r = parse_csv_row(
+      "1786800000,27.10,41.2,1001.0,70.50,10,4.20,1,30.2,30125,15800,87,1,27.90,40.1");
+  TEST_ASSERT_TRUE(r.valid);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 27.90, r.bme_t);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 40.1, r.bme_rh);
+  TEST_ASSERT_EQUAL_INT(-1, r.flips);
+}
+
+static void a_thirteen_field_row_has_no_flips() {
+  const auto r = parse_csv_row(
+      "1787200000,27.10,41.2,1001.0,70.50,10,4.20,1,30.2,30125,15800,87,1");
+  TEST_ASSERT_TRUE(r.valid);
+  TEST_ASSERT_EQUAL_INT(-1, r.flips);
+  TEST_ASSERT_TRUE(isnan(r.bme_t));
+}
+
 // -------------------------------------------------------------- the sentinels
 
 static void the_outdoor_sentinel_becomes_absent() {
@@ -118,6 +151,9 @@ int main() {
   RUN_TEST(reads_a_modern_eight_field_row);
   RUN_TEST(reads_a_legacy_six_field_row);
   RUN_TEST(a_card_spanning_the_change_reads_whole);
+  RUN_TEST(reads_a_fourteen_field_row_with_flips);
+  RUN_TEST(a_fifteen_field_bme_row_keeps_its_thermometer);
+  RUN_TEST(a_thirteen_field_row_has_no_flips);
   RUN_TEST(the_outdoor_sentinel_becomes_absent);
   RUN_TEST(the_battery_sentinel_becomes_absent);
   RUN_TEST(a_header_line_is_not_a_sample);

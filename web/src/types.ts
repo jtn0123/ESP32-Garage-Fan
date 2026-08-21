@@ -79,6 +79,16 @@ export interface PlugState {
    * (stale reading, speed changed too recently).
    */
   verdict: -1 | 0 | 1;
+  /**
+   * The cycling profile (net/plug_cycle.h): the fan is switching itself on
+   * and off while ONE speed is held -- four or more confirmed run/stop flips
+   * inside ten minutes. Distinct from verdict -1, which is "steadily wrong":
+   * on 2026-08-20 the fan cycled all night at a held speed 10 and the verdict
+   * only flapped.
+   */
+  cycling: boolean;
+  /** Confirmed run/stop flips inside the last ten minutes; 0 when steady. */
+  flips: number;
 }
 
 export interface BatteryState {
@@ -221,7 +231,13 @@ export interface History {
   /** Sensirion gas indices 1..500. 0 = the algorithm was still warming up. */
   voc: (number | null)[];
   nox: (number | null)[];
-  /** The BME280 logged beside the SHT41, for the dual-sensor overlays. */
+  /**
+   * Run/stop flips the plug meter confirmed inside each 5-minute bucket
+   * (net/plug_cycle.h). The watts column is one snapshot per bucket and
+   * aliases a fan cycling every minute into jitter; this is the count that
+   * says it happened. null = no meter, or a row from before 1.21.0.
+   */
+  flips: (number | null)[];
 }
 
 /**
