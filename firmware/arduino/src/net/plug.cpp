@@ -115,8 +115,8 @@ void on_cycle_event(CycleEvent ev, int speed) {
     const unsigned stopped_pct = g_cycle.polls ? 100u * g_cycle.stop_polls / g_cycle.polls : 0;
     eventlog::log(
         "plug", "cycling ended speed=%d after %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
-        speed, g_cycle.polls * (kPollMs / 1000) / 60, g_cycle.flips_total, stopped_pct,
-        g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
+        speed, static_cast<unsigned>(g_cycle.polls * (kPollMs / 1000) / 60), g_cycle.flips_total,
+        stopped_pct, g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
     g_trace_left = 0;
     publish_current_alert();
     return;
@@ -134,10 +134,10 @@ void on_cycle_event(CycleEvent ev, int speed) {
   if (++g_beat >= kBeatPolls) {
     g_beat = 0;
     const unsigned stopped_pct = g_cycle.polls ? 100u * g_cycle.stop_polls / g_cycle.polls : 0;
-    eventlog::log("plug",
-                  "still cycling speed=%d %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
-                  speed, g_cycle.polls * (kPollMs / 1000) / 60, g_cycle.flips_total, stopped_pct,
-                  g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
+    eventlog::log(
+        "plug", "still cycling speed=%d %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
+        speed, static_cast<unsigned>(g_cycle.polls * (kPollMs / 1000) / 60), g_cycle.flips_total,
+        stopped_pct, g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
   }
 }
 
