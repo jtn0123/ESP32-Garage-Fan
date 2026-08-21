@@ -106,8 +106,8 @@ void state_json(char* out, size_t cap) {
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
     snprintf(plugs, sizeof(plugs),
-             "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d," WK_CYCLING "%s,"
-             WK_FLIPS "%u}",
+             "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d," WK_CYCLING "%s," WK_FLIPS
+             "%u}",
              plug::watts(), vs, (long)plug::age_s(), plug::verdict(),
              plug::cycling() ? "true" : "false", plug::flips());
   } else {

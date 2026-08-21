@@ -301,12 +301,12 @@ void handle_history() {
     const uint16_t rows = history::count();
     tx.printf("{\"source\":\"ring\",\"interval_s\":%ld,", step);
     write_ts_derived(tx, history::end_ts(), rows, step);
-    write_all_series(tx,
-                     {history::temp(), history::rh(), history::hpa(), history::out_f(),
-                      history::batt_v(), history::watts(), history::speed(), history::chg(),
-                      history::voc_raw(), history::nox_raw(), history::voc(), history::nox(),
-                      history::flips()},
-                     rows);
+    write_all_series(
+        tx,
+        {history::temp(), history::rh(), history::hpa(), history::out_f(), history::batt_v(),
+         history::watts(), history::speed(), history::chg(), history::voc_raw(), history::nox_raw(),
+         history::voc(), history::nox(), history::flips()},
+        rows);
   }
   tx.end();
 }

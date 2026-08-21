@@ -62,7 +62,7 @@ static void test_the_0820_night_is_called_cycling() {
 static void test_one_stop_and_restart_is_a_hiccup_not_a_cycle() {
   CycleDetector d;
   feed(d, kRunW, 20);
-  feed(d, kStopW, 8);  // stops for two minutes
+  feed(d, kStopW, 8);                         // stops for two minutes
   const CycleEvent ev = feed(d, kRunW, 200);  // and runs on
   TEST_ASSERT_EQUAL(static_cast<int>(CycleEvent::kNone), static_cast<int>(ev));
   TEST_ASSERT_FALSE(d.cycling);
@@ -106,7 +106,7 @@ static void test_mid_band_readings_vote_for_nobody() {
 static void test_missing_readings_and_unsettled_speed_are_skipped() {
   CycleDetector d;
   for (int i = 0; i < 100; i++) {
-    d.poll(10, kSpeed10W, NAN, true);                      // HA unreachable
+    d.poll(10, kSpeed10W, NAN, true);                        // HA unreachable
     d.poll(10, kSpeed10W, (i & 1) ? kRunW : kStopW, false);  // still settling
   }
   TEST_ASSERT_FALSE(d.cycling);

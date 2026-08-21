@@ -43,13 +43,13 @@
 namespace plug {
 
 struct CycleCfg {
-  float run_frac;        // >= this fraction of the baseline = running
-  float stop_frac;       // <= this fraction of the baseline = stopped
-  float min_expect_w;    // below this baseline the classes are not separable
+  float run_frac;         // >= this fraction of the baseline = running
+  float stop_frac;        // <= this fraction of the baseline = stopped
+  float min_expect_w;     // below this baseline the classes are not separable
   uint8_t confirm_polls;  // consecutive polls a class must hold to count
-  uint8_t window;        // polls the onset count looks back over (<= 64)
-  uint8_t onset_flips;   // flips inside `window` that declare CYCLING
-  uint8_t quiet_polls;   // flip-free polls that end an episode (<= 64)
+  uint8_t window;         // polls the onset count looks back over (<= 64)
+  uint8_t onset_flips;    // flips inside `window` that declare CYCLING
+  uint8_t quiet_polls;    // flip-free polls that end an episode (<= 64)
 };
 
 // 15 s polls: confirm 2 = 30 s, window 40 = 10 min, quiet 60 = 15 min.
@@ -75,13 +75,13 @@ struct CycleDetector {
   bool cycling = false;
 
   // --- the testimony (valid from onset until the next onset) -------------
-  uint16_t polls = 0;          // polls since onset
-  uint16_t run_polls = 0;      // of those, classed RUN
-  uint16_t stop_polls = 0;     // of those, classed STOP
-  uint16_t flips_total = 0;    // flips since onset (the window only sees 40)
-  float peak_w = 0;            // loudest reading since onset
-  float trough_w = 0;          // quietest reading since onset (kNoTrough = none yet)
-  uint8_t bucket_flips = 0;    // flips since take_bucket_flips(), for history
+  uint16_t polls = 0;        // polls since onset
+  uint16_t run_polls = 0;    // of those, classed RUN
+  uint16_t stop_polls = 0;   // of those, classed STOP
+  uint16_t flips_total = 0;  // flips since onset (the window only sees 40)
+  float peak_w = 0;          // loudest reading since onset
+  float trough_w = 0;        // quietest reading since onset (kNoTrough = none yet)
+  uint8_t bucket_flips = 0;  // flips since take_bucket_flips(), for history
 
   /** Flips inside the last `polls` polls. */
   uint8_t flips_in(uint8_t polls) const {
@@ -135,8 +135,8 @@ struct CycleDetector {
     // The register ages by one poll whether or not this poll can decide
     // anything, so "10 minutes" stays wall-clock, not "40 decided polls".
     flip_bits <<= 1;
-    const bool decidable = settled && !(expect_w != expect_w) && !(w != w) &&
-                           expect_w >= cfg.min_expect_w;
+    const bool decidable =
+        settled && !(expect_w != expect_w) && !(w != w) && expect_w >= cfg.min_expect_w;
     int8_t cls = 0;
     if (decidable) {
       if (w >= expect_w * cfg.run_frac)

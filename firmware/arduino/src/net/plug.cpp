@@ -113,9 +113,10 @@ void on_cycle_event(CycleEvent ev, int speed) {
   }
   if (ev == CycleEvent::kEnded) {
     const unsigned stopped_pct = g_cycle.polls ? 100u * g_cycle.stop_polls / g_cycle.polls : 0;
-    eventlog::log("plug", "cycling ended speed=%d after %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
-                  speed, g_cycle.polls * (kPollMs / 1000) / 60, g_cycle.flips_total, stopped_pct,
-                  g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
+    eventlog::log(
+        "plug", "cycling ended speed=%d after %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
+        speed, g_cycle.polls * (kPollMs / 1000) / 60, g_cycle.flips_total, stopped_pct,
+        g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
     g_trace_left = 0;
     publish_current_alert();
     return;
@@ -133,7 +134,8 @@ void on_cycle_event(CycleEvent ev, int speed) {
   if (++g_beat >= kBeatPolls) {
     g_beat = 0;
     const unsigned stopped_pct = g_cycle.polls ? 100u * g_cycle.stop_polls / g_cycle.polls : 0;
-    eventlog::log("plug", "still cycling speed=%d %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
+    eventlog::log("plug",
+                  "still cycling speed=%d %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
                   speed, g_cycle.polls * (kPollMs / 1000) / 60, g_cycle.flips_total, stopped_pct,
                   g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
   }
@@ -207,9 +209,9 @@ void judge() {
   const bool settled = millis() - g_speed_since_ms >= kSettleMs;
   // The cycling profile sees EVERY poll, decidable or not: its window is
   // wall-clock, and it applies the same settle and freshness gates itself.
-  on_cycle_event(g_cycle.poll(speed, in_table ? kBaselineW[speed] : NAN, fresh ? g_watts : NAN,
-                              settled),
-                 speed);
+  on_cycle_event(
+      g_cycle.poll(speed, in_table ? kBaselineW[speed] : NAN, fresh ? g_watts : NAN, settled),
+      speed);
   if (!fresh || !settled || !in_table) {
     // Falling from disagreement to CANNOT-SAY must replace the retained
     // alert too, or a stale "plug_disagree" keeps speaking for a meter that
