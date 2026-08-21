@@ -6,3 +6,8 @@
 # scripts/calibrate_fan_power.py:37 reads HA_TOKEN from the environment
 # (os.environ.get) -- no literal secret ever existed on the line.
 412031a60882bfdb1ebc979db86ddc0e691fdb4d:scripts/calibrate_fan_power.py:bare-credential-assignment:37
+
+# scripts/mock_device.py:357 on this commit assigned the firmware's PUBLIC
+# default OTA token (config.h FAN_OTA_TOKEN, committed by design) to a mock
+# constant; the next commit reads it from config.h instead of repeating it.
+cd9195ee7df0786d063d09c514eb1539cc368389:scripts/mock_device.py:bare-credential-assignment:357

@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -66,6 +67,16 @@ from mock_state import BOOT, DEVICE, SCEN, SCEN_SPEC, STATE, STATS, coerce_scen 
 
 # What parse_qs hands every handler: each query key to its list of values.
 Query = dict[str, list[str]]
+
+CONFIG_H = Path(__file__).resolve().parents[1] / "firmware" / "arduino" / "src" / "config.h"
+
+
+def firmware_default_token() -> str:
+    """FAN_OTA_TOKEN's compiled default, straight from config.h."""
+    m = re.search(r'#define FAN_OTA_TOKEN "([^"]*)"', CONFIG_H.read_text())
+    if not m or not m.group(1):
+        raise RuntimeError(f"FAN_OTA_TOKEN default not found in {CONFIG_H}")
+    return m.group(1)
 
 
 class H(BaseHTTPRequestHandler):
@@ -349,12 +360,15 @@ class H(BaseHTTPRequestHandler):
     def _display_refresh(self, _query: Query) -> None:
         return self._json(200, {"ok": True})
 
-    # The firmware's OTA token default (config.h FAN_OTA_TOKEN). Routes that
-    # must be exercisable END TO END -- provisioning, and the update path --
-    # accept exactly this value, so a spec can drive the success path as well
-    # as the refusal. The older destructive routes stay refuse-only below: a
-    # mock that can be asked to "format the card" and says yes teaches nothing.
-    DEFAULT_TOKEN = "iliving-ota"
+    # The firmware's OTA token default, read from config.h's FAN_OTA_TOKEN so
+    # there is one source of truth and no second copy to drift (or to look
+    # like a leaked credential to a scanner -- it is the committed public
+    # default, by the operator's choice). Routes that must be exercisable END
+    # TO END -- provisioning, and the update path -- accept exactly this value,
+    # so a spec can drive the success path as well as the refusal. The older
+    # destructive routes stay refuse-only below: a mock that can be asked to
+    # "format the card" and says yes teaches nothing.
+    DEFAULT_TOKEN = firmware_default_token()
 
     def _token_ok(self, query: Query) -> bool:
         return query.get("token", [""])[0] == self.DEFAULT_TOKEN
