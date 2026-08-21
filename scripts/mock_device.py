@@ -368,7 +368,7 @@ class H(BaseHTTPRequestHandler):
     # so a spec can drive the success path as well as the refusal. The older
     # destructive routes stay refuse-only below: a mock that can be asked to
     # "format the card" and says yes teaches nothing.
-    DEFAULT_TOKEN = firmware_default_token()
+    DEFAULT_TOKEN = firmware_default_token()  # gitleaks:allow -- a call, not a value
 
     def _token_ok(self, query: Query) -> bool:
         return query.get("token", [""])[0] == self.DEFAULT_TOKEN
