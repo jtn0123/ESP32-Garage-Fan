@@ -49,6 +49,23 @@ static void an_absurd_value_costs_its_own_field_and_no_more() {
   TEST_ASSERT_TRUE(strlen(out) < fixedfmt::kCap);
 }
 
+static void an_infinity_clamps_to_the_top_of_the_range_on_every_platform() {
+  // lround() of an infinity is UNDEFINED and the platforms disagree: glibc
+  // returns LONG_MIN, so a value clamped only on the integer side rendered
+  // the largest possible reading as "-999.9". Caught by CI, not by the Mac
+  // this was written on.
+  char out[fixedfmt::kCap];
+  fixedfmt::write(out, fixedfmt::tenths(INFINITY));
+  TEST_ASSERT_EQUAL_STRING("999.9", out);
+  fixedfmt::write(out, fixedfmt::tenths(-INFINITY));
+  TEST_ASSERT_EQUAL_STRING("-999.9", out);
+  // And the overflow that PRODUCES an infinity inside the function: 1e38
+  // is finite, 1e38 * 10 is not.
+  TEST_ASSERT_EQUAL_INT32(9999, fixedfmt::tenths(1e38f));
+  TEST_ASSERT_EQUAL_INT32(-9999, fixedfmt::tenths(-1e38f));
+  TEST_ASSERT_EQUAL_INT32(9999, fixedfmt::tenths_f(3e38f));
+}
+
 static void a_caller_supplied_out_of_range_value_is_clamped_too() {
   // write() re-clamps rather than trusting its input: that is what lets the
   // compiler prove the field is at most six characters.
@@ -89,6 +106,7 @@ int main(int, char**) {
   RUN_TEST(a_small_negative_keeps_its_sign_and_its_zero);
   RUN_TEST(absent_reads_as_absent_not_as_zero);
   RUN_TEST(an_absurd_value_costs_its_own_field_and_no_more);
+  RUN_TEST(an_infinity_clamps_to_the_top_of_the_range_on_every_platform);
   RUN_TEST(a_caller_supplied_out_of_range_value_is_clamped_too);
   RUN_TEST(celsius_becomes_fahrenheit_tenths);
   RUN_TEST(a_differential_carries_an_explicit_sign);

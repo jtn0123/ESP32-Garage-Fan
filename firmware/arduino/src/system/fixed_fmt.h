@@ -37,15 +37,27 @@ inline constexpr int32_t kAbsent = INT32_MIN;
 inline int32_t tenths(float v) {
   if (std::isnan(v))
     return kAbsent;
-  // Clamp on the INTEGER side: the compiler tracks integer ranges and does
-  // not track float ones, and the whole point here is that it can prove the
+  // Two clamps, and both are load-bearing.
+  //
+  // The FLOAT one first, because lround() of an infinity is undefined and the
+  // platforms disagree about it: v * 10 overflows to +inf for anything past
+  // ~3.4e37, glibc's lround then returns LONG_MIN, and "the largest possible
+  // reading" would render as -999.9. (Written as !(x < limit) so it also
+  // catches a NaN produced by the multiply itself.)
+  const float t = v * 10.0f;
+  if (!(t < 9999.5f))
+    return 9999;
+  if (!(t > -9999.5f))
+    return -9999;
+  // Then the INTEGER one, because the compiler tracks integer ranges and does
+  // not track float ones -- this is what lets -Wformat-truncation prove the
   // rendered field is at most six characters.
-  long t = std::lround(v * 10.0f);
-  if (t > 9999)
-    t = 9999;
-  if (t < -9999)
-    t = -9999;
-  return static_cast<int32_t>(t);
+  long r = std::lround(t);
+  if (r > 9999)
+    r = 9999;
+  if (r < -9999)
+    r = -9999;
+  return static_cast<int32_t>(r);
 }
 
 /** Celsius in tenths of Fahrenheit, same clamp and sentinel. */
