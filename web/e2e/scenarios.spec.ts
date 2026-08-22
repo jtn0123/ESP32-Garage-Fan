@@ -217,6 +217,11 @@ test('a plug disagreement raises the warning banner', async ({ page }) => {
   await openConsole(page);
   await expect(page.locator('#plugwarn')).toBeVisible();
   await expect(page.locator('#plugwarn')).toContainText(/does not match/i);
+  // And it says what the speed SHOULD draw and what the reading looks like:
+  // "43.5 W" on its own is a number, not a diagnosis.
+  await expect(page.locator('#plugwarn')).toContainText(/draws \d/);
+  await expect(page.locator('#plugwarn')).toContainText(/closer to speed \d/);
+  await expect(page.locator('#stats')).toContainText(/looks like speed \d/);
 });
 
 test('a cycling fan raises the cycling banner, not the plain disagreement', async ({ page }) => {
@@ -238,9 +243,11 @@ test('the power row tints the buckets the meter saw the fan cycling in', async (
   await openConsole(page);
   await page.locator('#chips button[data-key="power"]').click();
   await expect(page.locator('#sub_w')).not.toHaveClass(/hide/);
-  // The newest rows under this scenario carry a flip count, so the readout
-  // (pinned to the latest sample until a scrub) names it.
+  // The newest rows under this scenario carry a flip count AND a wide draw
+  // range, so the readout names both: the range is what a single snapshot per
+  // five minutes could never show.
   await expect(page.locator('#roW')).toContainText(/cycling ×\d/, { timeout: 15_000 });
+  await expect(page.locator('#roW')).toContainText(/4\.3–45\.6 W/);
   // And the canvas is drawn: the mock's last two hours are flagged, so the
   // row must have inked columns (the tint's exact pixels are not asserted --
   // see inkedColumns on what a canvas probe can and cannot resolve).

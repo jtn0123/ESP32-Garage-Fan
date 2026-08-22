@@ -100,16 +100,23 @@ void state_json(char* out, size_t cap) {
   }
   // The watt meter on the fan's supply, or null when the poller is disabled
   // or has never read. verdict: 1 agree, -1 disagree, 0 cannot say.
-  char plugs[160];
+  char plugs[224];
   if (plug::enabled() && plug::age_s() >= 0) {
     char vs[16] = "null";
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
+    // expect_w and implied_spd travel WITH the reading: "45.1 W" means
+    // nothing on its own, and beside "should be 30.2 at speed 10" it means
+    // everything. Null while a raw duty is driven -- there is no table entry.
+    char ew[16] = "null";
+    const float expect = plug::expected_w(fan::speed());
+    if (!isnan(expect))
+      snprintf(ew, sizeof(ew), "%.1f", expect);
     snprintf(plugs, sizeof(plugs),
              "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d," WK_CYCLING "%s," WK_FLIPS
-             "%u}",
+             "%u," WK_EXPECT_W "%s," WK_IMPLIED_SPD "%d}",
              plug::watts(), vs, (long)plug::age_s(), plug::verdict(),
-             plug::cycling() ? "true" : "false", plug::flips());
+             plug::cycling() ? "true" : "false", plug::flips(), ew, plug::measured_speed());
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }

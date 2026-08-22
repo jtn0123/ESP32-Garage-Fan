@@ -169,10 +169,21 @@ def _history_uncached(days: int) -> Json:  # NOSONAR -- the branches ARE the sce
     # a flip count on every row -- so the power row's red tint is reachable.
     pre_meter = max(1, n // 3)
     flips: list[int | None] = [None if i < pre_meter else 0 for i in range(n)]
+    # The bucket's draw range. A steady fan's range is the sampling wobble;
+    # a cycling one's spans stopped to flat out, which is the whole point of
+    # recording a range instead of one snapshot per five minutes.
+    w_min: list[float | None] = [
+        None if i < pre_meter else round(w - 0.3, 1) for i, w in enumerate(watts)
+    ]
+    w_max: list[float | None] = [
+        None if i < pre_meter else round(w + 0.3, 1) for i, w in enumerate(watts)
+    ]
     if SCEN["plug"] == "cycling":
         for i in range(max(pre_meter, n - 24), n):
             flips[i] = 2 + (i % 5)
             watts[i] = 45.1 if i % 2 else 4.3
+            w_min[i] = 4.3
+            w_max[i] = 45.6
             spd[i] = 10
     vocr: list[int | None] = []
     noxr: list[int | None] = []
@@ -225,6 +236,8 @@ def _history_uncached(days: int) -> Json:  # NOSONAR -- the branches ARE the sce
         "ts": ts,
         "watts": watts,
         "flips": flips,
+        "w_min": w_min,
+        "w_max": w_max,
         "voc_raw": vocr,
         "nox_raw": noxr,
         "voc": voc,

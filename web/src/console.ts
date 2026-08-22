@@ -394,10 +394,13 @@ export function paint(next?: DeviceState): void {
       'if it comes back, the control cable or the fan\'s own controller needs a look.';
     show(warn, true);
   } else if (s.plug && s.plug.verdict === -1 && !stale) {
+    const expect = s.plug.expect_w === null ? '' : ` (speed ${s.speed} draws ${s.plug.expect_w.toFixed(1)} W)`;
+    const looks =
+      s.plug.implied_spd >= 0 ? ` That is closer to speed ${s.plug.implied_spd}.` : '';
     warn.textContent =
       `The watt meter reads ${s.plug.w.toFixed(1)} W, which does not match ` +
-      `${s.speed > 0 ? `speed ${s.speed}` : 'off'} — the fan may not be following commands. ` +
-      'Check the control cable at the fan port.';
+      `${s.speed > 0 ? `speed ${s.speed}` : 'off'}${expect} — the fan may not be following ` +
+      `commands.${looks} Check the control cable at the fan port.`;
     show(warn, true);
   } else {
     show(warn, false);

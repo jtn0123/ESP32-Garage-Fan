@@ -39,6 +39,10 @@ constexpr uint16_t kMinRunTicks = 15 * 60 * 1000 / kAutoTickMs;
 uint16_t g_auto_run_ticks = 0;  // ticks the thermostat latch has been high
 uint16_t g_gas_run_ticks = 0;   // ticks the gas latch has been high
 
+// One auto-mode telemetry line per 5 minutes of ticks (see tick_auto).
+constexpr uint8_t kAutoLogTicks = 5 * 60 * 1000 / kAutoTickMs;
+uint8_t g_auto_log_ticks = 0;
+
 // LEDC, not RMT. On 2026-08-13 the fan ignored an entire 0..12 calibration
 // sweep against a watt meter: rmtWriteLooping() reported success at every
 // step while /api/pinprobe showed the pad stuck LOW with zero transitions --
@@ -69,10 +73,21 @@ void set_wave(uint16_t high_us) {
     duty = 1UL << kLedcBits;
   else
     duty = (static_cast<uint32_t>(high_us) * ((1UL << kLedcBits) - 1)) / kPeriodUs;
-  if (!ledcWrite(FAN_PWM_PIN, duty))
+  if (!ledcWrite(FAN_PWM_PIN, duty)) {
     eventlog::log("fan", "ledcWrite FAILED duty=%lu", (unsigned long)duty);
-  else
-    eventlog::log("fan", "duty %lu/4096 high_us=%u", (unsigned long)duty, high_us);
+    return;
+  }
+  // Read the pad back and put it on the SAME line, so every speed change
+  // carries its own proof that the waveform left the chip. ledcWrite applies
+  // the new duty at the next period boundary, hence the one-period wait --
+  // measuring immediately would blend the old duty into the answer and the
+  // proof would be worth less than nothing.
+  delay(kPeriodUs / 1000 + 2);
+  float pad_pct = 0;
+  uint32_t edges = 0;
+  probe_pad(&pad_pct, &edges);
+  eventlog::log("fan", "duty %lu/4096 high_us=%u pad=%.0f%%/%lu", (unsigned long)duty, high_us,
+                static_cast<double>(pad_pct), (unsigned long)edges);
 }
 
 }  // namespace
@@ -159,6 +174,19 @@ void tick_auto() {
     eventlog::log("gas", "boost %s voc=%ld floor=%d", g_gas_high ? "ON" : "off",
                   (long)air::voc_index(), floor_speed);
   next = fan_apply_gas_floor(next, prev, floor_speed);
+  // One telemetry line every 5 minutes (10 ticks). The tape has always
+  // recorded WHAT the thermostat did and never WHY, and the dwell counter --
+  // which decides whether a release is honoured at all -- appeared nowhere.
+  // Rendered by auto_logic.h so the host tests can pin the wording and the
+  // 80-byte budget.
+  if (++g_auto_log_ticks >= kAutoLogTicks) {
+    g_auto_log_ticks = 0;
+    char msg[80];
+    fan_auto_log_line(msg, sizeof(msg), climate::inside_c(), climate::outside_c_fresh(),
+                      g_auto_high, g_auto_run_ticks, kMinRunTicks,
+                      g_auto_high ? cfg.max_speed : cfg.min_speed, g_gas_high);
+    eventlog::log("auto", "%s", msg);
+  }
   if (next != g_speed)
     apply(next, "auto", false);
 }

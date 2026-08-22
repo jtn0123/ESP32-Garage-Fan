@@ -89,6 +89,18 @@ export interface PlugState {
   cycling: boolean;
   /** Confirmed run/stop flips inside the last ten minutes; 0 when steady. */
   flips: number;
+  /**
+   * What the commanded speed SHOULD draw, from the measured baseline table.
+   * null while a raw duty is being driven (there is no table entry for it).
+   * "45.1 W" means nothing on its own; beside 30.2 it means everything.
+   */
+  expect_w: number | null;
+  /**
+   * The speed the measured draw implies, -1 with no reading. The number the
+   * 2026-08-20 tape never carried: the fan pulled the speed-12 level all
+   * night while every line reported the commanded 10.
+   */
+  implied_spd: number;
 }
 
 export interface BatteryState {
@@ -238,6 +250,14 @@ export interface History {
    * says it happened. null = no meter, or a row from before 1.21.0.
    */
   flips: (number | null)[];
+  /**
+   * The lowest and highest draw the meter saw inside each bucket. `watts` is
+   * one instant of five minutes; these two are the range, which is what makes
+   * a cycling fan legible on the chart instead of a jittery line.
+   * null = no meter, or a row from before 1.22.0.
+   */
+  w_min: (number | null)[];
+  w_max: (number | null)[];
 }
 
 /**

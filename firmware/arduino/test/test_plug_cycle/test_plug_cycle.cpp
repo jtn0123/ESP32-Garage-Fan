@@ -198,8 +198,22 @@ static void test_register_aging_forgets_old_flips() {
   TEST_ASSERT_FALSE(d.cycling);
 }
 
+// The bands, used by the detector AND by the telemetry counts. One rule.
+
+static void classify_names_the_band_a_reading_falls_in() {
+  TEST_ASSERT_EQUAL_INT8(1, plug::classify(kRunW, kSpeed10W));    // 45 of 30 W
+  TEST_ASSERT_EQUAL_INT8(-1, plug::classify(kStopW, kSpeed10W));  // 4.3 of 30 W
+  TEST_ASSERT_EQUAL_INT8(0, plug::classify(15.0f, kSpeed10W));    // mid-band
+  TEST_ASSERT_EQUAL_INT8(0, plug::classify(NAN, kSpeed10W));      // no reading
+  TEST_ASSERT_EQUAL_INT8(0, plug::classify(30.0f, NAN));          // no baseline
+  // Below the separable floor no reading gets a band: at speed 1 the fan's
+  // idle electronics and a running fan are the same number to a meter.
+  TEST_ASSERT_EQUAL_INT8(0, plug::classify(3.9f, 3.7f));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(classify_names_the_band_a_reading_falls_in);
   RUN_TEST(test_quiet_fan_never_cycles);
   RUN_TEST(test_the_0820_night_is_called_cycling);
   RUN_TEST(test_one_stop_and_restart_is_a_hiccup_not_a_cycle);

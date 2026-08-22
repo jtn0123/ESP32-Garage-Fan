@@ -141,12 +141,21 @@ export function speedReadout(spd: number | undefined): string {
 
 /** "4.19 V" / "4.19 V ⚡ charging" / '' -- the battery row. */
 /**
- * "45.1 W", or "45.1 W · cycling ×3" when the meter confirmed run/stop flips
- * inside this bucket -- the scrub readout's half of what the red tint says.
+ * What the meter saw in one bucket: "45.1 W", "4.3–45.6 W" when the draw
+ * moved inside those five minutes, and "· cycling ×3" when those swings were
+ * confirmed run/stop flips. The snapshot alone is what let a fan cycling
+ * every minute read as an ordinary reading at whatever instant it was taken.
  */
-export function powerReadout(w: number | null, flips: number | null): string {
+export function powerReadout(
+  w: number | null,
+  flips: number | null,
+  lo: number | null = null,
+  hi: number | null = null,
+): string {
   if (w === null) return '';
-  const base = `${w.toFixed(1)} W`;
+  // A range worth printing: more than a watt of spread inside one bucket.
+  const spread = lo !== null && hi !== null && hi - lo > 1;
+  const base = spread ? `${lo!.toFixed(1)}–${hi!.toFixed(1)} W` : `${w.toFixed(1)} W`;
   return flips !== null && flips > 0 ? `${base} · cycling ×${flips}` : base;
 }
 
@@ -170,7 +179,7 @@ function paintReadouts(): void {
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   $('roB').textContent = battReadout(at(s.bv, i), s.chg[i] === 1);
   const w = at(s.w, i);
-  $('roW').textContent = powerReadout(w, at(s.flips, i));
+  $('roW').textContent = powerReadout(w, at(s.flips, i), at(s.wmin, i), at(s.wmax, i));
   $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
   $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
 }

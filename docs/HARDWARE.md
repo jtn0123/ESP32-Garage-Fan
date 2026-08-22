@@ -152,6 +152,42 @@ reflashing.
 - Bench configuration: **USB-C from computer + battery, fan VBUS
   disconnected** (iron law #2).
 
+## Reading the tape (`/events.log`)
+
+The flight recorder keeps 24 lines in RAM and drains to the card, so every
+line has to earn its slot. These are the ones that describe the fan itself;
+the rule throughout is **more data per line, never more lines**.
+
+| Line | Cadence | Says |
+|---|---|---|
+| `fan duty 3439/4096 high_us=8344 pad=84%/6` | every speed change | The duty asked for **and the pad read back one period later** — its own proof the waveform left the chip. At speed 10 a healthy pad is ~84 % with 6 edges per 30 ms; `0%/0` or `100%/0` means the chip stopped driving the line |
+| `plug window sp10/~12 pad=84% w=4.3/12.7/45.3 on=8 off=28 new=12 miss=0 cyc=5` | 5 min | Commanded speed / **the speed the draw implies**, the pad, the draw as **min/mean/max** (not one snapshot), polls classed running vs stopped, how many polls carried a *new* meter value (`new` — this measures the METER: a low count means we are oversampling a slow sensor), polls with no reading, confirmed run/stop flips |
+| `auto in=81.0 out=71.6 d=+9.4 latch=on dwell=12/30 tgt=10 gas=off` | 5 min, auto only | The whole decision: both temperatures in F, the differential the hysteresis actually compares, the latch, **how much of the 15-minute minimum run has been served**, the target speed, the gas floor |
+| `fan pad MISMATCH want=84% got=0% edges=0 high_us=8344` | only when wrong | The chip is not driving what it thinks it is. This one is the difference between "our fault" and "the fan's fault" |
+| `plug DISAGREE speed=10 expect=30.2W measured=45.3W(~sp12)` | on the edge | Unchanged except for the tail: the draw now names the speed it looks like |
+| `plug CYCLING …` / `plug trace …` / `still cycling …` / `cycling ended …` | per episode | See below |
+
+Two things deliberately do **not** go on the tape:
+
+- **Raw meter samples** — `GET /api/plugtrace?token=…` streams the last 15
+  minutes of 15 s polls as `{poll_s, w[], spd[], cls[]}`. A fan can cycle
+  faster than one line per five minutes, so the *shape* of an episode cannot
+  live in lines; it costs nothing until asked for.
+- **A periodic pad all-clear** — the pad is on every duty line and every
+  window line already; a "still fine" line every five minutes would spend the
+  recorder to say nothing.
+
+And in the history rows (so the charts can show it): `flips`, `w_min`, `w_max`
+per 5-minute bucket. The power row shades the min-max band and tints cycling
+buckets red — the single `watts` snapshot per bucket is exactly what drew nine
+hours of cycling as jitter on 2026-08-20.
+
+Numbers destined for a log line go through `system/fixed_fmt.h`, which clamps
+them and formats from integers. That is not fussiness: `%.1f` of a corrupt
+reading can be three hundred characters, the recorder truncates at 80 and it
+truncates the *tail* — where the counts are. Because the fields are bounded
+integers, `-Wformat-truncation` checks "this line fits" at every build.
+
 ## When the fan cycles on and off by itself
 
 Seen 2026-08-20: nine hours with the firmware holding speed 10 (zero speed
@@ -172,7 +208,8 @@ What the firmware does now (1.21.0, `net/plug_cycle.h`):
   minutes of per-poll `plug trace` lines, a half-hourly heartbeat, and one
   `cycling ended` line with the totals. The DISAGREE/agree flapping is muted
   while an episode lasts.
-- `/api/state` carries `plug.cycling` and `plug.flips`; the console banner
+- `/api/state` carries `plug.cycling`, `plug.flips`, `plug.expect_w` (what the
+  commanded speed *should* draw) and `plug.implied_spd`; the console banner
   and the PLUG status bit say CYCLING; the e-ink banner reads FAN CYCLING;
   the retained MQTT alert is `{"kind":"plug_cycling",...}`.
 - Every 5-minute history row records `flips` (CSV column 14), and the power

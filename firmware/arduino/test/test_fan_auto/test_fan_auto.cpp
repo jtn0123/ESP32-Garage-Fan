@@ -2,6 +2,9 @@
 // Native tests for fan_auto_logic.h -- the hold-at-max hysteresis thermostat.
 #include <unity.h>
 
+#include <cmath>
+#include <cstring>
+
 #include "fan/auto_logic.h"
 
 static const FanAutoCfg kCfg = kFanAutoDefaults;  // min 0, max 9, 2.5F/1.5F
@@ -237,6 +240,50 @@ static void test_min_run_reengage_restarts_the_clock() {
   TEST_ASSERT_TRUE(gh);
 }
 
+// ------------------------------------------------------------- telemetry
+//
+// The line that explains a decision after the fact. It is the only record of
+// the dwell counter, so it has to survive absent sensors and it has to FIT:
+// eventlog renders at most 80 bytes and drops the tail.
+
+static void the_auto_line_carries_the_whole_decision() {
+  char out[80];
+  // 27.2 C garage, 21.1 C yard: 11 F hotter, latched high, half the dwell
+  // served, heading for the user's max.
+  fan_auto_log_line(out, sizeof(out), 27.2f, 21.1f, true, 15, 30, 10, false);
+  TEST_ASSERT_NOT_NULL(strstr(out, "in=81.0"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "out=70.0"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "d=+11.0"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "latch=on"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "dwell=15/30"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "tgt=10"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "gas=off"));
+}
+
+static void a_missing_sensor_reads_as_absent_not_as_zero() {
+  // NaN is the hold-everything contract; a line claiming 32.0 F would read as
+  // a freezing garage rather than as a sensor that stopped answering.
+  char out[80];
+  fan_auto_log_line(out, sizeof(out), NAN, 21.1f, true, 3, 30, 10, true);
+  TEST_ASSERT_NOT_NULL(strstr(out, "in=--"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "d=--"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "gas=ON"));
+  TEST_ASSERT_NULL(strstr(out, "32.0"));
+}
+
+static void a_cooler_garage_shows_a_signed_negative_differential() {
+  char out[80];
+  fan_auto_log_line(out, sizeof(out), 20.0f, 25.0f, false, 0, 30, 0, false);
+  TEST_ASSERT_NOT_NULL(strstr(out, "d=-9.0"));
+  TEST_ASSERT_NOT_NULL(strstr(out, "latch=off"));
+}
+
+static void the_worst_case_auto_line_fits_the_recorders_budget() {
+  char out[256];
+  const int n = fan_auto_log_line(out, sizeof(out), -999.9f, 999.9f, true, 65535, 65535, 12, true);
+  TEST_ASSERT_TRUE_MESSAGE(n > 0 && n < 80, "the auto line must fit eventlog's 80-byte message");
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_hot_garage_ramps_to_max_one_step_per_tick);
@@ -258,5 +305,9 @@ int main(int, char**) {
   RUN_TEST(test_min_run_blocks_early_gas_release);
   RUN_TEST(test_min_run_never_outlives_the_sensor);
   RUN_TEST(test_min_run_reengage_restarts_the_clock);
+  RUN_TEST(the_auto_line_carries_the_whole_decision);
+  RUN_TEST(a_missing_sensor_reads_as_absent_not_as_zero);
+  RUN_TEST(a_cooler_garage_shows_a_signed_negative_differential);
+  RUN_TEST(the_worst_case_auto_line_fits_the_recorders_budget);
   return UNITY_END();
 }

@@ -21,10 +21,26 @@ const h = (over: Partial<History> = {}): History => ({
   voc: [null, 0, 87],
   nox: [null, 0, 1],
   flips: [null, 0, 3],
+  w_min: [null, 20.1, 4.3],
+  w_max: [null, 20.5, 45.6],
   ...over,
 });
 
 describe('build', () => {
+  it('carries the bucket draw range the power band shades', () => {
+    // The half a single `watts` snapshot cannot carry: inside the last bucket
+    // the meter swung 4.3 to 45.6 W, which is a fan stopping and restarting.
+    const s = build(h());
+    expect(s.wmin).toEqual([null, 20.1, 4.3]);
+    expect(s.wmax).toEqual([null, 20.5, 45.6]);
+    // A pre-1.22.0 firmware sends neither: nulls, not a throw.
+    const old = h();
+    delete (old as Partial<History>).w_min;
+    delete (old as Partial<History>).w_max;
+    expect(build(old).wmin).toEqual([null, null, null]);
+    expect(build(old).wmax).toEqual([null, null, null]);
+  });
+
   it('carries the plug flip count per row, null where the meter had none', () => {
     // The cycling profile's column; the power chart tints any bucket > 0.
     expect(build(h()).flips).toEqual([null, 0, 3]);

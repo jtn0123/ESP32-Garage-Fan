@@ -12,10 +12,11 @@
 #include <cstring>
 
 #include "config.h"
-#include "fan/control.h"
 #include "generated_config.h"
 #include "net/mqtt_link.h"
+#include "fan/control.h"
 #include "net/plug_cycle.h"
+#include "net/plug_window.h"
 #include "system/eventlog.h"
 
 namespace plug {
@@ -67,13 +68,41 @@ constexpr uint16_t kBeatPolls = 120;
 uint16_t g_beat = 0;
 
 /** The table speed whose baseline is nearest a reading -- "45 W is ~speed 12". */
-int nearest_speed(float w) {
-  int best = 0;
-  for (int i = 1; i <= 12; i++) {
-    if (fabsf(kBaselineW[i] - w) < fabsf(kBaselineW[best] - w))
-      best = i;
-  }
-  return best;
+int implied_speed(float w) { return plug::nearest_speed(kBaselineW, 13, w); }
+
+// The tape holds 24 lines in RAM, so telemetry buys its place with DATA PER
+// LINE, not with more lines: one `plug window ...` every 5 minutes carrying
+// the range, the implied speed and the counts (plug_window.h). g_bucket is
+// the same fold on the history sample's clock, and g_trace is the raw
+// 15-minute record that costs the tape nothing because it lives behind
+// /api/plugtrace instead.
+constexpr uint8_t kWindowPolls = 5 * 60 * 1000 / kPollMs;  // 20 polls = 5 min
+Window g_window;
+Window g_bucket;
+Trace<60> g_trace;
+uint8_t g_window_polls = 0;
+
+/** The 5-minute telemetry line, plus a loud one when the pad disagrees. */
+void log_window(int speed) {
+  float pad_pct = 0;
+  uint32_t edges = 0;
+  fan::probe_pad(&pad_pct, &edges);
+  char msg[kLogMsgCap];
+  format_window_line(msg, sizeof(msg), g_window, speed, static_cast<int>(pad_pct + 0.5f),
+                     implied_speed(g_window.mean()));
+  eventlog::log("plug", "window %s", msg);
+  // The control line is fire-and-forget, so "is the chip still driving it"
+  // has to be ASKED. Reported only on a real mismatch: a periodic all-clear
+  // would cost a line every five minutes to say nothing happened.
+  const uint16_t want_us = fan::commanded_high_us();
+  const int want_pct = static_cast<int>(100.0f * want_us / kPeriodUs + 0.5f);
+  const int got_pct = static_cast<int>(pad_pct + 0.5f);
+  const int off_by = got_pct > want_pct ? got_pct - want_pct : want_pct - got_pct;
+  if (off_by > 5)
+    eventlog::log("fan", "pad MISMATCH want=%d%% got=%d%% edges=%lu high_us=%u", want_pct, got_pct,
+                  (unsigned long)edges, want_us);
+  g_window.reset();
+  g_window_polls = 0;
 }
 
 /**
@@ -104,7 +133,7 @@ void on_cycle_event(CycleEvent ev, int speed) {
     eventlog::log("plug",
                   "CYCLING speed=%d flips=%u/10min now=%.1fW(~speed %d) -- the fan is "
                   "switching on and off while the speed is held",
-                  speed, g_cycle.flips_in_window(), g_watts, nearest_speed(g_watts));
+                  speed, g_cycle.flips_in_window(), g_watts, implied_speed(g_watts));
     log_pad("cycling");
     g_trace_left = kTracePolls;
     g_beat = 0;
@@ -209,9 +238,28 @@ void judge() {
   const bool settled = millis() - g_speed_since_ms >= kSettleMs;
   // The cycling profile sees EVERY poll, decidable or not: its window is
   // wall-clock, and it applies the same settle and freshness gates itself.
+  const uint8_t flips_before = g_cycle.bucket_flips;
   on_cycle_event(
       g_cycle.poll(speed, in_table ? kBaselineW[speed] : NAN, fresh ? g_watts : NAN, settled),
       speed);
+  // Telemetry sees every poll too, and BEFORE the verdict's early returns:
+  // it records what the meter said, not what the verdict made of it. The
+  // window feeds the 5-minute line, the bucket feeds the history row, the
+  // trace feeds /api/plugtrace.
+  //
+  // The class here is this READING's band (plug_cycle.h's classify), not the
+  // detector's debounced state: the counts are meant to say how many polls
+  // looked stopped, and the debounced state holds its last value through the
+  // mid-band readings that are exactly what a cycling fan produces.
+  const float w = fresh ? g_watts : NAN;
+  const int8_t cls = classify(w, in_table ? kBaselineW[speed] : NAN);
+  g_window.feed(w, cls);
+  g_bucket.feed(w, cls);
+  g_trace.push(encode_reading(w, speed, cls));
+  if (g_cycle.bucket_flips > flips_before)
+    g_window.add_flips(static_cast<uint16_t>(g_cycle.bucket_flips - flips_before));
+  if (++g_window_polls >= kWindowPolls)
+    log_window(speed);
   if (!fresh || !settled || !in_table) {
     // Falling from disagreement to CANNOT-SAY must replace the retained
     // alert too, or a stale "plug_disagree" keeps speaking for a meter that
@@ -245,13 +293,15 @@ void judge() {
   if (next == -1 && g_verdict != -1) {
     g_verdict = next;
     if (!quiet) {
-      eventlog::log("plug", "DISAGREE speed=%d expect=%.1fW measured=%.1fW", speed, e, g_watts);
+      eventlog::log("plug", "DISAGREE speed=%d expect=%.1fW measured=%.1fW(~sp%d)", speed, e,
+                    g_watts, implied_speed(g_watts));
       publish_current_alert();
     }
   } else if (next == 1 && g_verdict == -1) {
     g_verdict = next;
     if (!quiet) {
-      eventlog::log("plug", "agree again speed=%d measured=%.1fW", speed, g_watts);
+      eventlog::log("plug", "agree again speed=%d measured=%.1fW(~sp%d)", speed, g_watts,
+                    implied_speed(g_watts));
       publish_current_alert();
     }
   }
@@ -302,11 +352,28 @@ float expected_w(int speed) { return (speed >= 0 && speed <= 12) ? kBaselineW[sp
 
 bool cycling() { return g_cycle.cycling; }
 uint8_t flips() { return g_cycle.flips_in_window(); }
-int8_t take_bucket_flips() {
-  if (!enabled() || !g_ever_read)
-    return -1;
-  const uint8_t n = g_cycle.take_bucket_flips();
-  return static_cast<int8_t>(n > 127 ? 127 : n);
+Bucket take_bucket() {
+  Bucket b{-1, NAN, NAN};
+  if (enabled() && g_ever_read) {
+    const uint8_t n = g_cycle.take_bucket_flips();
+    b.flips = static_cast<int8_t>(n > 127 ? 127 : n);
+    if (g_bucket.n_w) {
+      b.min_w = g_bucket.min_w;
+      b.max_w = g_bucket.max_w;
+    }
+  }
+  g_bucket.reset();
+  return b;
+}
+
+int measured_speed() { return g_ever_read ? implied_speed(g_watts) : -1; }
+
+uint16_t poll_interval_s() { return static_cast<uint16_t>(kPollMs / 1000); }
+
+uint8_t trace_count() { return g_trace.size(); }
+
+Reading trace_at(uint8_t i) {
+  return i < g_trace.size() ? g_trace.at(i) : Reading{Reading::kNoRead, 0, 0};
 }
 
 void alert_json(char* out, size_t cap) {

@@ -431,12 +431,38 @@ export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): 
     placeholder(surf, 'no plug data yet');
     return;
   }
-  const sc = limits(s.w, MIN_SPAN);
+  // Scale to the BAND, not just the snapshot line: a bucket whose meter
+  // swung 4->45 W has to fit on the axis or the range it describes is a lie.
+  const sc = limits([...s.w, ...s.wmin, ...s.wmax], MIN_SPAN);
   if (!sc) {
     placeholder(surf, 'no plug data yet');
     return;
   }
   frame(surf, s, sc, (v) => v.toFixed(1), false);
+  // The min-max range the meter saw inside each 5-minute bucket. This is the
+  // half the snapshot line cannot carry: on 2026-08-20 the fan alternated
+  // between stopped and flat out inside every bucket, and one sample per
+  // bucket drew that as a jittery line at whatever instant it landed on.
+  c.fillStyle = 'rgba(232,131,74,.20)';
+  let from = 0;
+  while (from < s.n) {
+    const lo = at(s.wmin, from);
+    const hi = at(s.wmax, from);
+    if (lo === null || hi === null) {
+      from++;
+      continue;
+    }
+    let to = from;
+    while (to + 1 < s.n && at(s.wmin, to + 1) !== null && at(s.wmax, to + 1) !== null &&
+           !s.gap[to + 1])
+      to++;
+    c.beginPath();
+    for (let i = from; i <= to; i++) c.lineTo(xAt(s, i, W), yAt(at(s.wmax, i)!, H, sc));
+    for (let i = to; i >= from; i--) c.lineTo(xAt(s, i, W), yAt(at(s.wmin, i)!, H, sc));
+    c.closePath();
+    c.fill();
+    from = to + 1;
+  }
   c.fillStyle = 'rgba(224,169,169,.22)';
   let i = 0;
   while (i < s.n) {

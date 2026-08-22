@@ -10,6 +10,8 @@
 
 #include "config.h"
 #include "fan/control.h"
+#include "net/http_tx.h"
+#include "net/plug.h"
 #include "sensors/battery.h"
 #include "storage/sdcard.h"
 
@@ -198,6 +200,42 @@ void register_routes(WebServer& http, const char* token) {
     snprintf(out, sizeof(out), "{\"high_pct\":%.1f,\"transitions\":%lu,\"want_high_us\":%u}",
              static_cast<double>(high_pct), (unsigned long)transitions, fan::commanded_high_us());
     g_http->send(200, "application/json", out);
+  });
+  // Every raw meter poll the device still remembers: 15 minutes of 15 s
+  // samples, streamed rather than summarised. The flight recorder holds 24
+  // lines and a fan can cycle faster than one line per five minutes, so the
+  // shape of an episode cannot live on the tape -- it lives here, costs
+  // nothing until asked for, and is what turns "the meter looks noisy" into
+  // a sequence anyone can read.
+  http.on("/api/plugtrace", []() {
+    if (!authorized())
+      return;
+    const uint8_t n = plug::trace_count();
+    http_tx::Chunked tx(g_http->client(), "application/json");
+    tx.printf("{\"poll_s\":%u,\"n\":%u,\"w\":[", static_cast<unsigned>(plug::poll_interval_s()),
+              static_cast<unsigned>(n));
+    for (uint8_t i = 0; i < n && tx.ok(); i++) {
+      const plug::Reading r = plug::trace_at(i);
+      char num[16];
+      if (r.dw == plug::Reading::kNoRead) {
+        snprintf(num, sizeof(num), "null");
+      } else {
+        // Tenths straight out of the encoding: no float formatting, so a
+        // corrupt sample cannot render a hundred digits into the stream.
+        snprintf(num, sizeof(num), "%u.%u", static_cast<unsigned>(r.dw / 10),
+                 static_cast<unsigned>(r.dw % 10));
+      }
+      tx.print(num);
+      tx.print(i + 1 < n ? "," : "");
+    }
+    tx.print("],\"spd\":[");
+    for (uint8_t i = 0; i < n && tx.ok(); i++)
+      tx.printf(i + 1 < n ? "%d," : "%d", static_cast<int>(plug::trace_at(i).speed));
+    tx.print("],\"cls\":[");
+    for (uint8_t i = 0; i < n && tx.ok(); i++)
+      tx.printf(i + 1 < n ? "%d," : "%d", static_cast<int>(plug::trace_at(i).cls));
+    tx.print("]}");
+    tx.end();
   });
   http.on("/api/battdebug", []() {
     if (!authorized())
