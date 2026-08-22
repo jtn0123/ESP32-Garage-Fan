@@ -64,8 +64,27 @@ static void reads_a_fourteen_field_row_with_flips() {
   TEST_ASSERT_EQUAL_INT(-1, none.flips);
 }
 
+// The 1.22.0 width: flips, then the bucket's measured draw range. The single
+// `watts` snapshot is what charted a cycling fan as jitter; these two are the
+// range that makes it legible.
+static void reads_a_sixteen_field_row_with_the_draw_range() {
+  const auto r = parse_csv_row(
+      "1787300000,27.10,41.2,1001.0,70.50,10,4.20,1,45.1,30125,15800,87,1,3,4.3,45.6");
+  TEST_ASSERT_TRUE(r.valid);
+  TEST_ASSERT_EQUAL_INT(3, r.flips);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 4.3, r.w_min);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 45.6, r.w_max);
+  TEST_ASSERT_TRUE(isnan(r.bme_t));  // fields 14-16 are NOT the BME pair here
+  // A bucket the meter could not answer for records the sentinel, not zero.
+  const auto none = parse_csv_row(
+      "1787300000,27.10,41.2,1001.0,70.50,10,4.20,1,-999.0,30125,15800,87,1,-1,-999.0,-999.0");
+  TEST_ASSERT_EQUAL_INT(-1, none.flips);
+  TEST_ASSERT_TRUE(isnan(none.w_min));
+  TEST_ASSERT_TRUE(isnan(none.w_max));
+}
+
 // The 1.14.48-1.15.1 width: fields 14-15 are the BME pair, and flips is
-// absent. Width decides which; the two never share a card era.
+// absent. Width decides which; the three never share a card era.
 static void a_fifteen_field_bme_row_keeps_its_thermometer() {
   const auto r = parse_csv_row(
       "1786800000,27.10,41.2,1001.0,70.50,10,4.20,1,30.2,30125,15800,87,1,27.90,40.1");
@@ -73,6 +92,7 @@ static void a_fifteen_field_bme_row_keeps_its_thermometer() {
   TEST_ASSERT_FLOAT_WITHIN(0.01, 27.90, r.bme_t);
   TEST_ASSERT_FLOAT_WITHIN(0.01, 40.1, r.bme_rh);
   TEST_ASSERT_EQUAL_INT(-1, r.flips);
+  TEST_ASSERT_TRUE(isnan(r.w_min));
 }
 
 static void a_thirteen_field_row_has_no_flips() {
@@ -152,6 +172,7 @@ int main() {
   RUN_TEST(reads_a_legacy_six_field_row);
   RUN_TEST(a_card_spanning_the_change_reads_whole);
   RUN_TEST(reads_a_fourteen_field_row_with_flips);
+  RUN_TEST(reads_a_sixteen_field_row_with_the_draw_range);
   RUN_TEST(a_fifteen_field_bme_row_keeps_its_thermometer);
   RUN_TEST(a_thirteen_field_row_has_no_flips);
   RUN_TEST(the_outdoor_sentinel_becomes_absent);

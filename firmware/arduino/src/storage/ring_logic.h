@@ -29,6 +29,9 @@ struct Sample {
   int8_t speed;     // fan speed 0..12 at sample time
   int8_t chg;       // 1 charging, 0 not, -1 no battery
   int8_t flips;     // plug run/stop flips inside the bucket (-1 = no meter)
+  float w_min;      // lowest and highest draw seen across the bucket. The
+  float w_max;      // `watts` field above is ONE instant of a five-minute
+                    // window; a fan cycling every minute is only visible here.
 };
 
 template <uint16_t kN>
@@ -44,6 +47,8 @@ struct Ring {
   int8_t s[kN];    // fan speed at sample time
   int8_t c[kN];    // charging verdict (1/0, -1 = no battery)
   int8_t f[kN];    // plug run/stop flips in the bucket (-1 = no meter)
+  float wn[kN];    // lowest draw in the bucket (NAN = none)
+  float wx[kN];    // highest draw in the bucket (NAN = none)
   uint16_t n = 0;
 
   /** Append a row, evicting the oldest once full. */
@@ -62,6 +67,8 @@ struct Ring {
       memmove(ni, ni + 1, (kN - 1) * sizeof(int16_t));
       memmove(c, c + 1, (kN - 1) * sizeof(int8_t));
       memmove(f, f + 1, (kN - 1) * sizeof(int8_t));
+      memmove(wn, wn + 1, (kN - 1) * sizeof(float));
+      memmove(wx, wx + 1, (kN - 1) * sizeof(float));
       n--;
     }
     t[n] = row.t;
@@ -77,6 +84,8 @@ struct Ring {
     ni[n] = row.nox;
     c[n] = row.chg;
     f[n] = row.flips;
+    wn[n] = row.w_min;
+    wx[n] = row.w_max;
     n++;
   }
 

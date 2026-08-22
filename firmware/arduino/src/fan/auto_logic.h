@@ -13,6 +13,9 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+
+#include "system/fixed_fmt.h"
 
 // Minimum-run dwell, applied to a latch's RELEASE edge only. Both latches
 // (thermostat, gas) are bang-bang controllers whose actuator changes the very
@@ -117,6 +120,45 @@ inline int fan_gas_floor(int voc_index, bool* gas_high, const FanGasCfg& cfg,
     want = latch_min_run(*gas_high, want, run_ticks, min_run_ticks);
   *gas_high = want;
   return *gas_high ? cfg.boost_speed : 0;
+}
+
+// ------------------------------------------------------------- telemetry
+//
+// The tape records WHAT the thermostat did (`fan speed=9 src=local`) and has
+// never recorded WHY. Reconstructing a decision afterwards meant pairing the
+// 5-minute climate sample against thresholds by hand, and the dwell counter --
+// the thing that decides whether a release is honoured at all -- was not
+// visible anywhere. This renders one periodic line carrying the whole
+// decision: both temperatures, the differential the latch actually compares,
+// the latch, how much of the minimum run has been served, and the target.
+//
+// The recorder truncates past 80 bytes and it truncates the TAIL, so the
+// worst case is pinned by the native test rather than hoped for.
+
+/**
+ * The periodic auto-mode line, e.g.
+ *   "in=81.0 out=71.6 d=+9.4 latch=on dwell=12/30 tgt=10 gas=off"
+ *
+ * Temperatures in F because the thresholds the user sets are in F; `d` is
+ * inside-minus-outside, the quantity the hysteresis actually compares.
+ * Returns the length written (never past `cap`).
+ */
+inline int fan_auto_log_line(char* out, size_t cap, float inside_c, float outside_c, bool high,
+                             uint16_t run_ticks, uint16_t min_ticks, int target, bool gas_high) {
+  if (!out || cap == 0)
+    return 0;
+  // Every field is rendered from a CLAMPED INTEGER (system/fixed_fmt.h), so
+  // the compiler can prove the whole line fits and -Wformat-truncation checks
+  // it at every build rather than the tape losing its tail at 3 a.m.
+  char in_f[fixedfmt::kCap], out_f[fixedfmt::kCap], d_f[fixedfmt::kCap];
+  fixedfmt::write(in_f, fixedfmt::tenths_f(inside_c));
+  fixedfmt::write(out_f, fixedfmt::tenths_f(outside_c));
+  const bool blind = std::isnan(inside_c) || std::isnan(outside_c);
+  fixedfmt::write_signed(
+      d_f, blind ? fixedfmt::kAbsent : fixedfmt::tenths((inside_c - outside_c) * 9 / 5));
+  return snprintf(out, cap, "in=%s out=%s d=%s latch=%s dwell=%d/%d tgt=%d gas=%s", in_f, out_f,
+                  d_f, high ? "on" : "off", fixedfmt::count999(run_ticks),
+                  fixedfmt::count999(min_ticks), fixedfmt::small(target), gas_high ? "ON" : "off");
 }
 
 // Merge the gas floor into the thermostat's decision, preserving the one-step

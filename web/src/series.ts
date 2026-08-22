@@ -58,6 +58,9 @@ export interface Series {
    * jitter; this is the column that says it happened (net/plug_cycle.h).
    */
   flips: (number | null)[];
+  /** The bucket's measured draw range -- the band the power row shades. */
+  wmin: (number | null)[];
+  wmax: (number | null)[];
 }
 
 /**
@@ -194,6 +197,8 @@ export function build(h: History): Series {
     voc: pad<number | null>(h.voc, n, null),
     nox: pad<number | null>(h.nox, n, null),
     flips: pad<number | null>(h.flips, n, null),
+    wmin: pad<number | null>(h.w_min, n, null),
+    wmax: pad<number | null>(h.w_max, n, null),
   };
 }
 

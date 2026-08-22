@@ -45,7 +45,10 @@ STATE: Json = {
     # The Tapo watt meter on the fan's supply, as net/plug reports it. The
     # SCEN plug knob swaps in the disagreement case; "none" serves null, the
     # no-meter build.
-    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1, "cycling": False, "flips": 0},
+    "plug": {
+        "w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1, "cycling": False, "flips": 0,
+        "expect_w": 20.3, "implied_spd": 9,
+    },  # fmt: skip
     # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
     "gas_on": True,
     "gas_spd": 6,
@@ -114,6 +117,12 @@ SCEN: Json = {
     # meter at all
     "plug": "ok",
 }
+
+
+# The measured watt baseline per speed (net/plug.cpp's kBaselineW). The mock
+# answers /api/state and /api/plugtrace from it so "expected vs measured" is
+# a real comparison here rather than two unrelated numbers.
+PLUG_BASELINE = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
 
 
 # Type and bounds for every scenario knob. /_scen coerces through this rather

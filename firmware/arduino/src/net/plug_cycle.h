@@ -62,6 +62,25 @@ inline constexpr CycleCfg kCycleDefaults{0.65f, 0.35f, 7.0f, 2, 40, 4, 60};
 // trough_w before any decidable reading landed in the episode.
 inline constexpr float kNoTrough = 1e9f;
 
+/**
+ * Which band one reading falls in: RUN (+1), STOP (-1), or undecided (0) --
+ * the meter averaging across an edge, no reading at all, or a speed whose
+ * baseline is too low to separate a stopped fan from a running one.
+ *
+ * The ONE definition of the bands: the detector decides with it and the
+ * telemetry window counts with it, so "28 of 36 polls looked stopped" and
+ * "this is cycling" can never come from two different rules.
+ */
+inline int8_t classify(float w, float expect_w, const CycleCfg& cfg = kCycleDefaults) {
+  if (w != w || expect_w != expect_w || expect_w < cfg.min_expect_w)  // x != x: NaN
+    return 0;
+  if (w >= expect_w * cfg.run_frac)
+    return 1;
+  if (w <= expect_w * cfg.stop_frac)
+    return -1;
+  return 0;
+}
+
 // What one poll decided.
 enum class CycleEvent : int8_t { kNone = 0, kOnset = 1, kEnded = -1 };
 
@@ -135,14 +154,11 @@ struct CycleDetector {
     // The register ages by one poll whether or not this poll can decide
     // anything, so "10 minutes" stays wall-clock, not "40 decided polls".
     flip_bits <<= 1;
-    const bool decidable =
-        settled && !(expect_w != expect_w) && !(w != w) && expect_w >= cfg.min_expect_w;
-    int8_t cls = 0;
+    // The bands live in classify() so the telemetry window counts polls by
+    // exactly the rule the detector decides by.
+    const bool decidable = settled;
+    const int8_t cls = decidable ? classify(w, expect_w, cfg) : 0;
     if (decidable) {
-      if (w >= expect_w * cfg.run_frac)
-        cls = 1;
-      else if (w <= expect_w * cfg.stop_frac)
-        cls = -1;
       if (cls != 0) {
         // Confirm a class across confirm_polls before it can flip anything:
         // a lone blip in either direction is the meter, not the fan.

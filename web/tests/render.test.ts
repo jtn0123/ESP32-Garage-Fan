@@ -158,6 +158,15 @@ describe('powerReadout', () => {
     expect(powerReadout(20.3, 0)).toBe('20.3 W');
     expect(powerReadout(20.3, null)).toBe('20.3 W');
     expect(powerReadout(null, 3)).toBe('');
+    // A range narrower than a watt is the meter breathing, not a story.
+    expect(powerReadout(20.3, 0, 20.1, 20.5)).toBe('20.3 W');
+  });
+
+  it('prints the range when the draw moved inside the bucket', () => {
+    // One snapshot per five minutes is what let a cycling fan read as an
+    // ordinary number at whatever instant the sample landed on.
+    expect(powerReadout(45.1, 0, 4.3, 45.6)).toBe('4.3–45.6 W');
+    expect(powerReadout(45.1, 3, 4.3, 45.6)).toBe('4.3–45.6 W · cycling ×3');
   });
 
   it('names the cycling flips the meter confirmed in the bucket', () => {
@@ -168,15 +177,26 @@ describe('powerReadout', () => {
 });
 
 describe('the PLUG status bit', () => {
-  const plug = { w: 45.1, v: 120.9, age_s: 3, verdict: -1 as const, cycling: true, flips: 5 };
+  const plug = {
+    w: 45.1, v: 120.9, age_s: 3, verdict: -1 as const, cycling: true, flips: 5,
+    expect_w: 30.2, implied_spd: 12,
+  };
 
   it('says CYCLING with the flip count, and goes red', () => {
     expect(plugBit(plug)).toBe('45.1 W · CYCLING ×5');
     expect(plugColour(plug)).toBe('#e0a9a9');
   });
 
+  it('names the speed the draw implies when the meter disagrees', () => {
+    // Not the volts: "45.1 W · looks like speed 12" is the sentence the
+    // 2026-08-20 night needed, and nothing said it.
+    expect(plugBit({ ...plug, cycling: false })).toBe('45.1 W · looks like speed 12');
+  });
+
   it('reads watts and volts when the fan is steady', () => {
-    const ok = { ...plug, verdict: 1 as const, cycling: false, flips: 0, w: 20.3 };
+    const ok = {
+      ...plug, verdict: 1 as const, cycling: false, flips: 0, w: 20.3, implied_spd: 9,
+    };
     expect(plugBit(ok)).toBe('20.3 W · 120.9 V');
     expect(plugColour(ok)).not.toBe('#e0a9a9');
   });

@@ -49,6 +49,11 @@ function battBit(batt: DeviceState['batt']): string {
 export function plugBit(plug: DeviceState['plug']): string {
   if (!plug) return 'no meter';
   if (plug.cycling) return `${plug.w.toFixed(1)} W · CYCLING ×${plug.flips}`;
+  // A disagreeing meter reports the speed the draw IMPLIES instead of the
+  // mains voltage: "45.1 W · looks like speed 12" is the sentence the
+  // 2026-08-20 night needed, and volts were never the interesting half.
+  if (plug.verdict === -1 && plug.implied_spd >= 0)
+    return `${plug.w.toFixed(1)} W · looks like speed ${plug.implied_spd}`;
   const volts = plug.v === null ? '' : ` · ${plug.v.toFixed(1)} V`;
   return `${plug.w.toFixed(1)} W${volts}`;
 }

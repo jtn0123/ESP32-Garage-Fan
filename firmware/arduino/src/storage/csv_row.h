@@ -34,6 +34,8 @@ struct CsvRow {
   float bme_t = NAN;  // the BME280 beside the SHT41 (1.14.48-1.15.1 rows)
   float bme_rh = NAN;
   int8_t flips = -1;  // plug run/stop flips in the bucket (1.21.0+ rows)
+  float w_min = NAN;  // the bucket's measured draw range (1.22.0+ rows)
+  float w_max = NAN;
   int8_t spd = 0;
   int8_t chg = -1;
   bool valid = false;  // false when the line is not a usable sample
@@ -47,12 +49,13 @@ constexpr float kAbsentBelow = -100.0f;
  *
  * Accepts every width this firmware has ever written: 6 fields (pre-1.14.23),
  * 8 (batt_v/chg), 13 (watts + the four SGP41 columns, 1.14.47), 15
- * (bme_t/bme_rh, the second thermometer, 1.14.48-1.15.1) and 14 (the plug
- * meter's flip count, 1.21.0). The 14th field is the ONLY ambiguity: in a
- * 15-field row it is bme_t, in a 14-field row it is flips -- the width
- * decides, and the two never share a card era. A line is valid only with
- * at least epoch + the three always-present readings; anything shorter (a
- * torn tail row, a stray blank, a header) is rejected rather than half-read.
+ * (bme_t/bme_rh, the second thermometer, 1.14.48-1.15.1), 14 (the plug
+ * meter's flip count, 1.21.0) and 16 (flips plus the bucket's draw range,
+ * 1.22.0). The 14th field is the ONLY ambiguity: in a 15-field row it is
+ * bme_t, otherwise it is flips -- the WIDTH decides, and the BME era and the
+ * meter era never share a card. A line is valid only with at least epoch +
+ * the three always-present readings; anything shorter (a torn tail row, a
+ * stray blank, a header) is rejected rather than half-read.
  */
 inline CsvRow parse_csv_row(const char* line) {
   CsvRow r;
@@ -67,10 +70,11 @@ inline CsvRow parse_csv_row(const char* line) {
   // cannot correlate that with `got`, so -Wmaybe-uninitialized can fire -- and
   // CI builds with -Werror.
   float tv = NAN, hv = NAN, pv = NAN, ov = NAN, bv = NAN, wv = NAN, btv = NAN, bhv = NAN;
+  float wxv = NAN;
   int sp = 0, cg = -1, vi = -1, ni = -1;
   long vr = -1, nr = -1;
-  const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d,%f,%ld,%ld,%d,%d,%f,%f", &tv, &hv, &pv,
-                         &ov, &sp, &bv, &cg, &wv, &vr, &nr, &vi, &ni, &btv, &bhv);
+  const int got = sscanf(line, "%*d,%f,%f,%f,%f,%d,%f,%d,%f,%ld,%ld,%d,%d,%f,%f,%f", &tv, &hv, &pv,
+                         &ov, &sp, &bv, &cg, &wv, &vr, &nr, &vi, &ni, &btv, &bhv, &wxv);
   if (got < 3)
     return r;
 
@@ -90,10 +94,15 @@ inline CsvRow parse_csv_row(const char* line) {
   if (got == 13) {
     // 14 fields: the 1.21.0 shape, field 14 is the flip count (-1 = no meter).
     r.flips = (btv >= 0.0f && btv <= 127.0f) ? static_cast<int8_t>(btv) : -1;
-  } else if (got >= 14) {
+  } else if (got == 14) {
     // 15 fields: the 1.14.48-1.15.1 BME pair.
     r.bme_t = btv > kAbsentBelow ? btv : NAN;
     r.bme_rh = bhv > kAbsentBelow ? bhv : NAN;
+  } else if (got >= 15) {
+    // 16 fields: 1.22.0 -- flips, then the bucket's measured draw range.
+    r.flips = (btv >= 0.0f && btv <= 127.0f) ? static_cast<int8_t>(btv) : -1;
+    r.w_min = bhv > kAbsentBelow ? bhv : NAN;
+    r.w_max = wxv > kAbsentBelow ? wxv : NAN;
   }
   r.valid = true;
   return r;

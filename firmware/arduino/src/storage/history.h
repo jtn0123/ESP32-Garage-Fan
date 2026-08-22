@@ -40,6 +40,8 @@ const int16_t* nox();
 const int8_t* speed();
 const int8_t* chg();
 const int8_t* flips();
+const float* w_min();
+const float* w_max();
 
 /** Min/max/avg of the temperature column; NANs when the ring is empty. */
 void temp_stats(float* mn, float* mx, float* avg);
