@@ -5,7 +5,7 @@
 // endpoint answers with the new state, so nothing here optimistically guesses
 // what the device did.
 
-import * as api from "./api.js";
+import * as api from './api.js';
 import {
   paint,
   paintChips,
@@ -16,23 +16,26 @@ import {
   startScope,
   stopScope,
   waveform,
-} from "./console.js";
-import { $, clear, el, show } from "./dom.js";
-import { drawAll, paintCaption, paintChartTitle } from "./history_view.js";
-import { buildRail } from "./rail.js";
-import { paintTip } from "./status_bits.js";
-import { attachScrub, endScrub } from "./scrub.js";
-import { drawPreview, drawScope } from "./pwm.js";
-import { build, tail } from "./series.js";
-import { buildGroups, render as renderSettings } from "./settings.js";
-import { ROW_IDS, view, type RowKey } from "./state.js";
-import type { DeviceState } from "./types.js";
-import { maintenance, uploadFirmware } from "./ota.js";
-import { checkForUpdate } from "./update.js";
+} from './console.js';
+import { $, clear, el, show } from './dom.js';
+import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
+import { buildRail } from './rail.js';
+import { paintTip } from './status_bits.js';
+import { attachScrub, endScrub } from './scrub.js';
+import { drawPreview, drawScope } from './pwm.js';
+import { build, tail } from './series.js';
+import { buildGroups, render as renderSettings } from './settings.js';
+import { ROW_IDS, view, type RowKey } from './state.js';
+import type { DeviceState } from './types.js';
+import { maintenance, uploadFirmware } from './ota.js';
+import { checkForUpdate } from './update.js';
+
+
+
 
 function paintSettings(): void {
   if (!view.state) {
-    clear($("groups"));
+    clear($('groups'));
     return;
   }
   // Never rebuild the settings DOM out from under someone who is using it.
@@ -52,7 +55,7 @@ function paintSettings(): void {
   // toggle pill keeps focus after a click, which would freeze every later
   // repaint and leave the whole screen showing stale values until focus moved
   // out of the host.
-  const host = $("groups");
+  const host = $('groups');
   const active = document.activeElement as HTMLElement | null;
   const editing =
     !!active &&
@@ -64,21 +67,20 @@ function paintSettings(): void {
   if (editing) return;
 
   renderSettings(
-    $("groups"),
+    $('groups'),
     buildGroups({
       state: view.state,
       info: view.info,
       update: view.update,
       setConfig: (q) => void command(() => api.setConfig(q)),
-      toggleAuto: () =>
-        void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`)),
-      restart: () => void maintenance("restart"),
-      formatCard: () => void maintenance("format"),
-      purgeCard: () => void maintenance("purge"),
+      toggleAuto: () => void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`)),
+      restart: () => void maintenance('restart'),
+      formatCard: () => void maintenance('format'),
+      purgeCard: () => void maintenance('purge'),
       recheckUpdate: () => void runUpdateCheck(true),
     }),
   );
-  const go = document.getElementById("ota_go");
+  const go = document.getElementById('ota_go');
   if (go) go.onclick = () => void uploadFirmware();
 }
 
@@ -104,26 +106,25 @@ async function runUpdateCheck(force = false): Promise<void> {
   if (!repo || !running) return;
   if (view.update && !force) return; // one check per page load; the button forces
   view.update = await checkForUpdate(repo, running);
-  if (view.screen === "settings") paintSettings();
+  if (view.screen === 'settings') paintSettings();
   const s = view.update;
-  show($("updot"), s.kind === "available");
+  show($('updot'), s.kind === 'available');
 }
 
 /* ---------------------------------------------------------------- navigation */
 
-export function setScreen(next?: "console" | "settings"): void {
-  view.screen = next ?? (view.screen === "console" ? "settings" : "console");
-  show($("console"), view.screen === "console");
-  show($("settings"), view.screen === "settings");
-  const nav = $("nav");
-  nav.textContent = view.screen === "settings" ? "← CONSOLE" : "SETTINGS";
-  nav.className = view.screen === "settings" ? "on" : "";
+export function setScreen(next?: 'console' | 'settings'): void {
+  view.screen = next ?? (view.screen === 'console' ? 'settings' : 'console');
+  show($('console'), view.screen === 'console');
+  show($('settings'), view.screen === 'settings');
+  const nav = $('nav');
+  nav.textContent = view.screen === 'settings' ? '← CONSOLE' : 'SETTINGS';
+  nav.className = view.screen === 'settings' ? 'on' : '';
   view.tip = -1;
   paintTip();
-  if (view.screen === "console") {
+  if (view.screen === 'console') {
     drawAll();
-    if (view.previewOpen)
-      drawPreview($<HTMLCanvasElement>("cv_pm"), waveform());
+    if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());
     if (view.scopeOpen) startScope();
   } else {
     stopScope();
@@ -135,17 +136,17 @@ function setPreview(open: boolean): void {
   const want = view.scopeOpen ? false : open;
   if (view.previewOpen === want) return;
   view.previewOpen = want;
-  show($("pwmcard"), want);
+  show($('pwmcard'), want);
   paintPwm();
-  if (want) drawPreview($<HTMLCanvasElement>("cv_pm"), waveform());
+  if (want) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());
 }
 
 function toggleScope(ev?: Event): void {
   ev?.stopPropagation();
   view.scopeOpen = !view.scopeOpen;
   view.previewOpen = false;
-  show($("pwmcard"), false);
-  show($("scope"), view.scopeOpen);
+  show($('pwmcard'), false);
+  show($('scope'), view.scopeOpen);
   paintPwm();
   if (view.scopeOpen) startScope();
   else stopScope();
@@ -156,9 +157,9 @@ function setRange(days: number): void {
   // Through the module that owns the crosshair, so the height reserved for the
   // state sentence during a gesture is released with it (scrub.ts).
   endScrub();
-  Array.from($("ranges").children).forEach((child) => {
+  Array.from($('ranges').children).forEach((child) => {
     const b = child as HTMLElement;
-    b.className = Number(b.dataset["d"]) === days ? "on" : "";
+    b.className = Number(b.dataset['d']) === days ? 'on' : '';
   });
   // Title and caption both live in history_view now: the title slot doubles as
   // the scrub readout, and the caption has to be able to say "this range is
@@ -180,17 +181,17 @@ function setRange(days: number): void {
  */
 function markChipOverflow(host: HTMLElement): void {
   const more = host.scrollLeft + host.clientWidth < host.scrollWidth - 2;
-  host.classList.toggle("more", more);
+  host.classList.toggle('more', more);
 }
 
 function buildChips(): void {
-  const host = $("chips");
-  host.addEventListener("scroll", () => markChipOverflow(host));
-  window.addEventListener("resize", () => markChipOverflow(host));
+  const host = $('chips');
+  host.addEventListener('scroll', () => markChipOverflow(host));
+  window.addEventListener('resize', () => markChipOverflow(host));
   host.replaceChildren(
     ...(Object.keys(ROW_IDS) as RowKey[]).map((key) => {
-      const b = el("button", { textContent: key.toUpperCase() });
-      b.dataset["key"] = key;
+      const b = el('button', { textContent: key.toUpperCase() });
+      b.dataset['key'] = key;
       b.onclick = () => {
         view.rows[key] = !view.rows[key];
         paintChips();
@@ -203,19 +204,17 @@ function buildChips(): void {
   markChipOverflow(host);
 }
 
+
 function buildCaptureTable(): void {
   const info = view.info;
   if (!info) return;
-  const grid = $("capgrid");
+  const grid = $('capgrid');
   grid.replaceChildren(
     ...info.high_us.map((us, n) => {
-      const b = el("button");
+      const b = el('button');
       b.append(
-        el("div", {
-          className: "ck",
-          textContent: n === 0 ? "OFF" : String(n),
-        }),
-        el("div", { className: "cu", textContent: n === 0 ? "—" : String(us) }),
+        el('div', { className: 'ck', textContent: n === 0 ? 'OFF' : String(n) }),
+        el('div', { className: 'cu', textContent: n === 0 ? '—' : String(us) }),
       );
       b.onclick = (ev) => {
         ev.stopPropagation();
@@ -253,8 +252,7 @@ async function loadHistory(): Promise<void> {
     view.history = shown;
     // Restart marks have to be cut to the same window. A boot older than the
     // first row left in `shown` has no x position on this axis, and drawing it
-    // anyway would pin it to the left edge -- a restart that never happened
-    // there.
+    // anyway pins it to the left edge -- a restart that never happened there.
     const from = shown.ts?.[0] ?? 0;
     view.boots = (boots.boots ?? []).filter((b) => from <= 0 || b.ts >= from);
     view.series = build(shown);
@@ -270,8 +268,8 @@ async function loadHistory(): Promise<void> {
     // happened and draw nothing.
     view.historyError =
       err instanceof Error && /50\d/.test(err.message)
-        ? "this range is unavailable — the card is not mounted, or the clock has not synced"
-        : "could not load history from the controller";
+        ? 'this range is unavailable — the card is not mounted, or the clock has not synced'
+        : 'could not load history from the controller';
     view.history = null;
     view.boots = [];
     view.series = null;
@@ -343,7 +341,7 @@ async function loadDevice(attempt = 0): Promise<void> {
     // late-arriving device fetch has to nudge it. Guarded internally against
     // running twice.
     void runUpdateCheck();
-    if (view.screen === "settings") paintSettings();
+    if (view.screen === 'settings') paintSettings();
   } catch {
     // Back off to a minute and keep trying; these facts never change, so a
     // late answer is still the right answer.
@@ -357,42 +355,35 @@ export async function boot(): Promise<void> {
   buildRail(setSpeed);
   buildChips();
 
-  $("nav").onclick = () => setScreen();
-  $("bauto").onclick = () =>
+  $('nav').onclick = () => setScreen();
+  $('bauto').onclick = () =>
     void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`));
-  $("boff").onclick = () => setSpeed(0);
-  const pwmCell = $("pwmcell");
+  $('boff').onclick = () => setSpeed(0);
+  const pwmCell = $('pwmcell');
   pwmCell.onmouseenter = () => setPreview(true);
   pwmCell.onmouseleave = () => setPreview(false);
   pwmCell.onclick = () => toggleScope();
-  $("scclose").onclick = (ev) => toggleScope(ev);
-  Array.from($("ranges").children).forEach((child) => {
+  $('scclose').onclick = (ev) => toggleScope(ev);
+  Array.from($('ranges').children).forEach((child) => {
     const b = child as HTMLElement;
-    b.onclick = () => setRange(Number(b.dataset["d"]));
+    b.onclick = () => setRange(Number(b.dataset['d']));
   });
 
-  attachScrub($("plots"));
+  attachScrub($('plots'));
   // Tap anywhere else to dismiss an open explanation. On a phone the tip has no
   // mouseleave to close it, so without this the only way out was finding the
   // same bit again. The `.bit` guard matters: this listener sees the same click
   // that just opened the tip, on its way up to the document.
-  document.addEventListener("click", (e) => {
+  document.addEventListener('click', (e) => {
     if (view.tip < 0) return;
-    if ((e.target as HTMLElement | null)?.closest("#stats .bit")) return;
+    if ((e.target as HTMLElement | null)?.closest('#stats .bit')) return;
     view.tip = -1;
     paintTip();
   });
-  window.addEventListener("resize", () => {
+  window.addEventListener('resize', () => {
     drawAll();
-    if (view.previewOpen)
-      drawPreview($<HTMLCanvasElement>("cv_pm"), waveform());
-    if (view.scopeOpen)
-      drawScope(
-        $<HTMLCanvasElement>("cv_pw"),
-        waveform(),
-        view.phase,
-        performance.now(),
-      );
+    if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());
+    if (view.scopeOpen) drawScope($<HTMLCanvasElement>('cv_pw'), waveform(), view.phase, performance.now());
   });
 
   await loadDevice();

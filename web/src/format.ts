@@ -6,30 +6,30 @@ export function hoursMinutes(seconds: number): string {
   // Math.max(0, NaN) is NaN, so the old guard let "NaNhNaNm" onto the status
   // line. Every formatter here takes device-supplied numbers and must render
   // SOMETHING truthful for a value that is not a number.
-  if (!Number.isFinite(seconds)) return "–";
+  if (!Number.isFinite(seconds)) return '–';
   const s = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 }
 
 /** Epoch seconds -> "04:05" in the viewer's local zone. */
 export function clock(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"] as const;
+const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
 
 /**
  * The selected range, as the chart title says it.
  *
  * Ranges under a day are carried as a FRACTION of one (0.25 = 6 h), because
  * everything downstream -- the axis, the scrub stamp, the coverage caption --
- * already reasons in days and reads a fraction correctly without knowing sub-
- * day ranges exist. Only the words have to change.
+ * already reasons in days and reads a fraction correctly without knowing
+ * sub-day ranges exist. Only the words have to change.
  */
 export function rangeLabel(days: number): string {
   if (days < 1) return `LAST ${Math.round(days * 24)} HOURS`;
-  return days === 1 ? "LAST 24 HOURS" : `LAST ${days} DAYS`;
+  return days === 1 ? 'LAST 24 HOURS' : `LAST ${days} DAYS`;
 }
 
 /** The same range as a noun the coverage caption can put "window" after. */
@@ -51,9 +51,7 @@ export function moment(epochSeconds: number, days = 1): string {
   const time = clock(epochSeconds);
   if (days <= 1) return time;
   const date = `${d.getMonth() + 1}/${d.getDate()}`;
-  return days <= 7
-    ? `${WEEKDAYS[d.getDay()]} ${date} ${time}`
-    : `${date} ${time}`;
+  return days <= 7 ? `${WEEKDAYS[d.getDay()]} ${date} ${time}` : `${date} ${time}`;
 }
 
 /**
@@ -65,23 +63,23 @@ export function moment(epochSeconds: number, days = 1): string {
  * "yesterday afternoon" in hours, where hours are still the natural answer.
  */
 export function ago(minutes: number): string {
-  if (!Number.isFinite(minutes)) return "AGE UNKNOWN";
+  if (!Number.isFinite(minutes)) return 'AGE UNKNOWN';
   const m = Math.max(0, Math.round(minutes));
   if (m < 60) return `${m} MIN AGO`;
   const hours = Math.floor(m / 60);
   if (hours >= 48) {
     const days = Math.floor(hours / 24);
     const rem = hours % 24;
-    const tail = rem === 0 ? "" : `${rem}H`;
+    const tail = rem === 0 ? '' : `${rem}H`;
     return `${days}D${tail} AGO`;
   }
   const rem = m % 60;
-  return `${hours}H${rem ? String(rem).padStart(2, "0") : ""} AGO`;
+  return `${hours}H${rem ? String(rem).padStart(2, '0') : ''} AGO`;
 }
 
 /** Always-signed one-decimal number, for the differential readout. */
 export function signed(v: number, digits = 1): string {
-  return (v >= 0 ? "+" : "") + v.toFixed(digits);
+  return (v >= 0 ? '+' : '') + v.toFixed(digits);
 }
 
 /** Speed 0..12 -> the word shown under AIRFLOW. */
@@ -89,12 +87,12 @@ export function airflow(speed: number): string {
   // NaN fails EVERY comparison below, so an unknown speed used to fall
   // through to "Full tilt" -- a missing reading reading as maximum airflow
   // is the worst possible direction for this particular guess to go.
-  if (!Number.isFinite(speed)) return "Unknown";
-  if (speed <= 0) return "Still";
-  if (speed <= 3) return "Trickle";
-  if (speed <= 6) return "Steady";
-  if (speed <= 9) return "Strong";
-  return "Full tilt";
+  if (!Number.isFinite(speed)) return 'Unknown';
+  if (speed <= 0) return 'Still';
+  if (speed <= 3) return 'Trickle';
+  if (speed <= 6) return 'Steady';
+  if (speed <= 9) return 'Strong';
+  return 'Full tilt';
 }
 
 /**
@@ -105,21 +103,15 @@ export function airflow(speed: number): string {
  * reason sd_free_mb was added to the wire is that a nearly-full card was
  * invisible, so the formatter has to actually say it.
  */
-export function storage(
-  usedMb: number,
-  totalMb: number,
-  freeMb?: number,
-): string {
-  if (!Number.isFinite(usedMb) || !Number.isFinite(totalMb)) return "–";
+export function storage(usedMb: number, totalMb: number, freeMb?: number): string {
+  if (!Number.isFinite(usedMb) || !Number.isFinite(totalMb)) return '–';
   const base = `${(usedMb / 1024).toFixed(2)} / ${(totalMb / 1024).toFixed(1)} GB`;
   // freeMb is RENDERED below, so it needs the same guard the other two
   // got: a non-finite value reached the user as 'NaN MB free'.
-  if (freeMb === undefined || !Number.isFinite(freeMb) || totalMb <= 0)
-    return base;
+  if (freeMb === undefined || !Number.isFinite(freeMb) || totalMb <= 0) return base;
   const pctFull = (100 * usedMb) / totalMb;
   if (pctFull < 90) return base;
-  const free =
-    freeMb >= 1024 ? `${(freeMb / 1024).toFixed(1)} GB` : `${freeMb} MB`;
+  const free = freeMb >= 1024 ? `${(freeMb / 1024).toFixed(1)} GB` : `${freeMb} MB`;
   return `${base} · ${free} free (${pctFull.toFixed(0)}% full)`;
 }
 
@@ -140,8 +132,8 @@ export function cardTight(usedMb: number, totalMb: number): boolean {
  */
 export function axisLabel(t: number, days: number): string {
   const d = new Date(t * 1000);
-  const hh = String(d.getHours()).padStart(2, "0");
-  if (days <= 1) return `${hh}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hh = String(d.getHours()).padStart(2, '0');
+  if (days <= 1) return `${hh}:${String(d.getMinutes()).padStart(2, '0')}`;
   const date = `${d.getMonth() + 1}/${d.getDate()}`;
   return days <= 7 ? `${date} ${d.getHours()}h` : date;
 }
