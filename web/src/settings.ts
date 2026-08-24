@@ -7,25 +7,49 @@
 // line; D- was measured idle). Shipping controls that silently do nothing is
 // worse than not shipping them, so those rows are absent rather than inert.
 
-import * as api from './api.js';
-import { el, show } from './dom.js';
-import { hoursMinutes, storage } from './format.js';
-import { view } from './state.js';
-import { provisionControl } from './provision.js';
-import { DEFAULT_TOKEN, installUpdate } from './updater.js';
-import type { DeviceInfo, DeviceState } from './types.js';
-import { ageText, paintFrame } from './panel.js';
-import type { UpdateStatus } from './update.js';
+import * as api from "./api.js";
+import { el, show } from "./dom.js";
+import { hoursMinutes, storage } from "./format.js";
+import { view } from "./state.js";
+import { provisionControl } from "./provision.js";
+import { DEFAULT_TOKEN, installUpdate } from "./updater.js";
+import type { DeviceInfo, DeviceState } from "./types.js";
+import { ageText, paintFrame } from "./panel.js";
+import type { UpdateStatus } from "./update.js";
 
 export type Row =
-  | { kind: 'step'; label: string; hint: string; value: string; dec: () => void; inc: () => void }
-  | { kind: 'toggle'; label: string; hint: string; on: boolean; toggle: () => void }
-  | { kind: 'text'; label: string; hint: string; value: string }
-  | { kind: 'actions'; label: string; hint: string; actions: Action[] }
-  | { kind: 'update'; label: string; hint: string; status: UpdateStatus | null; recheck: () => void }
-  | { kind: 'ota'; label: string; hint: string }
-  | { kind: 'panel'; label: string; hint: string }
-  | { kind: 'provision'; label: string; hint: string; info: () => DeviceInfo | null };
+  | {
+      kind: "step";
+      label: string;
+      hint: string;
+      value: string;
+      dec: () => void;
+      inc: () => void;
+    }
+  | {
+      kind: "toggle";
+      label: string;
+      hint: string;
+      on: boolean;
+      toggle: () => void;
+    }
+  | { kind: "text"; label: string; hint: string; value: string }
+  | { kind: "actions"; label: string; hint: string; actions: Action[] }
+  | {
+      kind: "update";
+      label: string;
+      hint: string;
+      status: UpdateStatus | null;
+      recheck: () => void;
+    }
+  | { kind: "ota"; label: string; hint: string }
+  | { kind: "panel"; label: string; hint: string }
+  | {
+      kind: "provision";
+      label: string;
+      hint: string;
+      info: () => DeviceInfo | null;
+    };
 
 export interface Action {
   text: string;
@@ -68,20 +92,24 @@ export function buildGroups(d: SettingsDeps): Group[] {
     value: string,
     dec: () => void,
     inc: () => void,
-  ): Row => ({ kind: 'step', label, hint, value, dec, inc });
+  ): Row => ({ kind: "step", label, hint, value, dec, inc });
 
-  const text = (label: string, hint: string, value: string): Row =>
-    ({ kind: 'text', label, hint, value });
+  const text = (label: string, hint: string, value: string): Row => ({
+    kind: "text",
+    label,
+    hint,
+    value,
+  });
 
   return [
     {
-      title: 'AUTO MODE',
+      title: "AUTO MODE",
       blurb:
-        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles. Engaging is instant; once running, auto commits for at least 15 minutes before it may drop back.',
+        "The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles. Engaging is instant; once running, auto commits for at least 15 minutes before it may drop back.",
       rows: [
         step(
-          'Engage above',
-          'Garage must be this many degrees hotter than the yard before auto drives the fan to its hold speed.',
+          "Engage above",
+          "Garage must be this many degrees hotter than the yard before auto drives the fan to its hold speed.",
           `+${eng.toFixed(1)} °F`,
           // Release must stay strictly below engage or the hysteresis latch
           // flaps; the firmware enforces this too, this just avoids the round trip.
@@ -89,50 +117,50 @@ export function buildGroups(d: SettingsDeps): Group[] {
           () => set(`onf=${clamp(eng + 0.5, 0.5, 20)}`),
         ),
         step(
-          'Release below',
-          'Fan drops back to the rest speed once the gap falls under this. Keep it well under the engage point or the fan chatters.',
+          "Release below",
+          "Fan drops back to the rest speed once the gap falls under this. Keep it well under the engage point or the fan chatters.",
           `+${rel.toFixed(1)} °F`,
           () => set(`offf=${clamp(rel - 0.5, 0, 20)}`),
           () => set(`offf=${clamp(rel + 0.5, 0, eng - 0.5)}`),
         ),
         step(
-          'Hold speed',
-          'Speed auto holds while the differential is above the engage point — partial venting wastes the gap.',
+          "Hold speed",
+          "Speed auto holds while the differential is above the engage point — partial venting wastes the gap.",
           `${s.auto_max} / 12`,
           () => set(`max=${Math.max(1, s.auto_max - 1)}`),
           () => set(`max=${Math.min(12, s.auto_max + 1)}`),
         ),
         step(
-          'Rest speed',
-          'Speed auto falls back to once inside and outside have equalized. Zero means the fan stops.',
-          s.auto_min === 0 ? 'off' : `${s.auto_min} / 12`,
+          "Rest speed",
+          "Speed auto falls back to once inside and outside have equalized. Zero means the fan stops.",
+          s.auto_min === 0 ? "off" : `${s.auto_min} / 12`,
           () => set(`min=${Math.max(0, s.auto_min - 1)}`),
           () => set(`min=${Math.min(12, s.auto_min + 1)}`),
         ),
         {
-          kind: 'toggle',
-          label: 'Auto mode',
-          hint: 'When off, the fan holds whatever speed you set by hand until you turn auto back on.',
+          kind: "toggle",
+          label: "Auto mode",
+          hint: "When off, the fan holds whatever speed you set by hand until you turn auto back on.",
           on: s.auto,
           toggle: d.toggleAuto,
         },
         {
-          kind: 'toggle',
-          label: 'Gas boost',
-          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger, and never before 15 minutes of boosting. Needs the SGP41 warmed up — the boost simply stays off without it.',
+          kind: "toggle",
+          label: "Gas boost",
+          hint: "Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger, and never before 15 minutes of boosting. Needs the SGP41 warmed up — the boost simply stays off without it.",
           on: s.gas_on,
           toggle: () => d.setConfig(`gason=${s.gas_on ? 0 : 1}`),
         },
         step(
-          'Gas boost · trigger',
+          "Gas boost · trigger",
           'VOC index that engages the boost. 100 is this sensor’s own 24 h average, so 250 means "clearly worse than normal for this garage".',
           `${s.gas_voc}`,
           () => set(`gasvoc=${Math.max(100, s.gas_voc - 25)}`),
           () => set(`gasvoc=${Math.min(500, s.gas_voc + 25)}`),
         ),
         step(
-          'Gas boost · speed',
-          'The minimum speed auto holds while the boost is engaged. The thermostat can still run faster; it cannot run slower.',
+          "Gas boost · speed",
+          "The minimum speed auto holds while the boost is engaged. The thermostat can still run faster; it cannot run slower.",
           `${s.gas_spd} / 12`,
           () => set(`gasspd=${Math.max(1, s.gas_spd - 1)}`),
           () => set(`gasspd=${Math.min(12, s.gas_spd + 1)}`),
@@ -140,118 +168,155 @@ export function buildGroups(d: SettingsDeps): Group[] {
       ],
     },
     {
-      title: 'SENSORS',
-      blurb: 'What is measuring the garage, and how often it is logged.',
+      title: "SENSORS",
+      blurb: "What is measuring the garage, and how often it is logged.",
       rows: [
         text(
-          'Garage probe',
-          'Off-board SHT41 on the sensor cable — the sole temperature and humidity source. It hangs away from the board precisely so it needs no self-heating correction; the offsets that existed to patch the old on-board reading died with it.',
-          'SHT41',
+          "Garage probe",
+          "Off-board SHT41 on the sensor cable — the sole temperature and humidity source. It hangs away from the board precisely so it needs no self-heating correction; the offsets that existed to patch the old on-board reading died with it.",
+          "SHT41",
         ),
         text(
-          'Barometer',
+          "Barometer",
           s.sensor
-            ? 'On-board BME280, pressure only — its thermometer read +5 °C high whenever the fan rested, so everything but the barometer is switched off.'
-            : 'The on-board BME280 barometer has not answered; pressure is blank until it does.',
-          s.sensor ? 'BME280 OK' : 'NO ANSWER',
+            ? "On-board BME280, pressure only — its thermometer read +5 °C high whenever the fan rested, so everything but the barometer is switched off."
+            : "The on-board BME280 barometer has not answered; pressure is blank until it does.",
+          s.sensor ? "BME280 OK" : "NO ANSWER",
         ),
         text(
-          'Outside temperature',
-          'Fetched from open-meteo every 10 minutes and averaged over the last three polls, so one jumpy forecast step cannot move the fan. Older than 30 minutes counts as stale and auto holds.',
-          info?.lat && info?.lon ? `open-meteo · ${info.lat}, ${info.lon}` : 'open-meteo',
+          "Outside temperature",
+          "Fetched from open-meteo every 10 minutes and averaged over the last three polls, so one jumpy forecast step cannot move the fan. Older than 30 minutes counts as stale and auto holds.",
+          info?.lat && info?.lon
+            ? `open-meteo · ${info.lat}, ${info.lon}`
+            : "open-meteo",
         ),
         text(
-          'Sample interval',
-          'How often a reading is taken, logged to the card and pushed into the 24 h ring.',
-          info ? `${info.sample_s / 60} min` : '–',
+          "Sample interval",
+          "How often a reading is taken, logged to the card and pushed into the 24 h ring.",
+          info ? `${info.sample_s / 60} min` : "–",
         ),
       ],
     },
     {
-      title: 'NETWORK',
+      title: "NETWORK",
       blurb:
-        'Where the controller publishes and how it is reached. Local logging on the card continues through any outage.',
+        "Where the controller publishes and how it is reached. Local logging on the card continues through any outage.",
       rows: [
-        text('MQTT broker', 'Address the controller publishes state to and takes commands from.',
-          info?.broker ?? '–'),
-        text('Link', 'Access point joined at boot, and the current signal.',
-          `${info?.ssid ?? '–'} · ${s.rssi} dBm`),
-        text('Address', 'Where this page is served from.',
-          `${s.ip || '–'}${info ? ` · ${info.host}.local` : ''}`),
-        text('Command topic', 'Publish a speed 0–12 here to drive the fan from anywhere.',
-          info?.topic_set ?? '–'),
+        text(
+          "MQTT broker",
+          "Address the controller publishes state to and takes commands from.",
+          info?.broker ?? "–",
+        ),
+        text(
+          "Link",
+          "Access point joined at boot, and the current signal.",
+          `${info?.ssid ?? "–"} · ${s.rssi} dBm`,
+        ),
+        text(
+          "Address",
+          "Where this page is served from.",
+          `${s.ip || "–"}${info ? ` · ${info.host}.local` : ""}`,
+        ),
+        text(
+          "Command topic",
+          "Publish a speed 0–12 here to drive the fan from anywhere.",
+          info?.topic_set ?? "–",
+        ),
         {
-          kind: 'provision',
-          label: 'Connection',
-          hint: 'WiFi, MQTT and the weather coordinates, stored on the board itself — so a published release image, built without anyone’s passwords, still comes up on your network. Passwords are write-only: blank means unchanged. Saving reboots the controller.',
+          kind: "provision",
+          label: "Connection",
+          hint: "WiFi, MQTT and the weather coordinates, stored on the board itself — so a published release image, built without anyone’s passwords, still comes up on your network. Passwords are write-only: blank means unchanged. Saving reboots the controller.",
           info: () => view.info,
         },
       ],
     },
     {
-      title: 'POWER',
+      title: "POWER",
       blurb:
-        'The backup pack that keeps the controller alive and logging when the USB supply drops out. The fan itself runs from its own 12 V brick.',
+        "The backup pack that keeps the controller alive and logging when the USB supply drops out. The fan itself runs from its own 12 V brick.",
       rows: [
-        text('Cell voltage', 'Live pack voltage — the same series plotted in the BATTERY chart row.',
-          s.batt ? `${s.batt.v.toFixed(3)} V` : 'no pack detected'),
         text(
-          'Charge state',
-          'Sticky verdict from the voltage slope, so trickle charging does not flap the temperature offset.',
-          s.batt
-            ? `${s.batt.chg ? 'charging' : 'discharging'}${
-                s.batt.mvh !== null ? ` · ${s.batt.mvh >= 0 ? '+' : ''}${s.batt.mvh} mV/h` : ''
-              }`
-            : '–',
+          "Cell voltage",
+          "Live pack voltage — the same series plotted in the BATTERY chart row.",
+          s.batt ? `${s.batt.v.toFixed(3)} V` : "no pack detected",
         ),
-        text('Estimated runtime', 'Hours left at the current discharge slope. Blank while charging or flat.',
-          s.batt?.eta_h != null ? `${s.batt.eta_h.toFixed(1)} h` : '–'),
         text(
-          'Fan energy today',
-          'Watt-hours the fan has drawn since local midnight — measured by the Tapo meter when it answers, the cubic-law estimate otherwise — and what that costs at the price below.',
+          "Charge state",
+          "Sticky verdict from the voltage slope, so trickle charging does not flap the temperature offset.",
+          s.batt
+            ? `${s.batt.chg ? "charging" : "discharging"}${
+                s.batt.mvh !== null
+                  ? ` · ${s.batt.mvh >= 0 ? "+" : ""}${s.batt.mvh} mV/h`
+                  : ""
+              }`
+            : "–",
+        ),
+        text(
+          "Estimated runtime",
+          "Hours left at the current discharge slope. Blank while charging or flat.",
+          s.batt?.eta_h != null ? `${s.batt.eta_h.toFixed(1)} h` : "–",
+        ),
+        text(
+          "Fan energy today",
+          "Watt-hours the fan has drawn since local midnight — measured by the Tapo meter when it answers, the cubic-law estimate otherwise — and what that costs at the price below.",
           `${(s.wh_today / 1000).toFixed(2)} kWh · $${((s.wh_today / 1000) * s.cost_kwh).toFixed(2)}`,
         ),
         step(
-          'Electricity price',
-          'Your utility rate, for the cost readouts. Display math only — nothing bills against it.',
+          "Electricity price",
+          "Your utility rate, for the cost readouts. Display math only — nothing bills against it.",
           `$${s.cost_kwh.toFixed(2)} / kWh`,
-          () => set(`ckwh=${clamp(Math.round((s.cost_kwh - 0.01) * 100) / 100, 0.01, 2)}`),
-          () => set(`ckwh=${clamp(Math.round((s.cost_kwh + 0.01) * 100) / 100, 0.01, 2)}`),
+          () =>
+            set(
+              `ckwh=${clamp(Math.round((s.cost_kwh - 0.01) * 100) / 100, 0.01, 2)}`,
+            ),
+          () =>
+            set(
+              `ckwh=${clamp(Math.round((s.cost_kwh + 0.01) * 100) / 100, 0.01, 2)}`,
+            ),
         ),
       ],
     },
     {
-      title: 'DEVICE',
+      title: "DEVICE",
       blurb:
-        'Identity, storage and maintenance. A restart takes about eight seconds and does not clear logs.',
+        "Identity, storage and maintenance. A restart takes about eight seconds and does not clear logs.",
       rows: [
-        text('Firmware', 'Running image and slot. See SLOT in the status bar for what “confirmed” means.',
-          `${s.fw} · ${s.slot} · ${s.confirmed ? 'confirmed' : 'unconfirmed'}`),
-        text('Device ID', 'Unique controller identifier, derived from the radio MAC.', info?.id ?? '–'),
         text(
-          'Uptime',
+          "Firmware",
+          "Running image and slot. See SLOT in the status bar for what “confirmed” means.",
+          `${s.fw} · ${s.slot} · ${s.confirmed ? "confirmed" : "unconfirmed"}`,
+        ),
+        text(
+          "Device ID",
+          "Unique controller identifier, derived from the radio MAC.",
+          info?.id ?? "–",
+        ),
+        text(
+          "Uptime",
           `Time since the last reboot.${
-            s.prev_death && s.prev_death !== 'none' ? ` Previous boot ended in ${s.prev_death}.` : ''
+            s.prev_death && s.prev_death !== "none"
+              ? ` Previous boot ended in ${s.prev_death}.`
+              : ""
           }`,
           `${hoursMinutes(s.uptime_s)} · boot ${s.boots}`,
         ),
         text(
-          'Log storage',
-          'microSD card holding the per-month CSV files behind the 7-day and 30-day ranges.',
+          "Log storage",
+          "microSD card holding the per-month CSV files behind the 7-day and 30-day ranges.",
           s.sd_total_mb
             ? storage(s.sd_used_mb, s.sd_total_mb, s.sd_free_mb)
             : s.sd_q
-              ? 'quarantined'
-              : 'not mounted',
+              ? "quarantined"
+              : "not mounted",
         ),
         {
-          kind: 'panel',
-          label: 'Panel',
-          hint: 'What the e-ink display on the device is showing right now. These are the same pixels the firmware sent to the glass, not a redrawing of them, so what you see here is what is on the wall. It repaints on the 5-minute sample cadence.',
+          kind: "panel",
+          label: "Panel",
+          hint: "What the e-ink display on the device is showing right now. These are the same pixels the firmware sent to the glass, not a redrawing of them, so what you see here is what is on the wall. It repaints on the 5-minute sample cadence.",
         },
         {
-          kind: 'actions',
-          label: 'Maintenance',
+          kind: "actions",
+          label: "Maintenance",
           hint: 'Restart reboots into the same slot. "Delete card contents" unlinks every file but leaves the filesystem alone — use it to reclaim space, since Format only rewrites a card that will not mount. Both need the update token.',
           actions: [
             // 30 days off the card, not the 24 h RAM ring this used to serve.
@@ -259,32 +324,34 @@ export function buildGroups(d: SettingsDeps): Group[] {
               // Follows the chart's selected range: offering 60 days on the
               // chart while the export silently capped at 30 meant the data
               // you could SEE was not the data you could TAKE.
-              text: `Download CSV (${view.days} d)`,
-              href: `/download.csv?days=${view.days}`,
+              // The export endpoint takes whole days only, so a 6 or 12 hour
+              // view exports the day containing it rather than refusing.
+              text: `Download CSV (${Math.max(1, Math.ceil(view.days))} d)`,
+              href: `/download.csv?days=${Math.max(1, Math.ceil(view.days))}`,
             },
-            { text: 'Restart', run: d.restart },
-            { text: 'Delete card contents', run: d.purgeCard, danger: true },
-            { text: 'Format SD card', run: d.formatCard, danger: true },
+            { text: "Restart", run: d.restart },
+            { text: "Delete card contents", run: d.purgeCard, danger: true },
+            { text: "Format SD card", run: d.formatCard, danger: true },
           ],
         },
       ],
     },
     {
-      title: 'UPDATE',
+      title: "UPDATE",
       blurb:
-        'One click: the newest release is downloaded by your browser, checked against its published checksum and handed to the controller. Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.',
+        "One click: the newest release is downloaded by your browser, checked against its published checksum and handed to the controller. Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.",
       rows: [
         {
-          kind: 'update',
-          label: 'Latest release',
-          hint: 'Your browser asks GitHub — the controller itself never talks to the internet.',
+          kind: "update",
+          label: "Latest release",
+          hint: "Your browser asks GitHub — the controller itself never talks to the internet.",
           status: d.update,
           recheck: d.recheckUpdate,
         },
         {
-          kind: 'ota',
-          label: 'Upload firmware',
-          hint: 'The manual route, for a locally built image or a specific older release: pick the firmware.bin, enter the update token, and the board reboots into it. The token field here also serves the one-click install above.',
+          kind: "ota",
+          label: "Upload firmware",
+          hint: "The manual route, for a locally built image or a specific older release: pick the firmware.bin, enter the update token, and the board reboots into it. The token field here also serves the one-click install above.",
         },
       ],
     },
@@ -297,24 +364,24 @@ export function render(host: HTMLElement, groups: Group[]): void {
 }
 
 function renderGroup(g: Group): HTMLElement {
-  const wrap = el('div', { className: 'grp' });
-  const head = el('div');
+  const wrap = el("div", { className: "grp" });
+  const head = el("div");
   head.append(
-    el('div', { className: 'gt', textContent: g.title }),
-    el('div', { className: 'gb', textContent: g.blurb }),
+    el("div", { className: "gt", textContent: g.title }),
+    el("div", { className: "gb", textContent: g.blurb }),
   );
-  const rows = el('div', { className: 'grows' });
+  const rows = el("div", { className: "grows" });
   rows.append(...g.rows.map(renderRow));
   wrap.append(head, rows);
   return wrap;
 }
 
 function renderRow(r: Row): HTMLElement {
-  const row = el('div', { className: 'grow' });
-  const left = el('div', { className: 'rl' });
+  const row = el("div", { className: "grow" });
+  const left = el("div", { className: "rl" });
   left.append(
-    el('div', { className: 'rlab', textContent: r.label }),
-    el('div', { className: 'rh', textContent: r.hint }),
+    el("div", { className: "rlab", textContent: r.label }),
+    el("div", { className: "rh", textContent: r.hint }),
   );
   row.append(left, control(r));
   return row;
@@ -322,46 +389,49 @@ function renderRow(r: Row): HTMLElement {
 
 function control(r: Row): HTMLElement {
   switch (r.kind) {
-    case 'step': {
-      const box = el('div', { className: 'stp' });
-      const dec = el('button', { textContent: '−', onclick: r.dec });
-      dec.setAttribute('aria-label', `decrease ${r.label}`);
-      const inc = el('button', { textContent: '+', onclick: r.inc });
-      inc.setAttribute('aria-label', `increase ${r.label}`);
-      box.append(dec, el('span', { textContent: r.value }), inc);
+    case "step": {
+      const box = el("div", { className: "stp" });
+      const dec = el("button", { textContent: "−", onclick: r.dec });
+      dec.setAttribute("aria-label", `decrease ${r.label}`);
+      const inc = el("button", { textContent: "+", onclick: r.inc });
+      inc.setAttribute("aria-label", `increase ${r.label}`);
+      box.append(dec, el("span", { textContent: r.value }), inc);
       return box;
     }
-    case 'toggle': {
-      const b = el('button', { className: `tgl${r.on ? ' on' : ''}`, onclick: r.toggle });
-      b.setAttribute('role', 'switch');
-      b.setAttribute('aria-checked', r.on ? 'true' : 'false');
-      b.setAttribute('aria-label', r.label);
-      b.append(el('i'));
+    case "toggle": {
+      const b = el("button", {
+        className: `tgl${r.on ? " on" : ""}`,
+        onclick: r.toggle,
+      });
+      b.setAttribute("role", "switch");
+      b.setAttribute("aria-checked", r.on ? "true" : "false");
+      b.setAttribute("aria-label", r.label);
+      b.append(el("i"));
       return b;
     }
-    case 'text':
-      return el('div', { className: 'rtx', textContent: r.value });
-    case 'actions': {
-      const box = el('div', { className: 'acts' });
+    case "text":
+      return el("div", { className: "rtx", textContent: r.value });
+    case "actions": {
+      const box = el("div", { className: "acts" });
       for (const a of r.actions) {
         if (a.href) {
-          box.append(el('a', { textContent: a.text, href: a.href }));
+          box.append(el("a", { textContent: a.text, href: a.href }));
         } else {
-          const b = el('button', { textContent: a.text });
-          if (a.danger) b.className = 'danger';
+          const b = el("button", { textContent: a.text });
+          if (a.danger) b.className = "danger";
           if (a.run) b.onclick = a.run;
           box.append(b);
         }
       }
       return box;
     }
-    case 'update':
+    case "update":
       return updateControl(r.status, r.recheck);
-    case 'ota':
+    case "ota":
       return otaControl();
-    case 'panel':
+    case "panel":
       return panelControl();
-    case 'provision':
+    case "provision":
       return provisionControl(r.info);
   }
 }
@@ -376,16 +446,22 @@ function control(r: Row): HTMLElement {
 let installBox: HTMLElement | null = null;
 let installing = false;
 
-function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): HTMLElement {
+function installControl(
+  status: Extract<UpdateStatus, { kind: "available" }>,
+): HTMLElement {
   if (installBox) return installBox;
-  const box = el('span', { className: 'updinstall' });
-  const go = el('button', { className: 'updbtn', id: 'upd_go', textContent: `Update now` });
-  const msg = el('span', { id: 'updmsg' });
+  const box = el("span", { className: "updinstall" });
+  const go = el("button", {
+    className: "updbtn",
+    id: "upd_go",
+    textContent: `Update now`,
+  });
+  const msg = el("span", { id: "updmsg" });
   go.onclick = () => {
     if (installing) return;
     const repo = view.info?.repo;
     if (!repo) return;
-    const field = document.getElementById('ota_t') as HTMLInputElement | null;
+    const field = document.getElementById("ota_t") as HTMLInputElement | null;
     const token = field?.value || DEFAULT_TOKEN;
     installing = true;
     go.disabled = true;
@@ -394,7 +470,10 @@ function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): H
       upload: api.uploadFirmware,
       getState: api.getState,
       state: () => view.state,
-      askToken: () => window.prompt('The controller refused the update token. Enter it to retry:'),
+      askToken: () =>
+        window.prompt(
+          "The controller refused the update token. Enter it to retry:",
+        ),
       say: (t) => (msg.textContent = t),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     })
@@ -409,55 +488,87 @@ function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): H
   return box;
 }
 
-function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLElement {
-  const box = el('div', { className: 'upd' });
-  const line = el('div', { className: 'updline' });
+function updateControl(
+  status: UpdateStatus | null,
+  recheck: () => void,
+): HTMLElement {
+  const box = el("div", { className: "upd" });
+  const line = el("div", { className: "updline" });
 
   const notes = (release: { html_url: string }) =>
-    el('a', {
-      className: 'updlink',
-      textContent: 'release notes',
+    el("a", {
+      className: "updlink",
+      textContent: "release notes",
       href: release.html_url,
-      target: '_blank',
-      rel: 'noopener noreferrer',
+      target: "_blank",
+      rel: "noopener noreferrer",
     });
 
   if (status === null) {
-    line.append(el('span', { className: 'updmuted', textContent: 'checking…' }));
-  } else if (status.kind === 'available') {
-    line.append(el('span', { className: 'updnew', textContent: `${status.latest} available` }));
+    line.append(
+      el("span", { className: "updmuted", textContent: "checking…" }),
+    );
+  } else if (status.kind === "available") {
+    line.append(
+      el("span", {
+        className: "updnew",
+        textContent: `${status.latest} available`,
+      }),
+    );
     line.append(notes(status.release));
     // Downloads the image to the machine running the browser, for the manual
     // route below; the button beside it is the one-click install.
-    line.append(el('a', {
-      className: 'updlink',
-      textContent: 'download .bin',
-      href: status.asset.browser_download_url,
-    }));
+    line.append(
+      el("a", {
+        className: "updlink",
+        textContent: "download .bin",
+        href: status.asset.browser_download_url,
+      }),
+    );
     line.append(installControl(status));
-  } else if (status.kind === 'no-binary') {
+  } else if (status.kind === "no-binary") {
     // Not shown as "available": there is nothing the operator can install.
-    line.append(el('span', {
-      className: 'updmuted',
-      textContent: `${status.latest} tagged, but it published no .bin`,
-    }));
+    line.append(
+      el("span", {
+        className: "updmuted",
+        textContent: `${status.latest} tagged, but it published no .bin`,
+      }),
+    );
     line.append(notes(status.release));
-  } else if (status.kind === 'ahead') {
+  } else if (status.kind === "ahead") {
     // Deliberately NOT the green "up to date". The device being ahead of the
     // newest published release means the release channel is stale, which is
     // the opposite of an all-clear -- the deployed fan sat 22 versions ahead
     // of v1.14.0 while this row rendered a reassuring green tick.
-    line.append(el('span', {
-      className: 'updmuted',
-      textContent: `running ${status.running}, newer than the latest release (${status.latest}) — unreleased build`,
-    }));
-  } else if (status.kind === 'up-to-date') {
-    line.append(el('span', { className: 'updok', textContent: `up to date (${status.latest})` }));
+    line.append(
+      el("span", {
+        className: "updmuted",
+        textContent: `running ${status.running}, newer than the latest release (${status.latest}) — unreleased build`,
+      }),
+    );
+  } else if (status.kind === "up-to-date") {
+    line.append(
+      el("span", {
+        className: "updok",
+        textContent: `up to date (${status.latest})`,
+      }),
+    );
   } else {
-    line.append(el('span', { className: 'updmuted', textContent: `unknown — ${status.reason}` }));
+    line.append(
+      el("span", {
+        className: "updmuted",
+        textContent: `unknown — ${status.reason}`,
+      }),
+    );
   }
 
-  line.append(el('button', { className: 'updbtn', textContent: 'Check again', onclick: recheck }));
+  line.append(
+    el("button", {
+      className: "updbtn",
+      textContent: "Check again",
+      onclick: recheck,
+    }),
+  );
   box.append(line);
   return box;
 }
@@ -476,26 +587,30 @@ let otaRow: HTMLElement | null = null;
 
 function otaControl(): HTMLElement {
   if (otaRow) return otaRow;
-  const box = el('div');
-  const row = el('div', { id: 'otarow' });
-  const file = el('input', { className: 'fld', id: 'ota_f', type: 'file', accept: '.bin' });
-  file.setAttribute('aria-label', 'firmware image file');
-  const token = el('input', {
-    className: 'fld',
-    id: 'ota_t',
-    type: 'password',
-    placeholder: 'update token',
-    autocomplete: 'off',
+  const box = el("div");
+  const row = el("div", { id: "otarow" });
+  const file = el("input", {
+    className: "fld",
+    id: "ota_f",
+    type: "file",
+    accept: ".bin",
   });
-  const go = el('button', { id: 'ota_go', textContent: 'Upload' });
+  file.setAttribute("aria-label", "firmware image file");
+  const token = el("input", {
+    className: "fld",
+    id: "ota_t",
+    type: "password",
+    placeholder: "update token",
+    autocomplete: "off",
+  });
+  const go = el("button", { id: "ota_go", textContent: "Upload" });
   row.append(file, token, go);
-  const msg = el('div', { id: 'otamsg' });
+  const msg = el("div", { id: "otamsg" });
   box.append(row, msg);
   show(msg, true);
   otaRow = box;
   return box;
 }
-
 
 // --------------------------------------------------------------- the mirror
 
@@ -514,13 +629,17 @@ let panelRow: HTMLElement | null = null;
  */
 function panelControl(): HTMLElement {
   if (panelRow) return panelRow;
-  const box = el('div', { className: 'pnl' });
-  const cv = el('canvas', { id: 'pnlcv' }) as HTMLCanvasElement;
-  const msg = el('div', { className: 'pnlmsg', id: 'pnlmsg', textContent: 'loading the panel…' });
-  const btn = el('button', {
-    className: 'updbtn',
-    id: 'pnlrefresh',
-    textContent: 'Refresh now',
+  const box = el("div", { className: "pnl" });
+  const cv = el("canvas", { id: "pnlcv" }) as HTMLCanvasElement;
+  const msg = el("div", {
+    className: "pnlmsg",
+    id: "pnlmsg",
+    textContent: "loading the panel…",
+  });
+  const btn = el("button", {
+    className: "updbtn",
+    id: "pnlrefresh",
+    textContent: "Refresh now",
     onclick: () => void forcePanelRefresh(cv, msg),
   });
   box.append(cv, msg, btn);
@@ -534,7 +653,10 @@ function panelControl(): HTMLElement {
   return box;
 }
 
-async function loadPanel(cv: HTMLCanvasElement, msg: HTMLElement): Promise<void> {
+async function loadPanel(
+  cv: HTMLCanvasElement,
+  msg: HTMLElement,
+): Promise<void> {
   try {
     const frame = await api.getDisplay();
     if (!frame.ready) {
@@ -552,8 +674,11 @@ async function loadPanel(cv: HTMLCanvasElement, msg: HTMLElement): Promise<void>
   }
 }
 
-async function forcePanelRefresh(cv: HTMLCanvasElement, msg: HTMLElement): Promise<void> {
-  msg.textContent = 'refreshing the panel…';
+async function forcePanelRefresh(
+  cv: HTMLCanvasElement,
+  msg: HTMLElement,
+): Promise<void> {
+  msg.textContent = "refreshing the panel…";
   try {
     await api.refreshDisplay();
     // The panel blocks the device for seconds while it clocks the waveform, so
