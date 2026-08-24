@@ -112,7 +112,8 @@ static void test_full_cycle_hot_afternoon_to_cool_evening() {
 
 // ---------------------------------------------------------------- gas boost
 
-static const FanGasCfg kGas{true, 6, 250, 200};
+// Mirrors kFanGasDefaults: 250 engage, 150 release (kGasReleaseGap = 100).
+static const FanGasCfg kGas{true, 6, 250, 250 - kGasReleaseGap};
 
 static void test_gas_floor_latches_and_releases_with_hysteresis() {
   bool gh = false;
@@ -120,9 +121,21 @@ static void test_gas_floor_latches_and_releases_with_hysteresis() {
   TEST_ASSERT_EQUAL(0, fan_gas_floor(249, &gh, kGas));  // just under: no latch
   TEST_ASSERT_EQUAL(6, fan_gas_floor(250, &gh, kGas));  // latch at the edge
   TEST_ASSERT_EQUAL(6, fan_gas_floor(225, &gh, kGas));  // holds between bands
-  TEST_ASSERT_EQUAL(6, fan_gas_floor(201, &gh, kGas));  // still above release
-  TEST_ASSERT_EQUAL(0, fan_gas_floor(200, &gh, kGas));  // releases at the edge
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(200, &gh, kGas));  // the OLD release point
+  TEST_ASSERT_EQUAL(6, fan_gas_floor(151, &gh, kGas));  // still above release
+  TEST_ASSERT_EQUAL(0, fan_gas_floor(150, &gh, kGas));  // releases at the edge
   TEST_ASSERT_FALSE(gh);
+}
+
+static void test_release_sits_below_where_the_fan_settles_the_air() {
+  // The 2026-08-23 regression this gap exists to prevent: a release point the
+  // decay merely PASSES THROUGH rather than settles at. Fitted from the
+  // device's own history, blowing air converges toward index 84 -- so the
+  // release must sit above that (reachable) and below the level the air
+  // rebounds to (or the boost quits while it is still winning).
+  TEST_ASSERT_GREATER_THAN(84, kFanGasDefaults.off_index);
+  TEST_ASSERT_LESS_THAN(200, kFanGasDefaults.off_index);
+  TEST_ASSERT_EQUAL(100, kFanGasDefaults.on_index - kFanGasDefaults.off_index);
 }
 
 static void test_gas_floor_clears_when_sensor_goes_away() {
@@ -296,6 +309,7 @@ int main(int, char**) {
   RUN_TEST(test_missing_data_holds_speed_and_latch);
   RUN_TEST(test_full_cycle_hot_afternoon_to_cool_evening);
   RUN_TEST(test_gas_floor_latches_and_releases_with_hysteresis);
+  RUN_TEST(test_release_sits_below_where_the_fan_settles_the_air);
   RUN_TEST(test_gas_floor_clears_when_sensor_goes_away);
   RUN_TEST(test_gas_floor_disabled_clears_latch);
   RUN_TEST(test_gas_floor_merges_under_thermostat);

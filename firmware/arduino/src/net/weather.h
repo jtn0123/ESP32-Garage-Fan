@@ -8,12 +8,23 @@
 // kept "firing" while an orphaned entity reference made it publish nothing.
 // Then the repaired feed turned out to live behind a configuration include
 // that HA never loads. Every link in that chain is outside this repo's
-// control and fails silently; a direct poll fails loudly, on our own tape,
-// and the MQTT path remains as an independent second source (both feed
-// climate::set_outside_f; freshest write wins).
+// control and fails silently; a direct poll fails loudly, on our own tape.
+//
+// Since 1.23.0 this is the ONLY outdoor source. The MQTT path was kept for a
+// while as a "second source, freshest write wins", which turned out to be the
+// bug rather than the belt-and-braces it looked like: it relayed a different
+// weather SERVICE (its topic tree carried `weather`, `condition_code` and
+// `wind_mps`, not a yard sensor), the two models disagreed about the
+// afternoon by up to 4.5 degF, and the differential the thermostat compares
+// therefore alternated across the whole 1 degF hysteresis band every five
+// minutes on nothing but which feed wrote last. sensors/outdoor.h carries the
+// measurements and now owns the smoothing and the expiry.
 //
 // The device's coordinates come from the gitignored .env (WEATHER_LAT/LON),
-// like credentials: a clone without them builds with the poller disabled.
+// like credentials. A clone without them builds with the poller disabled --
+// and since the MQTT feed is gone that means NO outdoor reading at all, so
+// auto mode holds whatever speed it is on rather than guessing. That is the
+// designed answer to a missing feed, not a regression; set the coordinates.
 //
 // Transport is PLAIN HTTP -- an accepted integrity tradeoff, not an
 // oversight. TLS was implemented first and failed on hardware: mbedtls needs

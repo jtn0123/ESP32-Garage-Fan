@@ -212,8 +212,7 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}.`;
   }
   if (delta === null) {
-    const topic = view.info?.topic_out ? ` on ${view.info.topic_out}` : '';
-    return `No outdoor reading yet — auto holds the last speed rather than guessing. The yard temperature arrives over MQTT${topic}.`;
+    return 'No outdoor reading yet — auto holds the last speed rather than guessing. The fan fetches the outside temperature from open-meteo every 10 minutes.';
   }
   if (!s.auto) {
     return `Auto is off — the fan is at ${s.speed > 0 ? `speed ${s.speed}` : 'off'} because you set it by hand. Turn auto back on to let the differential drive it again.`;

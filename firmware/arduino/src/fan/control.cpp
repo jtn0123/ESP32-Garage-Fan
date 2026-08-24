@@ -166,7 +166,7 @@ void tick_auto() {
   gcfg.enabled = g_gas_on;
   gcfg.boost_speed = g_gas_spd;
   gcfg.on_index = g_gas_voc;
-  gcfg.off_index = g_gas_voc - 50 > 0 ? g_gas_voc - 50 : 1;
+  gcfg.off_index = g_gas_voc - kGasReleaseGap > 0 ? g_gas_voc - kGasReleaseGap : 1;
   const bool was_high = g_gas_high;
   const int floor_speed = fan_gas_floor(static_cast<int>(air::voc_index()), &g_gas_high, gcfg,
                                         &g_gas_run_ticks, kMinRunTicks);
