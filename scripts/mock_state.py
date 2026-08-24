@@ -69,7 +69,6 @@ DEVICE: Json = {
     "lat": "",
     "lon": "",
     "topic_set": "garage/fan/set",
-    "topic_out": "home/outdoor/temp_f",
     "period_us": 9934,
     "sample_s": STEP,
     "high_us": [0, 3477, 4072, 4868, 5066, 5661, 6159, 6754, 7251, 7847, 8344, 8940, 9437],

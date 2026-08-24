@@ -13,7 +13,6 @@ const info: DeviceInfo = {
   lat: '',
   lon: '',
   topic_set: 'garage/fan/set',
-  topic_out: 'home/outdoor/temp_f',
   period_us: 9934,
   sample_s: 300,
   high_us: [],

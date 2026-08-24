@@ -17,7 +17,7 @@ import {
   drawTemperature,
 } from './charts.js';
 import { $, at, el } from './dom.js';
-import { ago, hoursMinutes, moment } from './format.js';
+import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
 import type { Series } from './series.js';
 import { sampleIndex, view } from './state.js';
 import { OR, OUT } from './theme.js';
@@ -69,7 +69,7 @@ export function paintChartTitle(): void {
   const i = sampleIndex();
   const t = view.scrub >= 0 && s && i >= 0 ? s.ts(i) : null;
   if (t === null || !s) {
-    title.textContent = view.days === 1 ? 'LAST 24 HOURS' : `LAST ${view.days} DAYS`;
+    title.textContent = rangeLabel(view.days);
     title.className = 'ct';
     return;
   }
@@ -113,7 +113,7 @@ export function paintCaption(): void {
   if (coveredH !== null && coveredH < view.days * 24 * 0.67) {
     return note(
       `the card only goes back ${hoursMinutes(coveredH * 3600)} — the rest of this ` +
-        `${view.days}-day window is older than anything it holds`,
+        `${rangeNoun(view.days)} window is older than anything it holds`,
     );
   }
   cap.textContent = CHART_HINT;

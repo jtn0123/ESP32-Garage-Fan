@@ -5,9 +5,10 @@
 // Control:  web UI http://garage-fan.local/ · /api/set?speed=0..12 ·
 //           MQTT garage/fan/set · /api/raw?high_pct= (calibration)
 // Auto:     differential thermostat vs outdoors (fan/auto_logic.h, natively
-//           tested). Outdoor temp arrives on MQTT_SUB_BASE "/temp_f" from the
-//           existing home/outdoor feed. Hotter outside -> min speed; hotter
-//           inside -> ramp toward the user's max. Manual set disables auto.
+//           tested). Outdoor temp is polled from open-meteo by net/weather --
+//           the only source since 1.23.0 -- and smoothed by sensors/outdoor.h.
+//           Hotter outside -> min speed; hotter inside -> ramp toward the
+//           user's max. Manual set disables auto.
 // Climate:  BME280 samples every 5 min -> 24 h RAM ring + CSV on the microSD
 //           card (monthly files, epoch-stamped once SNTP syncs) -> web graph
 //           at 24 h / 7 d / 30 d ranges.

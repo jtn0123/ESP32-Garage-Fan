@@ -193,11 +193,11 @@ static void handle_device() {
   snprintf(out, sizeof(out),
            "{" WK_ID "\"%s-%02x%02x%02x\"," WK_HOST "\"%s\"," WK_REPO "\"%s\"," WK_BROKER
            "\"%s:%u\"," WK_SSID "\"%s\"," WK_MQTT_USER "\"%s\"," WK_LAT "\"%s\"," WK_LON
-           "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US "%u," WK_SAMPLE_S
-           "%lu," WK_HIGH_US "[%s]}",
+           "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_PERIOD_US "%u," WK_SAMPLE_S "%lu," WK_HIGH_US
+           "[%s]}",
            FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host,
-           (unsigned)creds::mqtt_port(), ssid, user, lat, lon, kTopicSet, kTopicOutdoor,
-           (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000), high);
+           (unsigned)creds::mqtt_port(), ssid, user, lat, lon, kTopicSet, (unsigned)kPeriodUs,
+           (unsigned long)(kSampleMs / 1000), high);
   g_http.send(200, "application/json", out);
 }
 
