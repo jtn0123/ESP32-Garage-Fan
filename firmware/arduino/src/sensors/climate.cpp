@@ -11,7 +11,7 @@
 
 #include "config.h"
 #include "sensors/air.h"
-#include "system/timeutil.h"
+#include "sensors/outdoor.h"
 
 namespace climate {
 namespace {
@@ -24,15 +24,10 @@ float g_inside_c = NAN;
 // all night (2026-08-11); NaN is the contract fan_auto_decide expects.
 uint32_t g_inside_ms = 0;
 constexpr uint32_t kInsideStaleMs = 10 * 60 * 1000;  // two missed samples
-float g_outside_c = NAN;
-uint32_t g_outside_ms = 0;
-time_t g_outdoor_epoch = 0;  // bridge's own timestamp topic, if any
-uint32_t g_epoch_rx_ms = 0;  // when that /ts arrived, for pairing
-
-// How close together a /ts and its temperature must land to count as one
-// sample. Broker delivery of a pair is millisecond-scale; ten seconds is
-// generous without letting an epoch outlive its own sample cycle.
-constexpr uint32_t kEpochPairMs = 10000;
+// Three polls at weather.cpp's 10-minute cadence: ~30 minutes of coverage,
+// which is what it takes to blunt open-meteo's own >= 1 degF poll steps
+// against a 1 degF hysteresis band. outdoor.h owns the reasoning.
+sensors::OutdoorFeed<3, kOutdoorStaleMs> g_outside;
 
 bool begin_if_needed() {
   if (g_ok)
@@ -96,37 +91,16 @@ float inside_c() {
 }
 bool ok() { return g_ok; }
 
-void set_outside_f(float f) {
-  g_outside_c = (f - 32.0f) * 5.0f / 9.0f;
-  g_outside_ms = millis();
-  // Pair the bridge timestamp with its sample: keep an epoch that arrived
-  // just before this temperature (broker delivers the retained or live pair
-  // within milliseconds, in either order), discard one that is older than a
-  // pairing window. So: retained replay keeps its stale epoch and reads
-  // stale; a live feed keeps its fresh epoch; and a bridge that STOPS
-  // publishing /ts falls back to receipt-time freshness within one sample
-  // instead of gating on a fossil epoch forever.
-  if (millis() - g_epoch_rx_ms > kEpochPairMs)
-    g_outdoor_epoch = 0;
-}
+void set_outside_f(float f) { g_outside.push((f - 32.0f) * 5.0f / 9.0f, millis()); }
 
-void set_outdoor_epoch(long epoch) {
-  g_outdoor_epoch = epoch;
-  g_epoch_rx_ms = millis();
-}
+// Receipt time is exact freshness now that the firmware owns the only writer.
+// The bridge-epoch pairing this replaced existed because a RETAINED MQTT
+// message replays at connect looking brand new while carrying yesterday's
+// weather; with the relay gone there is no retained replay to defend against.
+float outside_c_fresh() { return g_outside.value_c(millis()); }
 
-float outside_c_fresh() {
-  // A bridge that publishes its own epoch timestamp gives real freshness --
-  // retained redelivery of an old snapshot reads as stale, as it should.
-  // Feeds without a ts topic fall back to receipt-time freshness.
-  if (g_outdoor_epoch > 0) {
-    if (!time_synced() || time(nullptr) - g_outdoor_epoch > 1800)
-      return NAN;
-    return g_outside_c;
-  }
-  if (g_outside_ms == 0 || millis() - g_outside_ms > kOutdoorStaleMs)
-    return NAN;
-  return g_outside_c;
-}
+float outside_c_raw() { return g_outside.raw_c(millis()); }
+
+bool outside_stale() { return g_outside.stale(millis()); }
 
 }  // namespace climate

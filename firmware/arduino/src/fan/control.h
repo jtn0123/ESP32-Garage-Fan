@@ -40,6 +40,19 @@ void raw_high_us(uint16_t high_us);
 /** Current speed 0..12, or negative while a raw duty is being driven. */
 int speed();
 
+/** The HIGH width the line is being driven with right now, us (0 = solid low). */
+uint16_t commanded_high_us();
+
+/**
+ * Read the control pad back while LEDC drives it: the high fraction in
+ * percent and the edge count over ~30 ms (three periods, so six edges when
+ * the waveform is alive). The line is fire-and-forget, so this is the only
+ * way to tell "the chip stopped driving it" from "the fan stopped obeying
+ * it" -- /api/pinprobe exposes it, and net/plug logs it when the meter says
+ * the fan is cycling. Blocks ~30 ms; perturbs nothing.
+ */
+void probe_pad(float* high_pct, uint32_t* transitions);
+
 /** Rough electrical draw at a given step (cubic fan law). */
 float watts(int speed);
 

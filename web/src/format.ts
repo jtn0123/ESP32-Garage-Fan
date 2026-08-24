@@ -20,6 +20,24 @@ export function clock(epochSeconds: number): string {
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
 
 /**
+ * The selected range, as the chart title says it.
+ *
+ * Ranges under a day are carried as a FRACTION of one (0.25 = 6 h), because
+ * everything downstream -- the axis, the scrub stamp, the coverage caption --
+ * already reasons in days and reads a fraction correctly without knowing
+ * sub-day ranges exist. Only the words have to change.
+ */
+export function rangeLabel(days: number): string {
+  if (days < 1) return `LAST ${Math.round(days * 24)} HOURS`;
+  return days === 1 ? 'LAST 24 HOURS' : `LAST ${days} DAYS`;
+}
+
+/** The same range as a noun the coverage caption can put "window" after. */
+export function rangeNoun(days: number): string {
+  return days < 1 ? `${Math.round(days * 24)}-hour` : `${days}-day`;
+}
+
+/**
  * The scrubbed instant, at the precision the selected range makes meaningful.
  *
  * On 24H the clock alone is unambiguous. On 7D/30D/60D it is not -- "15:27"

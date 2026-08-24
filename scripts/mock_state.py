@@ -45,7 +45,10 @@ STATE: Json = {
     # The Tapo watt meter on the fan's supply, as net/plug reports it. The
     # SCEN plug knob swaps in the disagreement case; "none" serves null, the
     # no-meter build.
-    "plug": {"w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1},
+    "plug": {
+        "w": 20.3, "v": 120.9, "age_s": 3, "verdict": 1, "cycling": False, "flips": 0,
+        "expect_w": 20.3, "implied_spd": 9,
+    },  # fmt: skip
     # Gas boost, as fan/control reports it: enabled with defaults, latch idle.
     "gas_on": True,
     "gas_spd": 6,
@@ -62,8 +65,10 @@ DEVICE: Json = {
     # carry the real broker address or the site's actual SSID.
     "broker": "192.0.2.10:1883",
     "ssid": "example-wifi",
+    "mqtt_user": "fan",
+    "lat": "",
+    "lon": "",
     "topic_set": "garage/fan/set",
-    "topic_out": "home/outdoor/temp_f",
     "period_us": 9934,
     "sample_s": STEP,
     "high_us": [0, 3477, 4072, 4868, 5066, 5661, 6159, 6754, 7251, 7847, 8344, 8940, 9437],
@@ -98,9 +103,25 @@ SCEN: Json = {
     # The panel before its first refresh: the firmware answers ready:false
     # until then, and the console has a branch for it that nothing could reach.
     "panel_ready": True,
-    # "ok" agree, "bad" sustained disagreement, "none" no meter at all
+    # What a token-accepted POST /update "flashes": the fw the mock reports
+    # afterwards (boots+1, other slot, confirmed). None = the upload is taken
+    # and the board "reboots" onto the SAME version, which is what a rolled-back
+    # image looks like from the console. Drives the one-click install specs.
+    "ota_fw": None,
+    # The fw the board reports. A knob so a worker's mock can be put back after
+    # an /update "flashed" it; applying it writes STATE["fw"] directly.
+    "fw": "1.14.23",
+    # "ok" agree, "bad" sustained disagreement, "cycling" the fan switching
+    # itself on and off at a held speed (the 2026-08-20 night), "none" no
+    # meter at all
     "plug": "ok",
 }
+
+
+# The measured watt baseline per speed (net/plug.cpp's kBaselineW). The mock
+# answers /api/state and /api/plugtrace from it so "expected vs measured" is
+# a real comparison here rather than two unrelated numbers.
+PLUG_BASELINE = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
 
 
 # Type and bounds for every scenario knob. /_scen coerces through this rather
@@ -122,13 +143,24 @@ SCEN_SPEC: dict[str, ScenSpec] = {
     "flat_rh": bool,
     "down": bool,
     "panel_ready": bool,
-    "plug": ("choice", "ok", "bad", "none"),
+    "plug": ("choice", "ok", "bad", "cycling", "none"),
+    "ota_fw": ("version",),  # X.Y.Z or none
+    "fw": ("version",),  # what the board reports; resets after an /update
 }
 
 
 def coerce_scen(key: str, raw: str) -> bool | int | str | None:
     """Whitelisted parse of one knob. Raises ValueError on anything else."""
     spec = SCEN_SPEC[key]
+    if isinstance(spec, tuple) and spec[0] == "version":
+        if raw == "none":
+            return None
+        # Split-and-isdigit rather than a regex: the value is caller-supplied,
+        # and `\d+\.\d+\.\d+` is the classic polynomial-backtracking shape.
+        parts = raw.split(".")
+        if len(raw) > 32 or len(parts) != 3 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"{key} takes X.Y.Z or none")
+        return raw
     if isinstance(spec, tuple) and spec[0] == "choice":
         choices = tuple(str(c) for c in spec[1:])
         if raw not in choices:

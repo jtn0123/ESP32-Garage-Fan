@@ -29,8 +29,20 @@ import {
  *    only asserts on visible text passes while the app is broken underneath.
  */
 
-/** First port of the per-worker block; worker N listens on BASE + N. */
-const MOCK_PORT_BASE = Number(process.env['MOCK_PORT'] ?? 8100);
+/**
+ * First port of the per-worker block; worker N listens on BASE + 2N. Two
+ * ports per worker, not one: the mock serves the console on its port and the
+ * SSE live stream one above it (mirroring the device's 80/8081 split), so
+ * consecutive workers would otherwise fight over each other's stream port.
+ *
+ * 8200, not 8100: a dogfooding mock left running on its default 8099 owns
+ * 8100 for ITS stream, and waitForMock() cannot tell a stream server from a
+ * console server -- worker 0's page.goto then hangs on an endless
+ * text/event-stream, the worker dies, respawns on the same port and dies
+ * again (2026-08-20: four scattered 30 s timeouts per run, never the same
+ * tests). Keep this block well away from the default mock's port pair.
+ */
+const MOCK_PORT_BASE = Number(process.env['MOCK_PORT'] ?? 8200);
 
 /**
  * The interpreter to run the mock with, as an ABSOLUTE path.
@@ -96,6 +108,8 @@ export const SCEN_DEFAULTS = {
   // the ordering held, which is the worst way for a test to pass.
   panel_ready: 'true',
   plug: 'ok',
+  ota_fw: 'none',
+  fw: '1.14.23',
 } as const;
 
 /** Flip scenario knobs on the mock. */
@@ -175,7 +189,7 @@ export const test = base.extend<{ errors: string[] }, { mockPort: number }>({
   // every test that worker runs, torn down when the worker exits.
   mockPort: [
     async ({}, use, workerInfo) => {
-      const port = MOCK_PORT_BASE + workerInfo.parallelIndex;
+      const port = MOCK_PORT_BASE + workerInfo.parallelIndex * 2;
       const proc = spawn(PYTHON, ['../scripts/mock_device.py'], {
         env: { ...process.env, MOCK_PORT: String(port) },
         stdio: ['ignore', 'pipe', 'pipe'],

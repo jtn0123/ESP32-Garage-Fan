@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { build, hasData } from '../src/series.js';
+import { build, hasData, tail } from '../src/series.js';
 import type { History } from '../src/types.js';
 
 const T = 1_786_071_600;
@@ -20,10 +20,36 @@ const h = (over: Partial<History> = {}): History => ({
   nox_raw: [null, 15800, 15810],
   voc: [null, 0, 87],
   nox: [null, 0, 1],
+  flips: [null, 0, 3],
+  w_min: [null, 20.1, 4.3],
+  w_max: [null, 20.5, 45.6],
   ...over,
 });
 
 describe('build', () => {
+  it('carries the bucket draw range the power band shades', () => {
+    // The half a single `watts` snapshot cannot carry: inside the last bucket
+    // the meter swung 4.3 to 45.6 W, which is a fan stopping and restarting.
+    const s = build(h());
+    expect(s.wmin).toEqual([null, 20.1, 4.3]);
+    expect(s.wmax).toEqual([null, 20.5, 45.6]);
+    // A pre-1.22.0 firmware sends neither: nulls, not a throw.
+    const old = h();
+    delete (old as Partial<History>).w_min;
+    delete (old as Partial<History>).w_max;
+    expect(build(old).wmin).toEqual([null, null, null]);
+    expect(build(old).wmax).toEqual([null, null, null]);
+  });
+
+  it('carries the plug flip count per row, null where the meter had none', () => {
+    // The cycling profile's column; the power chart tints any bucket > 0.
+    expect(build(h()).flips).toEqual([null, 0, 3]);
+    // A pre-1.21.0 firmware sends no flips at all: every row is null, not a throw.
+    const old = h();
+    delete (old as Partial<History>).flips;
+    expect(build(old).flips).toEqual([null, null, null]);
+  });
+
   it('converts garage temperature to Fahrenheit', () => {
     const s = build(h());
     expect(s.tf[0]).toBeCloseTo(68);
@@ -159,5 +185,68 @@ describe('build: the row spacing is measured, not assumed', () => {
   it('falls back to interval_s when no stamp has synced', () => {
     const n = 4;
     expect(build(h({ ts: [0, 0, 0, 0].slice(0, n), temp_c: [24, 24, 24, 24] })).step).toBe(300);
+  });
+});
+
+/* ------------------------------------------------------------------ tail() */
+
+/**
+ * The 6 h and 12 h ranges are a window on the 24 h response, so the slicing is
+ * the whole feature. Getting it wrong shows a chart whose axis says six hours
+ * and whose data is a day.
+ */
+describe('tail', () => {
+  const at = (n: number, first: number, step: number): History =>
+    ({
+      interval_s: step,
+      source: 'sd',
+      ts: Array.from({ length: n }, (_, i) => first + i * step),
+      temp_c: Array.from({ length: n }, (_, i) => i),
+      rh: Array.from({ length: n }, (_, i) => i),
+      hpa: Array.from({ length: n }, (_, i) => i),
+      out_f: Array.from({ length: n }, (_, i) => i),
+      spd: Array.from({ length: n }, (_, i) => i),
+      batt_v: Array.from({ length: n }, (_, i) => i),
+      chg: Array.from({ length: n }, () => 0),
+      watts: Array.from({ length: n }, (_, i) => i),
+      voc_raw: Array.from({ length: n }, (_, i) => i),
+    }) as unknown as History;
+
+  it('keeps only the requested hours', () => {
+    const h = at(288, 1_700_000_000, 300); // 24 h at 5 min
+    const six = tail(h, 6);
+    expect(six.ts.length).toBe(73); // 6 h, inclusive of the boundary row
+    expect(six.ts[six.ts.length - 1]).toBe(h.ts[287]);
+  });
+
+  it('slices every series to the same length', () => {
+    const six = tail(at(288, 1_700_000_000, 300), 6);
+    const lengths = Object.values(six)
+      .filter(Array.isArray)
+      .map((a) => (a as unknown[]).length);
+    expect(new Set(lengths).size).toBe(1);
+  });
+
+  it('returns the response untouched when it is already shorter', () => {
+    const h = at(10, 1_700_000_000, 300); // 50 min of rows
+    expect(tail(h, 12)).toBe(h);
+  });
+
+  it('falls back to the cadence when the clock has not synced', () => {
+    const h = at(288, 0, 300);
+    (h as { ts: number[] }).ts = Array.from({ length: 288 }, () => 0);
+    expect(tail(h, 6).ts.length).toBe(72); // 6 h / 5 min, counted not timed
+  });
+
+  it('cuts by time, not by row count, across an outage', () => {
+    // Six rows over 12 h: a dense hour, then a long dark stretch. Asking for
+    // the last 2 h must keep only what actually falls inside it.
+    const h = at(6, 1_700_000_000, 300);
+    (h as { ts: number[] }).ts = [0, 300, 600, 900, 40_000, 43_200].map(
+      (o) => 1_700_000_000 + o,
+    );
+    const two = tail(h, 2);
+    expect(two.ts.length).toBe(2);
+    expect(two.temp_c.length).toBe(2);
   });
 });

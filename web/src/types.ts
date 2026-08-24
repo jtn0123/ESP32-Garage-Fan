@@ -24,7 +24,7 @@ export interface DeviceState {
   auto_min: number; // speed auto rests at once equalised (0 = off)
   on_f: number; // engage differential, degrees F
   off_f: number; // release differential, degrees F
-  outside_f: number | null; // null when the yard feed is missing or stale
+  outside_f: number | null; // null when the weather poll is missing or stale
   fw: string; // FW_VERSION -- the update check compares exactly this
   slot: string; // "app0" | "app1"
   confirmed: boolean;
@@ -79,6 +79,28 @@ export interface PlugState {
    * (stale reading, speed changed too recently).
    */
   verdict: -1 | 0 | 1;
+  /**
+   * The cycling profile (net/plug_cycle.h): the fan is switching itself on
+   * and off while ONE speed is held -- four or more confirmed run/stop flips
+   * inside ten minutes. Distinct from verdict -1, which is "steadily wrong":
+   * on 2026-08-20 the fan cycled all night at a held speed 10 and the verdict
+   * only flapped.
+   */
+  cycling: boolean;
+  /** Confirmed run/stop flips inside the last ten minutes; 0 when steady. */
+  flips: number;
+  /**
+   * What the commanded speed SHOULD draw, from the measured baseline table.
+   * null while a raw duty is being driven (there is no table entry for it).
+   * "45.1 W" means nothing on its own; beside 30.2 it means everything.
+   */
+  expect_w: number | null;
+  /**
+   * The speed the measured draw implies, -1 with no reading. The number the
+   * 2026-08-20 tape never carried: the fan pulled the speed-12 level all
+   * night while every line reported the commanded 10.
+   */
+  implied_spd: number;
 }
 
 export interface BatteryState {
@@ -98,10 +120,12 @@ export interface DeviceInfo {
   id: string;
   host: string;
   repo: string; // "owner/name" on GitHub -- drives the update check
-  broker: string;
+  broker: string; // "host:port", from the NVS-backed creds store
   ssid: string;
+  mqtt_user: string; // never the password -- the provisioning form pre-fills from these
+  lat: string; // weather coordinates as stored ("" = weather poller off)
+  lon: string;
   topic_set: string;
-  topic_out: string;
   period_us: number; // PWM frame, measured: 9934
   sample_s: number;
   high_us: number[]; // index 0..12, the measured duty table
@@ -218,7 +242,21 @@ export interface History {
   /** Sensirion gas indices 1..500. 0 = the algorithm was still warming up. */
   voc: (number | null)[];
   nox: (number | null)[];
-  /** The BME280 logged beside the SHT41, for the dual-sensor overlays. */
+  /**
+   * Run/stop flips the plug meter confirmed inside each 5-minute bucket
+   * (net/plug_cycle.h). The watts column is one snapshot per bucket and
+   * aliases a fan cycling every minute into jitter; this is the count that
+   * says it happened. null = no meter, or a row from before 1.21.0.
+   */
+  flips: (number | null)[];
+  /**
+   * The lowest and highest draw the meter saw inside each bucket. `watts` is
+   * one instant of five minutes; these two are the range, which is what makes
+   * a cycling fan legible on the chart instead of a jittery line.
+   * null = no meter, or a row from before 1.22.0.
+   */
+  w_min: (number | null)[];
+  w_max: (number | null)[];
 }
 
 /**

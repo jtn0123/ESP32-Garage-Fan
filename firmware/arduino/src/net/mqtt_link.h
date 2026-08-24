@@ -1,7 +1,12 @@
 #pragma once
-// The MQTT session: availability, retained speed commands, the outdoor
-// temperature feed, and the health signal the OTA rollback logic keys on
-// (an image is only "confirmed" once it has reached the broker).
+// The MQTT session: availability, retained speed commands, and the health
+// signal the OTA rollback logic keys on (an image is only "confirmed" once
+// it has reached the broker).
+//
+// It used to carry the outdoor temperature in as well; that feed was a Home
+// Assistant relay racing the firmware's own weather poll for one variable,
+// and it was removed in 1.23.0 (sensors/outdoor.h). This link is now
+// commands out-and-in only -- nothing the thermostat reads arrives here.
 //
 // Command flow in: on_message -> fan::apply. Whether a set counts as manual
 // (and therefore disables auto) is decided HERE, because only this layer

@@ -45,17 +45,23 @@ function battBit(batt: DeviceState['batt']): string {
   return `${bolt}${pct}${batt.v.toFixed(3)} V`;
 }
 
-/** "20.3 W · 120.9 V" / "20.3 W" / "no meter" -- the PLUG bit. */
-function plugBit(plug: DeviceState['plug']): string {
+/** "20.3 W · 120.9 V" / "20.3 W" / "45.1 W · CYCLING ×5" / "no meter" -- the PLUG bit. */
+export function plugBit(plug: DeviceState['plug']): string {
   if (!plug) return 'no meter';
+  if (plug.cycling) return `${plug.w.toFixed(1)} W · CYCLING ×${plug.flips}`;
+  // A disagreeing meter reports the speed the draw IMPLIES instead of the
+  // mains voltage: "45.1 W · looks like speed 12" is the sentence the
+  // 2026-08-20 night needed, and volts were never the interesting half.
+  if (plug.verdict === -1 && plug.implied_spd >= 0)
+    return `${plug.w.toFixed(1)} W · looks like speed ${plug.implied_spd}`;
   const volts = plug.v === null ? '' : ` · ${plug.v.toFixed(1)} V`;
   return `${plug.w.toFixed(1)} W${volts}`;
 }
 
-/** Red only for a MEASURED disagreement; absent hardware is not a fault. */
-function plugColour(plug: DeviceState['plug']): string {
+/** Red only for a MEASURED fault (disagreement or cycling); absent hardware is not one. */
+export function plugColour(plug: DeviceState['plug']): string {
   if (!plug) return DIM;
-  return plug.verdict === -1 ? '#e0a9a9' : OK;
+  return plug.verdict === -1 || plug.cycling ? '#e0a9a9' : OK;
 }
 
 /** The GAS status bit: off (dim), armed (quiet), or actively boosting (loud). */

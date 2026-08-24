@@ -15,6 +15,49 @@
 
 import type { History } from './types.js';
 
+/**
+ * The last `hours` of a response, older rows dropped.
+ *
+ * Ranges under a day are a WINDOW on the 24 h payload, not a query of their
+ * own. The firmware answers days=1|7|30|60 and nothing else on purpose -- a
+ * malformed question gets an error rather than a plausible answer, which is
+ * the rule that caught `?range=7d` serving ring data under a card label -- and
+ * the 24 h response already holds every row a 6 or 12 hour view needs. Asking
+ * for it again with a new parameter would widen that contract to buy nothing.
+ *
+ * Slices EVERY array on the object, so a series added later cannot be left at
+ * full length and silently drawn against a shorter time axis.
+ */
+export function tail(raw: History, hours: number): History {
+  const ts = raw.ts ?? [];
+  const n = ts.length;
+  if (n === 0) return raw;
+  const want = hours * 3600;
+  const last = ts[n - 1] ?? 0;
+  let from = 0;
+  if (last > 0) {
+    // Timestamped rows: cut by real time, so an outage inside the window
+    // shortens the row count without shortening the span it represents.
+    while (from < n - 1) {
+      const t = ts[from] ?? 0;
+      if (t > 0 && last - t <= want) break;
+      from++;
+    }
+  } else {
+    // Before SNTP every ts is 0 and there is no time to cut by; fall back to
+    // the nominal cadence. Approximate, and the chart already draws
+    // index-proportional until the clock syncs.
+    const step = raw.interval_s > 0 ? raw.interval_s : 300;
+    from = Math.max(0, n - Math.ceil(want / step));
+  }
+  if (from === 0) return raw;
+  const out: Record<string, unknown> = { ...raw };
+  for (const [k, v] of Object.entries(raw)) {
+    if (Array.isArray(v)) out[k] = v.slice(from);
+  }
+  return out as unknown as History;
+}
+
 export interface Series {
   n: number;
   /** Epoch seconds for sample i, or null before SNTP has synced. */
@@ -52,6 +95,15 @@ export interface Series {
   noxr: (number | null)[];
   voc: (number | null)[];  // gas indices; 0 = warming
   nox: (number | null)[];
+  /**
+   * Plug run/stop flips the meter confirmed inside each bucket; null = no
+   * meter or a pre-1.21.0 row. The watts snapshot aliases a cycling fan into
+   * jitter; this is the column that says it happened (net/plug_cycle.h).
+   */
+  flips: (number | null)[];
+  /** The bucket's measured draw range -- the band the power row shades. */
+  wmin: (number | null)[];
+  wmax: (number | null)[];
 }
 
 /**
@@ -187,6 +239,9 @@ export function build(h: History): Series {
     noxr: pad<number | null>(h.nox_raw, n, null),
     voc: pad<number | null>(h.voc, n, null),
     nox: pad<number | null>(h.nox, n, null),
+    flips: pad<number | null>(h.flips, n, null),
+    wmin: pad<number | null>(h.w_min, n, null),
+    wmax: pad<number | null>(h.w_max, n, null),
   };
 }
 

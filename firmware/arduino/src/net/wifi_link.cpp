@@ -8,6 +8,7 @@
 #include <ctime>
 
 #include "config.h"
+#include "net/creds.h"
 #include "system/eventlog.h"
 
 namespace wifi_link {
@@ -81,7 +82,7 @@ void begin() {
   // first rung of the ladder does not get to depend on a default.
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(FAN_HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.begin(creds::wifi_ssid(), creds::wifi_pass());  // NVS-backed, see creds.h
   // Clock stays UTC: every epoch this firmware logs, publishes or compares is
   // UTC and must remain so. TZ is set alongside it purely so localtime_r() is
   // available to the one caller that needs the operator's calendar day --

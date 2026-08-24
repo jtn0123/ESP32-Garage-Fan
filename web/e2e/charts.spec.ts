@@ -10,9 +10,9 @@
 // desk project does not have.
 import { expect, inkedColumns, openConsole, openTip, recordRequests, test } from './harness';
 
-test('the four ranges are offered and 24H starts selected', async ({ page }) => {
+test('the six ranges are offered and 24H starts selected', async ({ page }) => {
   await openConsole(page);
-  await expect(page.locator('#ranges button')).toHaveCount(4);
+  await expect(page.locator('#ranges button')).toHaveCount(6);
   await expect(page.locator('#ranges button[data-d="1"]')).toHaveClass(/on/);
   await expect(page.locator('#chtitle')).toHaveText(/24 HOURS/i);
 });
@@ -36,6 +36,60 @@ for (const [days, title] of [
       .toBeTruthy();
   });
 }
+
+/**
+ * The sub-day ranges are a WINDOW on the 24 h response, not a query of their
+ * own -- the firmware answers days=1|7|30|60 and 400s anything else, on
+ * purpose. So the thing worth pinning is the REQUEST: a 6H button sending
+ * days=0.25 would take a 400 and draw nothing, and one sending days=6 would
+ * silently draw six DAYS under a six-hour title. Neither is visible to a unit
+ * test, which never clicks anything. The slicing maths is covered in
+ * tests/series.test.ts.
+ */
+for (const [d, hours] of [
+  ['0.25', 6],
+  ['0.5', 12],
+] as const) {
+  test(`the ${hours}H range windows the 24 h response instead of asking for it`, async ({
+    page,
+  }) => {
+    await openConsole(page);
+    const fetches = recordRequests(page, /\/api\/history/);
+    await page.locator(`#ranges button[data-d="${d}"]`).click();
+    await expect(page.locator(`#ranges button[data-d="${d}"]`)).toHaveClass(/on/);
+    await expect(page.locator('#chtitle')).toHaveText(new RegExp(`${hours} HOURS`, 'i'));
+    await expect(page.locator('#ranges button.on')).toHaveCount(1);
+    await expect.poll(() => fetches.some((r) => /days=1\b/.test(r.url()))).toBeTruthy();
+    // Never the fraction, and never the hour count read as days.
+    expect(fetches.some((r) => /days=(0\.|6\b|12\b)/.test(r.url()))).toBe(false);
+  });
+
+  test(`the ${hours}H range actually plots its data`, async ({ page }) => {
+    await openConsole(page);
+    await page.locator(`#ranges button[data-d="${d}"]`).click();
+    await expect(page.locator('#chtitle')).toHaveText(new RegExp(`${hours} HOURS`, 'i'));
+    await expect
+      .poll(() => inkedColumns(page, 'cv_t'), {
+        message: `the ${hours}-hour chart is blank`,
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(100);
+    await expect(page.locator('#roT')).toContainText('°');
+    await expect(page.locator('#tcap')).not.toContainText(/could not|no samples/i);
+  });
+}
+
+test('leaving a sub-day range for a wide one asks the device again', async ({ page }) => {
+  // 6H is served by slicing the 24 h payload; 7D is not, and the switch has to
+  // go back to the network rather than window what is already in hand.
+  await openConsole(page);
+  await page.locator('#ranges button[data-d="0.25"]').click();
+  await expect(page.locator('#chtitle')).toHaveText(/6 HOURS/i);
+  const fetches = recordRequests(page, /\/api\/history/);
+  await page.locator('#ranges button[data-d="7"]').click();
+  await expect(page.locator('#chtitle')).toHaveText(/7 DAYS/i);
+  await expect.poll(() => fetches.some((r) => /days=7\b/.test(r.url()))).toBeTruthy();
+});
 
 /**
  * A relabelled chart is not a plotted one.
@@ -358,15 +412,18 @@ test('the range chips are thumb-sized and separated', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await openConsole(page);
   const boxes = await page.locator('#ranges button').evaluateAll((els) =>
-    els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, w: r.width, h: r.height }; }),
+    els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }),
   );
-  expect(boxes).toHaveLength(4);
+  expect(boxes).toHaveLength(6);
   for (const [i, b] of boxes.entries()) {
     expect(b.w, `range chip ${i} is ${b.w} px wide`).toBeGreaterThanOrEqual(44);
     expect(b.h, `range chip ${i} is ${b.h} px tall`).toBeGreaterThanOrEqual(44);
   }
   // Adjacent chips must not share an edge, or one thumb hits two ranges.
+  // Within a row only: the strip wraps at six ranges, and the first chip of a
+  // new line legitimately sits left of the last one above it.
   for (let i = 1; i < boxes.length; i++) {
+    if (boxes[i]!.y !== boxes[i - 1]!.y) continue;
     expect(boxes[i]!.x - (boxes[i - 1]!.x + boxes[i - 1]!.w)).toBeGreaterThanOrEqual(4);
   }
 });

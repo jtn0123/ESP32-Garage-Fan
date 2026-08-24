@@ -11,6 +11,8 @@ import * as api from './api.js';
 import { el, show } from './dom.js';
 import { hoursMinutes, storage } from './format.js';
 import { view } from './state.js';
+import { provisionControl } from './provision.js';
+import { DEFAULT_TOKEN, installUpdate } from './updater.js';
 import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
@@ -22,7 +24,8 @@ export type Row =
   | { kind: 'actions'; label: string; hint: string; actions: Action[] }
   | { kind: 'update'; label: string; hint: string; status: UpdateStatus | null; recheck: () => void }
   | { kind: 'ota'; label: string; hint: string }
-  | { kind: 'panel'; label: string; hint: string };
+  | { kind: 'panel'; label: string; hint: string }
+  | { kind: 'provision'; label: string; hint: string; info: () => DeviceInfo | null };
 
 export interface Action {
   text: string;
@@ -74,7 +77,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
     {
       title: 'AUTO MODE',
       blurb:
-        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles.',
+        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles. Engaging is instant; once running, auto commits for at least 15 minutes before it may drop back.',
       rows: [
         step(
           'Engage above',
@@ -116,7 +119,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
         {
           kind: 'toggle',
           label: 'Gas boost',
-          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger. Needs the SGP41 warmed up — the boost simply stays off without it.',
+          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger, and never before 15 minutes of boosting. Needs the SGP41 warmed up — the boost simply stays off without it.',
           on: s.gas_on,
           toggle: () => d.setConfig(`gason=${s.gas_on ? 0 : 1}`),
         },
@@ -154,8 +157,8 @@ export function buildGroups(d: SettingsDeps): Group[] {
         ),
         text(
           'Outside temperature',
-          'Subscribed topic the yard reading arrives on. A reading older than 30 minutes counts as stale and auto holds.',
-          info?.topic_out ?? '–',
+          'Fetched from open-meteo every 10 minutes and averaged over the last three polls, so one jumpy forecast step cannot move the fan. Older than 30 minutes counts as stale and auto holds.',
+          info?.lat && info?.lon ? `open-meteo · ${info.lat}, ${info.lon}` : 'open-meteo',
         ),
         text(
           'Sample interval',
@@ -177,6 +180,12 @@ export function buildGroups(d: SettingsDeps): Group[] {
           `${s.ip || '–'}${info ? ` · ${info.host}.local` : ''}`),
         text('Command topic', 'Publish a speed 0–12 here to drive the fan from anywhere.',
           info?.topic_set ?? '–'),
+        {
+          kind: 'provision',
+          label: 'Connection',
+          hint: 'WiFi, MQTT and the weather coordinates, stored on the board itself — so a published release image, built without anyone’s passwords, still comes up on your network. Passwords are write-only: blank means unchanged. Saving reboots the controller.',
+          info: () => view.info,
+        },
       ],
     },
     {
@@ -250,8 +259,10 @@ export function buildGroups(d: SettingsDeps): Group[] {
               // Follows the chart's selected range: offering 60 days on the
               // chart while the export silently capped at 30 meant the data
               // you could SEE was not the data you could TAKE.
-              text: `Download CSV (${view.days} d)`,
-              href: `/download.csv?days=${view.days}`,
+              // The export endpoint takes whole days only, so a 6 or 12 hour
+              // view exports the day containing it rather than refusing.
+              text: `Download CSV (${Math.max(1, Math.ceil(view.days))} d)`,
+              href: `/download.csv?days=${Math.max(1, Math.ceil(view.days))}`,
             },
             { text: 'Restart', run: d.restart },
             { text: 'Delete card contents', run: d.purgeCard, danger: true },
@@ -263,7 +274,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
     {
       title: 'UPDATE',
       blurb:
-        'Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.',
+        'One click: the newest release is downloaded by your browser, checked against its published checksum and handed to the controller. Firmware is written to the inactive A/B slot and confirmed only after the new image reaches the broker; an image that never checks in rolls back on its own.',
       rows: [
         {
           kind: 'update',
@@ -275,7 +286,7 @@ export function buildGroups(d: SettingsDeps): Group[] {
         {
           kind: 'ota',
           label: 'Upload firmware',
-          hint: 'Pick the firmware.bin from a release (or from make build), enter the update token, and the board reboots into it.',
+          hint: 'The manual route, for a locally built image or a specific older release: pick the firmware.bin, enter the update token, and the board reboots into it. The token field here also serves the one-click install above.',
         },
       ],
     },
@@ -352,7 +363,52 @@ function control(r: Row): HTMLElement {
       return otaControl();
     case 'panel':
       return panelControl();
+    case 'provision':
+      return provisionControl(r.info);
   }
+}
+
+/**
+ * The one-click install: a button and a progress line that OUTLIVE the paint
+ * cycle. The update row is rebuilt on every state repaint; the OTA row below
+ * learned the hard way that a progress line inside a rebuilt node goes dark
+ * mid-upload. Same fix: built once, reused, and the running install keeps
+ * writing to the same #updmsg.
+ */
+let installBox: HTMLElement | null = null;
+let installing = false;
+
+function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): HTMLElement {
+  if (installBox) return installBox;
+  const box = el('span', { className: 'updinstall' });
+  const go = el('button', { className: 'updbtn', id: 'upd_go', textContent: `Update now` });
+  const msg = el('span', { id: 'updmsg' });
+  go.onclick = () => {
+    if (installing) return;
+    const repo = view.info?.repo;
+    if (!repo) return;
+    const field = document.getElementById('ota_t') as HTMLInputElement | null;
+    const token = field?.value || DEFAULT_TOKEN;
+    installing = true;
+    go.disabled = true;
+    void installUpdate(status, repo, token, {
+      fetch: (u) => fetch(u),
+      upload: api.uploadFirmware,
+      getState: api.getState,
+      state: () => view.state,
+      askToken: () => window.prompt('The controller refused the update token. Enter it to retry:'),
+      say: (t) => (msg.textContent = t),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    })
+      .then((final) => (msg.textContent = final))
+      .finally(() => {
+        installing = false;
+        go.disabled = false;
+      });
+  };
+  box.append(go, msg);
+  installBox = box;
+  return box;
 }
 
 function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLElement {
@@ -373,13 +429,14 @@ function updateControl(status: UpdateStatus | null, recheck: () => void): HTMLEl
   } else if (status.kind === 'available') {
     line.append(el('span', { className: 'updnew', textContent: `${status.latest} available` }));
     line.append(notes(status.release));
-    // Downloads the image to the machine running the browser; installing it
-    // is still the deliberate OTA upload below.
+    // Downloads the image to the machine running the browser, for the manual
+    // route below; the button beside it is the one-click install.
     line.append(el('a', {
       className: 'updlink',
       textContent: 'download .bin',
       href: status.asset.browser_download_url,
     }));
+    line.append(installControl(status));
   } else if (status.kind === 'no-binary') {
     // Not shown as "available": there is nothing the operator can install.
     line.append(el('span', {

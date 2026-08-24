@@ -19,7 +19,8 @@
 namespace sdcard {
 
 void log_sample(time_t now, float t, float h, float p, float out_f, int speed, float batt_v,
-                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox) {
+                int chg, float watts, int32_t voc_raw, int32_t nox_raw, int voc, int nox, int flips,
+                float w_min, float w_max) {
   if (!ok())
     return;
   struct tm tm_now;
@@ -33,17 +34,25 @@ void log_sample(time_t now, float t, float h, float p, float out_f, int speed, f
     mark_unmounted();  // card yanked; re-detect on reboot
     return;
   }
-  char line[144];
+  char line[160];
   // batt_v/chg appended 1.14.23; watts + the four SGP41 columns appended
   // 1.14.47 (plug meter and the air chain). bme_t/bme_rh columns existed
   // 1.14.48-1.15.1 (the dual-thermometer comparison that CONVICTED the
-  // BME280's thermometer of self-heating); rows are back to 13 fields now
-  // that it is barometer-only. read_range parses every historical width.
-  // -999 is the "no reading" sentinel for float columns, -1 for gas.
-  int n = snprintf(line, sizeof(line), "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d\n",
+  // BME280's thermometer of self-heating); rows went back to 13 fields when
+  // it became barometer-only, 1.21.0 appended the 14th (the plug meter's
+  // run/stop flip count for the bucket -- the cycling profile,
+  // net/plug_cycle.h) and 1.22.0 appended the 15th and 16th: the bucket's
+  // draw range, because the single `watts` snapshot is what let a fan
+  // cycling every minute chart as jitter. read_range parses every historical
+  // width -- 14 fields is flips, 15 is the old BME pair, 16 is this one (see
+  // csv_row.h; the width decides, and the two eras never share a card).
+  // -999 is the "no reading" sentinel for float columns, -1 for gas and flips.
+  int n = snprintf(line, sizeof(line),
+                   "%ld,%.2f,%.1f,%.1f,%.2f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%d,%.1f,%.1f\n",
                    (long)now, t, h, isnan(p) ? -999.0f : p, isnan(out_f) ? -999.0f : out_f, speed,
                    isnan(batt_v) ? -999.0f : batt_v, chg, isnan(watts) ? -999.0f : watts,
-                   (long)voc_raw, (long)nox_raw, voc, nox);
+                   (long)voc_raw, (long)nox_raw, voc, nox, flips, isnan(w_min) ? -999.0f : w_min,
+                   isnan(w_max) ? -999.0f : w_max);
   if (n < 0 || n >= static_cast<int>(sizeof(line))) {
     f.close();  // a truncated row would corrupt the CSV for every later reader
     CRUMB_CLEAR();
@@ -172,6 +181,9 @@ uint16_t read_range(time_t cutoff, const Samples& out, uint16_t max_pts) {
         out.nox_raw[kept] = row.nox_raw;
         out.voc[kept] = row.voc;
         out.nox[kept] = row.nox;
+        out.flips[kept] = row.flips;
+        out.w_min[kept] = row.w_min;
+        out.w_max[kept] = row.w_max;
         kept++;
       }
       f.close();

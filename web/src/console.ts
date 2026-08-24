@@ -212,15 +212,14 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}.`;
   }
   if (delta === null) {
-    const topic = view.info?.topic_out ? ` on ${view.info.topic_out}` : '';
-    return `No outdoor reading yet — auto holds the last speed rather than guessing. The yard temperature arrives over MQTT${topic}.`;
+    return 'No outdoor reading yet — auto holds the last speed rather than guessing. The fan fetches the outside temperature from open-meteo every 10 minutes.';
   }
   if (!s.auto) {
     return `Auto is off — the fan is at ${s.speed > 0 ? `speed ${s.speed}` : 'off'} because you set it by hand. Turn auto back on to let the differential drive it again.`;
   }
   const gap = delta.toFixed(1);
   if (delta >= s.on_f) {
-    return `Garage is ${gap}°F hotter than the yard — past the +${s.on_f}° engage point, so auto is holding speed ${s.auto_max}. It falls back to ${rest} when the gap drops under +${s.off_f}°.`;
+    return `Garage is ${gap}°F hotter than the yard — past the +${s.on_f}° engage point, so auto is holding speed ${s.auto_max}. It falls back to ${rest} when the gap drops under +${s.off_f}°, though never before 15 minutes of running.`;
   }
   if (delta <= s.off_f) {
     return `Garage is only ${gap}°F hotter than the yard — under the +${s.off_f}° release point, so auto has dropped the fan to ${rest}. It engages speed ${s.auto_max} again above +${s.on_f}°.`;
@@ -379,11 +378,28 @@ export function paint(next?: DeviceState): void {
   // the fan is not doing what it was told (it ran at full power for a day
   // while everything here honestly said OFF, 2026-08-13).
   const warn = $('plugwarn');
-  if (s.plug && s.plug.verdict === -1 && !stale) {
+  if (s.plug && s.plug.cycling && !stale) {
+    // The more specific finding outranks the plain disagreement: the meter
+    // saw the fan stop and restart repeatedly while ONE speed was held (the
+    // 2026-08-20 night: nine hours at a held speed 10, ~4 W most of the time
+    // with bursts at the speed-12 level). The controller's output did not
+    // change; the fan is not honouring it.
+    warn.textContent =
+      `The fan is cycling on and off: the watt meter saw it stop and restart ` +
+      `${s.plug.flips} times in the last 10 minutes while ` +
+      `${s.speed > 0 ? `speed ${s.speed}` : 'off'} was held steady (reading ${s.plug.w.toFixed(1)} W now). ` +
+      'The controller did not change its output — the fan is not following it. ' +
+      'Set the fan OFF here, power-cycle it at the plug, then set the speed again; ' +
+      'if it comes back, the control cable or the fan\'s own controller needs a look.';
+    show(warn, true);
+  } else if (s.plug && s.plug.verdict === -1 && !stale) {
+    const expect = s.plug.expect_w === null ? '' : ` (speed ${s.speed} draws ${s.plug.expect_w.toFixed(1)} W)`;
+    const looks =
+      s.plug.implied_spd >= 0 ? ` That is closer to speed ${s.plug.implied_spd}.` : '';
     warn.textContent =
       `The watt meter reads ${s.plug.w.toFixed(1)} W, which does not match ` +
-      `${s.speed > 0 ? `speed ${s.speed}` : 'off'} — the fan may not be following commands. ` +
-      'Check the control cable at the fan port.';
+      `${s.speed > 0 ? `speed ${s.speed}` : 'off'}${expect} — the fan may not be following ` +
+      `commands.${looks} Check the control cable at the fan port.`;
     show(warn, true);
   } else {
     show(warn, false);

@@ -18,13 +18,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 
 #include "config.h"
+#include "net/creds.h"
 #include "generated_config.h"
 #include "sensors/climate.h"
+#include "sensors/outdoor.h"
 #include "system/eventlog.h"
-#include "system/timeutil.h"
 
 namespace weather {
 namespace {
@@ -35,6 +35,7 @@ constexpr uint32_t kFirstPollDelayMs = 25000;  // let WiFi/MQTT/SD settle first
 
 uint32_t g_last_ms = 0;
 bool g_ever = false;
+sensors::BlindEdge g_blind;  // one tape line each way, never per poll
 
 // GET the current temperature; NAN on any failure, with a short reason in
 // `err` -- the MQTT feed died silently for five days and nobody could tell,
@@ -46,12 +47,18 @@ float fetch_f(uint32_t* dur_ms, char* err, size_t err_cap) {
   float out = NAN;
   snprintf(err, err_cap, "connect failed");
   if (net.connect("api.open-meteo.com", 80)) {
-    net.print("GET /v1/forecast?latitude=" WEATHER_LAT "&longitude=" WEATHER_LON
-              "&current=temperature_2m&temperature_unit=fahrenheit HTTP/1.1\r\n"
-              "Host: api.open-meteo.com\r\n"
-              "User-Agent: garage-fan/" FW_VERSION
-              "\r\n"
-              "Connection: close\r\n\r\n");
+    // Coordinates are runtime values now (creds.h), so the request line is
+    // assembled rather than concatenated at compile time.
+    char req[256];
+    snprintf(req, sizeof(req),
+             "GET /v1/forecast?latitude=%s&longitude=%s"
+             "&current=temperature_2m&temperature_unit=fahrenheit HTTP/1.1\r\n"
+             "Host: api.open-meteo.com\r\n"
+             "User-Agent: garage-fan/" FW_VERSION
+             "\r\n"
+             "Connection: close\r\n\r\n",
+             creds::weather_lat(), creds::weather_lon());
+    net.print(req);
     // Small bounded read: headers + body fit comfortably; anything beyond the
     // buffer is truncated, and the field either parses or it does not.
     char buf[1536];
@@ -97,7 +104,7 @@ float fetch_f(uint32_t* dur_ms, char* err, size_t err_cap) {
 
 }  // namespace
 
-bool enabled() { return WEATHER_LAT[0] != '\0' && WEATHER_LON[0] != '\0'; }
+bool enabled() { return creds::weather_lat()[0] != '\0' && creds::weather_lon()[0] != '\0'; }
 
 void tick() {
   if (!enabled() || WiFi.status() != WL_CONNECTED)
@@ -117,11 +124,24 @@ void tick() {
   // Same plausibility band as the MQTT outdoor path in mqtt_link.
   if (!isnan(f) && f > -60 && f < 150) {
     climate::set_outside_f(f);
-    if (time_synced())
-      climate::set_outdoor_epoch(time(nullptr));
     eventlog::log("wx", "%.1fF in %lums", f, (unsigned long)dur);
   } else {
     eventlog::log("wx", "FAILED after %lums: %s", (unsigned long)dur, err);
+  }
+  // This is the fan's only outdoor source now, so the moment it stops being
+  // usable has to be legible. Auto already does the safe thing (NAN holds
+  // speed and latch), but it did it silently, and a fan that quietly stopped
+  // responding to the weather is exactly the five-day failure this module
+  // was written to end. Edge-triggered: one line each way, not per poll.
+  switch (g_blind.update(climate::outside_stale())) {
+    case sensors::BlindEdge::kWentBlind:
+      eventlog::log("wx", "BLIND: no usable reading, auto holds");
+      break;
+    case sensors::BlindEdge::kRestored:
+      eventlog::log("wx", "reading restored, auto resumes");
+      break;
+    case sensors::BlindEdge::kNone:
+      break;
   }
   if (dur > 5000)
     eventlog::log("slow", "wx fetch %lums", (unsigned long)dur);
