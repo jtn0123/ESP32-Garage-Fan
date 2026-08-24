@@ -37,14 +37,21 @@ const body = readFileSync(resolve(SRC, 'body.html'), 'utf8').trim();
 // Cheap, safe CSS minification: strip comments and collapse the whitespace the
 // authored file uses for readability. Deliberately not a full CSS parser --
 // this only has to handle the one stylesheet in this repo.
+// No regex for the whitespace pass. Both /\s*\n\s*/ and the [ \t]*\n[ \t]*
+// that first replaced it are quadratic: a leading unbounded quantifier with a
+// literal after it re-tries at every position in a run of spaces that has no
+// newline, and the authored stylesheet is full of those. Trimming line by line
+// is linear, does the same job, and does not have to be reasoned about.
 const cssMin = css
   .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/\s*\n\s*/g, '\n')
-  .replace(/\n+/g, '\n')
+  .split('\n')
+  .map((line) => line.trim())
+  .filter((line) => line !== '')
+  .join('\n')
   .trim();
 
 const html = `<!doctype html>
-<html><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0b0e13">
 <link rel="manifest" href="/manifest.json">
