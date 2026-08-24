@@ -90,9 +90,27 @@ struct FanGasCfg {
   int off_index;    // release when VOC index <= this (hysteresis gap)
 };
 
-// 250/200: comfortably past normal drift (the index recenters on 100), wide
-// enough apart that cooking-adjacent wobble does not flap the fan.
-inline constexpr FanGasCfg kFanGasDefaults{true, 6, 250, 200};
+// How far below the engage index the release sits. 100, not the original 50.
+//
+// A 50-point gap put the release ABOVE the level the fan settles the air at,
+// so the boost crossed it on the way down while it was still winning, quit,
+// and the air rebounded over the engage threshold within five minutes. The
+// 2026-08-23 tape: eight engage/release pairs, every one ending at exactly
+// the 15-minute dwell rather than at clean air, releasing at index 121-191
+// and re-engaging 8-25 minutes later. Fitted over 2106 five-minute samples of
+// the device's own history, the air settles toward index 84 while the fan
+// blows and climbs toward 212 while it rests -- so 150 is reachable and 200
+// was never a resting point, just a number the decay passed through.
+//
+// The cost is deliberate: runs get longer. Of those eight cycles, three would
+// still have released inside the dwell, and five would have run on past it to
+// reach 150. Fewer, deeper cycles is the trade.
+inline constexpr int kGasReleaseGap = 100;
+
+// 250 engage / 150 release: comfortably past normal drift (the index recenters
+// on 100), and far enough apart that the fan reaches the release point by
+// cleaning the air rather than by passing through it.
+inline constexpr FanGasCfg kFanGasDefaults{true, 6, 250, 250 - kGasReleaseGap};
 
 // The floor to enforce this tick, 0 when none. `gas_high` is the hysteresis
 // latch, owned by the caller across ticks.
