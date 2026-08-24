@@ -16,6 +16,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "net/plug_window.h"
+
 namespace plug {
 
 /** True when HA_URL and HA_TOKEN were baked in and the poller is active. */
@@ -46,6 +48,48 @@ int verdict();
 
 /** Expected draw for a speed, from the measured baseline table. */
 float expected_w(int speed);
+
+/**
+ * The speed the MEASURED draw implies, or -1 with no reading.
+ *
+ * The number the 2026-08-20 tape never carried: the fan pulled ~45 W all
+ * night -- the speed-12 level -- while every line reported the commanded 10.
+ */
+int measured_speed();
+
+/**
+ * The cycling profile (net/plug_cycle.h): true while the meter shows the fan
+ * switching itself on and off -- four or more confirmed run/stop flips in ten
+ * minutes -- with ONE speed held the whole time. Distinct from verdict -1,
+ * which is "steadily wrong": on 2026-08-20 the fan cycled all night at a
+ * held speed 10 and the verdict only flapped.
+ */
+bool cycling();
+
+/** Confirmed run/stop flips inside the last ten minutes; 0 when steady. */
+uint8_t flips();
+
+/** What the meter saw across one 5-minute history bucket. */
+struct Bucket {
+  int8_t flips;  // confirmed run/stop flips; -1 = no meter / never answered
+  float min_w;   // lowest and highest reading in the bucket, NAN when none.
+  float max_w;   // The chart draws the RANGE: a single snapshot per bucket is
+                 // what aliased the 2026-08-20 cycling into jitter.
+};
+
+/**
+ * The bucket since the previous call, and start a new one. Called by the
+ * 5-minute sample so the history row records what happened BETWEEN rows
+ * rather than one instant of it.
+ */
+Bucket take_bucket();
+
+/** Seconds between meter polls -- the trace's sample spacing. */
+uint16_t poll_interval_s();
+
+/** Raw polls behind /api/plugtrace: 15 min of 15 s samples, oldest first. */
+uint8_t trace_count();
+Reading trace_at(uint8_t i);
 
 /**
  * The retained kTopicAlert payload for the CURRENT verdict:

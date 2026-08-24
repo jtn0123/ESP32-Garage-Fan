@@ -63,7 +63,16 @@ from mock_panel import (  # noqa: E402
     display_frame,
     qr_v1_encode,  # noqa: F401  (re-exported for tests/test_qr_v1.py)
 )
-from mock_state import BOOT, DEVICE, SCEN, SCEN_SPEC, STATE, STATS, coerce_scen  # noqa: E402
+from mock_state import (  # noqa: E402
+    BOOT,
+    DEVICE,
+    PLUG_BASELINE,
+    SCEN,
+    SCEN_SPEC,
+    STATE,
+    STATS,
+    coerce_scen,
+)
 
 # What parse_qs hands every handler: each query key to its list of values.
 Query = dict[str, list[str]]
@@ -196,11 +205,38 @@ class H(BaseHTTPRequestHandler):
             STATE["plug"] = None
         elif mode == "bad":
             # The failure this exists to catch: commanded off, meter says full.
-            STATE["plug"] = {"w": 43.5, "v": 120.9, "age_s": 3, "verdict": -1}
+            STATE["plug"] = {
+                "w": 43.5, "v": 120.9, "age_s": 3, "verdict": -1, "cycling": False, "flips": 0,
+                "expect_w": PLUG_BASELINE[min(max(0, int(STATE["speed"])), 12)],
+                "implied_spd": 12,
+            }  # fmt: skip
+        elif mode == "cycling":
+            # The 2026-08-20 night: one speed held, the meter alternating between
+            # the fan stopped (~4 W) and flat out (~45 W). The reading flips
+            # every 30 s of wall clock so a watching console sees it move.
+            running = int(time.time() / 30) % 2 == 0
+            STATE["plug"] = {
+                "w": 45.1 if running else 4.3,
+                "v": 120.9,
+                "age_s": 3,
+                "verdict": -1,
+                "cycling": True,
+                "flips": 5,
+                "expect_w": PLUG_BASELINE[min(max(0, int(STATE["speed"])), 12)],
+                "implied_spd": 12 if running else 0,
+            }
         else:
-            speed = max(0, int(STATE["speed"]))
-            base = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
-            STATE["plug"] = {"w": base[min(speed, 12)], "v": 120.9, "age_s": 3, "verdict": 1}
+            speed = min(max(0, int(STATE["speed"])), 12)
+            STATE["plug"] = {
+                "w": PLUG_BASELINE[speed],
+                "v": 120.9,
+                "age_s": 3,
+                "verdict": 1,
+                "cycling": False,
+                "flips": 0,
+                "expect_w": PLUG_BASELINE[speed],
+                "implied_spd": speed,
+            }
         return self._json(200, STATE)
 
     def _device(self, _query: Query) -> None:
@@ -442,6 +478,39 @@ class H(BaseHTTPRequestHandler):
         # what the console's error path should be exercised against.
         return self._json(403, {"error": "bad token"})
 
+    def _plugtrace(self, query: Query) -> None:
+        """The raw meter polls, as net/web_debug serves them.
+
+        Token-guarded like its neighbours in web_debug.cpp. Under the
+        `cycling` scenario the samples alternate stopped/full the way the
+        2026-08-20 night did, so a reader of this endpoint sees the shape the
+        five-minute history row cannot hold.
+        """
+        if not self._token_ok(query):
+            # A silent return would close the socket with no response at all,
+            # which reads to a client as "the device died" rather than "you
+            # need a token" -- the guard has to answer.
+            return self._json(403, {"error": "bad token"})
+        cycling = SCEN["plug"] == "cycling"
+        speed = min(max(0, int(STATE["speed"])), 12)
+        watts: list[float | None] = []
+        cls: list[int] = []
+        for i in range(60):
+            if SCEN["plug"] == "none":
+                watts.append(None)
+                cls.append(0)
+            elif cycling:
+                running = i % 2 == 0
+                watts.append(45.1 if running else 4.3)
+                cls.append(1 if running else -1)
+            else:
+                watts.append(PLUG_BASELINE[speed])
+                cls.append(1 if speed else -1)
+        return self._json(
+            200,
+            {"poll_s": 15, "n": len(watts), "w": watts, "spd": [speed] * len(watts), "cls": cls},
+        )
+
     READS = {
         "/": _page,
         "/index.html": _page,
@@ -458,6 +527,8 @@ class H(BaseHTTPRequestHandler):
         # the token, the WiFi PSK and the MQTT password. See handle_crash().
         "/api/crash": _needs_token,
         "/api/crash.bin": _needs_token,
+        # Diagnostic reads, token-guarded like the rest of web_debug.cpp.
+        "/api/plugtrace": _plugtrace,
     }
     WRITES = {
         "/api/set": _set,

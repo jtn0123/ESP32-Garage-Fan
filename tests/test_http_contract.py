@@ -160,6 +160,78 @@ def test_out_of_range_speed_is_refused(mock):
         assert status == 400, f"speed={bad!r} should be refused"
 
 
+def test_a_cycling_fan_is_reported_distinctly_from_a_disagreement(mock):
+    """The cycling profile's wire shape (net/plug_cycle.h via PlugState).
+
+    `cycling` and `flips` ride beside the verdict so the console can say "the
+    fan is switching itself on and off" instead of "the meter does not match",
+    which is what the 2026-08-20 night looked like through the verdict alone.
+    """
+    try:
+        scen(plug="cycling")
+        plug = get_json("/api/state")["plug"]
+        assert plug["cycling"] is True
+        assert plug["flips"] >= 4  # onset needs four confirmed flips
+        assert plug["verdict"] == -1
+        # The history carries the per-bucket count so the chart can tint it.
+        h = get_json("/api/history?days=1")
+        assert len(h["flips"]) == len(h["ts"])
+        assert any((f or 0) > 0 for f in h["flips"][-24:])
+        assert all(f is None or f >= 0 for f in h["flips"])
+        # And the range that makes it legible: one snapshot per five minutes
+        # is what drew nine hours of cycling as jitter.
+        assert len(h["w_min"]) == len(h["w_max"]) == len(h["ts"])
+        assert any(
+            lo is not None and hi is not None and hi - lo > 10
+            for lo, hi in zip(h["w_min"][-24:], h["w_max"][-24:])
+        ), "a cycling bucket must record a wide draw range"
+    finally:
+        scen(plug="ok")
+    plug = get_json("/api/state")["plug"]
+    assert plug["cycling"] is False
+    assert plug["flips"] == 0
+    assert all(not (f or 0) for f in get_json("/api/history?days=1")["flips"])
+
+
+def test_the_state_says_what_the_speed_should_draw(mock):
+    """`45.1 W` means nothing on its own.
+
+    expect_w and implied_spd ride WITH the reading so the console (and a
+    person reading /api/state over curl at 3 a.m.) can see "measured 45, the
+    commanded speed draws 30, that looks like speed 12" without a lookup
+    table in their head. The 2026-08-20 tape carried only the commanded
+    number and the raw watts, which is why nine hours of it read as noise.
+    """
+    req("/api/set?speed=9", "POST")
+    plug = get_json("/api/state")["plug"]
+    assert plug["expect_w"] == pytest.approx(plug["w"], abs=0.6)
+    assert plug["implied_spd"] == 9
+
+
+def test_the_raw_meter_trace_is_served_and_guarded(mock):
+    """/api/plugtrace: the shape an episode has, which no log line can hold.
+
+    Token-guarded like the rest of web_debug.cpp, and parallel arrays of the
+    same length -- a trace whose columns disagree would pair one poll's watts
+    with another's speed.
+    """
+    status, _ = req("/api/plugtrace")
+    assert status == 403, "the trace must be token-guarded like its neighbours"
+    tr = get_json("/api/plugtrace?token=iliving-ota")
+    assert tr["poll_s"] == 15
+    assert tr["n"] == len(tr["w"]) == len(tr["spd"]) == len(tr["cls"])
+    assert all(c in (-1, 0, 1) for c in tr["cls"])
+    try:
+        scen(plug="cycling")
+        cyc = get_json("/api/plugtrace?token=iliving-ota")
+        # Alternating stopped/running is the signature the 5-minute row cannot
+        # show: the samples must actually swing, not sit at one level.
+        assert min(cyc["w"]) < 10 < max(cyc["w"])
+        assert 1 in cyc["cls"] and -1 in cyc["cls"]
+    finally:
+        scen(plug="ok")
+
+
 # ------------------------------------------------------------------ history
 
 

@@ -200,15 +200,21 @@ static void a_null_or_zero_buffer_is_survivable() {
 
 static void the_fault_banner_outranks_the_mode() {
   char b[16];
-  display_layout::banner_status_text(true, 1, b, sizeof(b));
+  display_layout::banner_status_text(true, 1, false, b, sizeof(b));
   TEST_ASSERT_EQUAL_STRING("AUTO", b);
-  display_layout::banner_status_text(false, 0, b, sizeof(b));
+  display_layout::banner_status_text(false, 0, false, b, sizeof(b));
   TEST_ASSERT_EQUAL_STRING("MANUAL", b);
   // The watt meter calling the fan a liar outranks whoever is driving.
-  display_layout::banner_status_text(true, -1, b, sizeof(b));
+  display_layout::banner_status_text(true, -1, false, b, sizeof(b));
   TEST_ASSERT_EQUAL_STRING("FAN FAULT", b);
-  display_layout::banner_status_text(false, -1, b, sizeof(b));
+  display_layout::banner_status_text(false, -1, false, b, sizeof(b));
   TEST_ASSERT_EQUAL_STRING("FAN FAULT", b);
+  // And the cycling profile outranks the plain fault: it is the more
+  // specific finding, and the verdict flaps underneath it while a fan cycles.
+  display_layout::banner_status_text(true, -1, true, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("FAN CYCLING", b);
+  display_layout::banner_status_text(true, 1, true, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("FAN CYCLING", b);
 }
 
 // Formatter only: the freshness gate lives in display.cpp's compose(),

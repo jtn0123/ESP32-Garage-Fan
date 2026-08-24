@@ -100,13 +100,23 @@ void state_json(char* out, size_t cap) {
   }
   // The watt meter on the fan's supply, or null when the poller is disabled
   // or has never read. verdict: 1 agree, -1 disagree, 0 cannot say.
-  char plugs[112];
+  char plugs[224];
   if (plug::enabled() && plug::age_s() >= 0) {
     char vs[16] = "null";
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
-    snprintf(plugs, sizeof(plugs), "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d}",
-             plug::watts(), vs, (long)plug::age_s(), plug::verdict());
+    // expect_w and implied_spd travel WITH the reading: "45.1 W" means
+    // nothing on its own, and beside "should be 30.2 at speed 10" it means
+    // everything. Null while a raw duty is driven -- there is no table entry.
+    char ew[16] = "null";
+    const float expect = plug::expected_w(fan::speed());
+    if (!isnan(expect))
+      snprintf(ew, sizeof(ew), "%.1f", expect);
+    snprintf(plugs, sizeof(plugs),
+             "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d," WK_CYCLING "%s," WK_FLIPS
+             "%u," WK_EXPECT_W "%s," WK_IMPLIED_SPD "%d}",
+             plug::watts(), vs, (long)plug::age_s(), plug::verdict(),
+             plug::cycling() ? "true" : "false", plug::flips(), ew, plug::measured_speed());
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }
@@ -183,11 +193,11 @@ static void handle_device() {
   snprintf(out, sizeof(out),
            "{" WK_ID "\"%s-%02x%02x%02x\"," WK_HOST "\"%s\"," WK_REPO "\"%s\"," WK_BROKER
            "\"%s:%u\"," WK_SSID "\"%s\"," WK_MQTT_USER "\"%s\"," WK_LAT "\"%s\"," WK_LON
-           "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US "%u," WK_SAMPLE_S
-           "%lu," WK_HIGH_US "[%s]}",
+           "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_PERIOD_US "%u," WK_SAMPLE_S "%lu," WK_HIGH_US
+           "[%s]}",
            FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host,
-           (unsigned)creds::mqtt_port(), ssid, user, lat, lon, kTopicSet, kTopicOutdoor,
-           (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000), high);
+           (unsigned)creds::mqtt_port(), ssid, user, lat, lon, kTopicSet, (unsigned)kPeriodUs,
+           (unsigned long)(kSampleMs / 1000), high);
   g_http.send(200, "application/json", out);
 }
 

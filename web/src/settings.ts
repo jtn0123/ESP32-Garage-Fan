@@ -157,8 +157,8 @@ export function buildGroups(d: SettingsDeps): Group[] {
         ),
         text(
           'Outside temperature',
-          'Subscribed topic the yard reading arrives on. A reading older than 30 minutes counts as stale and auto holds.',
-          info?.topic_out ?? '–',
+          'Fetched from open-meteo every 10 minutes and averaged over the last three polls, so one jumpy forecast step cannot move the fan. Older than 30 minutes counts as stale and auto holds.',
+          info?.lat && info?.lon ? `open-meteo · ${info.lat}, ${info.lon}` : 'open-meteo',
         ),
         text(
           'Sample interval',
@@ -259,8 +259,10 @@ export function buildGroups(d: SettingsDeps): Group[] {
               // Follows the chart's selected range: offering 60 days on the
               // chart while the export silently capped at 30 meant the data
               // you could SEE was not the data you could TAKE.
-              text: `Download CSV (${view.days} d)`,
-              href: `/download.csv?days=${view.days}`,
+              // The export endpoint takes whole days only, so a 6 or 12 hour
+              // view exports the day containing it rather than refusing.
+              text: `Download CSV (${Math.max(1, Math.ceil(view.days))} d)`,
+              href: `/download.csv?days=${Math.max(1, Math.ceil(view.days))}`,
             },
             { text: 'Restart', run: d.restart },
             { text: 'Delete card contents', run: d.purgeCard, danger: true },

@@ -12,9 +12,11 @@
 #include <cstring>
 
 #include "config.h"
-#include "fan/control.h"
 #include "generated_config.h"
 #include "net/mqtt_link.h"
+#include "fan/control.h"
+#include "net/plug_cycle.h"
+#include "net/plug_window.h"
 #include "system/eventlog.h"
 
 namespace plug {
@@ -50,6 +52,123 @@ int g_verdict = 0;
 int g_bad_streak = 0;
 uint8_t g_fetch_fails = 0;  // consecutive failed polls; the module that exists
                             // to catch silent faults must not fail silently
+
+// The cycling profile. Fed every poll the verdict sees (and the ones it
+// declines), because its whole value is noticing a pattern the per-poll
+// verdict cannot: the fan stopping and restarting while one speed is held.
+CycleDetector g_cycle;
+// After onset, one trace line per poll for this many polls, so the tape
+// carries the shape of the first five minutes (reading + the control pad as
+// the chip sees it) and not just the headline.
+constexpr uint8_t kTracePolls = 20;
+uint8_t g_trace_left = 0;
+// A heartbeat every 30 min while an episode lasts: "still cycling" with the
+// running totals, so a long night reads as one story rather than a silence.
+constexpr uint16_t kBeatPolls = 120;
+uint16_t g_beat = 0;
+
+/** The table speed whose baseline is nearest a reading -- "45 W is ~speed 12". */
+int implied_speed(float w) { return plug::nearest_speed(kBaselineW, 13, w); }
+
+// The tape holds 24 lines in RAM, so telemetry buys its place with DATA PER
+// LINE, not with more lines: one `plug window ...` every 5 minutes carrying
+// the range, the implied speed and the counts (plug_window.h). g_bucket is
+// the same fold on the history sample's clock, and g_trace is the raw
+// 15-minute record that costs the tape nothing because it lives behind
+// /api/plugtrace instead.
+constexpr uint8_t kWindowPolls = 5 * 60 * 1000 / kPollMs;  // 20 polls = 5 min
+Window g_window;
+Window g_bucket;
+Trace<60> g_trace;
+uint8_t g_window_polls = 0;
+
+/** The 5-minute telemetry line, plus a loud one when the pad disagrees. */
+void log_window(int speed) {
+  float pad_pct = 0;
+  uint32_t edges = 0;
+  fan::probe_pad(&pad_pct, &edges);
+  char msg[kLogMsgCap];
+  format_window_line(msg, sizeof(msg), g_window, speed, static_cast<int>(pad_pct + 0.5f),
+                     implied_speed(g_window.mean()));
+  eventlog::log("plug", "window %s", msg);
+  // The control line is fire-and-forget, so "is the chip still driving it"
+  // has to be ASKED. Reported only on a real mismatch: a periodic all-clear
+  // would cost a line every five minutes to say nothing happened.
+  const uint16_t want_us = fan::commanded_high_us();
+  const int want_pct = static_cast<int>(100.0f * want_us / kPeriodUs + 0.5f);
+  const int got_pct = static_cast<int>(pad_pct + 0.5f);
+  const int off_by = got_pct > want_pct ? got_pct - want_pct : want_pct - got_pct;
+  if (off_by > 5)
+    eventlog::log("fan", "pad MISMATCH want=%d%% got=%d%% edges=%lu high_us=%u", want_pct, got_pct,
+                  (unsigned long)edges, want_us);
+  g_window.reset();
+  g_window_polls = 0;
+}
+
+/**
+ * Read the control pad back and put it on the tape beside the meter's
+ * testimony. This is the one line that separates "the chip stopped driving
+ * the line" from "the fan stopped obeying it": a live pad shows ~84 % high
+ * and six edges per 30 ms at speed 10; a dead one shows 0 or 100 and none.
+ */
+void log_pad(const char* tag) {
+  float high_pct = 0;
+  uint32_t edges = 0;
+  fan::probe_pad(&high_pct, &edges);
+  const uint16_t want = fan::commanded_high_us();
+  eventlog::log("fan", "%s pad high=%.1f%% want=%.1f%% edges=%lu/30ms high_us=%u", tag,
+                static_cast<double>(high_pct), 100.0 * want / kPeriodUs, (unsigned long)edges,
+                want);
+}
+
+void publish_current_alert() {
+  char alert[160];
+  alert_json(alert, sizeof(alert));
+  mqtt_link::publish_alert(alert);
+}
+
+/** What the cycling profile decided this poll, onto the tape and the broker. */
+void on_cycle_event(CycleEvent ev, int speed) {
+  if (ev == CycleEvent::kOnset) {
+    eventlog::log("plug",
+                  "CYCLING speed=%d flips=%u/10min now=%.1fW(~speed %d) -- the fan is "
+                  "switching on and off while the speed is held",
+                  speed, g_cycle.flips_in_window(), g_watts, implied_speed(g_watts));
+    log_pad("cycling");
+    g_trace_left = kTracePolls;
+    g_beat = 0;
+    publish_current_alert();
+    return;
+  }
+  if (ev == CycleEvent::kEnded) {
+    const unsigned stopped_pct = g_cycle.polls ? 100u * g_cycle.stop_polls / g_cycle.polls : 0;
+    eventlog::log(
+        "plug", "cycling ended speed=%d after %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
+        speed, static_cast<unsigned>(g_cycle.polls * (kPollMs / 1000) / 60), g_cycle.flips_total,
+        stopped_pct, g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
+    g_trace_left = 0;
+    publish_current_alert();
+    return;
+  }
+  if (!g_cycle.cycling)
+    return;
+  if (g_trace_left) {
+    g_trace_left--;
+    float high_pct = 0;
+    uint32_t edges = 0;
+    fan::probe_pad(&high_pct, &edges);
+    eventlog::log("plug", "trace w=%.1f pad=%.1f%%/%lu", g_watts, static_cast<double>(high_pct),
+                  (unsigned long)edges);
+  }
+  if (++g_beat >= kBeatPolls) {
+    g_beat = 0;
+    const unsigned stopped_pct = g_cycle.polls ? 100u * g_cycle.stop_polls / g_cycle.polls : 0;
+    eventlog::log(
+        "plug", "still cycling speed=%d %u min flips=%u stopped=%u%% peak=%.1fW trough=%.1fW",
+        speed, static_cast<unsigned>(g_cycle.polls * (kPollMs / 1000) / 60), g_cycle.flips_total,
+        stopped_pct, g_cycle.peak_w, g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
+  }
+}
 
 /** GET one entity's "state" as a float; NAN on any failure. */
 float fetch_state(const char* entity) {
@@ -114,19 +233,42 @@ void judge() {
     g_speed_since_ms = millis();
     g_bad_streak = 0;
   }
-  if (!g_ever_read || millis() - g_read_ms > kStaleMs || millis() - g_speed_since_ms < kSettleMs ||
-      speed < 0 || speed > 12 || isnan(g_watts)) {
+  const bool in_table = speed >= 0 && speed <= 12;
+  const bool fresh = g_ever_read && millis() - g_read_ms <= kStaleMs && !isnan(g_watts);
+  const bool settled = millis() - g_speed_since_ms >= kSettleMs;
+  // The cycling profile sees EVERY poll, decidable or not: its window is
+  // wall-clock, and it applies the same settle and freshness gates itself.
+  const uint8_t flips_before = g_cycle.bucket_flips;
+  on_cycle_event(
+      g_cycle.poll(speed, in_table ? kBaselineW[speed] : NAN, fresh ? g_watts : NAN, settled),
+      speed);
+  // Telemetry sees every poll too, and BEFORE the verdict's early returns:
+  // it records what the meter said, not what the verdict made of it. The
+  // window feeds the 5-minute line, the bucket feeds the history row, the
+  // trace feeds /api/plugtrace.
+  //
+  // The class here is this READING's band (plug_cycle.h's classify), not the
+  // detector's debounced state: the counts are meant to say how many polls
+  // looked stopped, and the debounced state holds its last value through the
+  // mid-band readings that are exactly what a cycling fan produces.
+  const float w = fresh ? g_watts : NAN;
+  const int8_t cls = classify(w, in_table ? kBaselineW[speed] : NAN);
+  g_window.feed(w, cls);
+  g_bucket.feed(w, cls);
+  g_trace.push(encode_reading(w, speed, cls));
+  if (g_cycle.bucket_flips > flips_before)
+    g_window.add_flips(static_cast<uint16_t>(g_cycle.bucket_flips - flips_before));
+  if (++g_window_polls >= kWindowPolls)
+    log_window(speed);
+  if (!fresh || !settled || !in_table) {
     // Falling from disagreement to CANNOT-SAY must replace the retained
     // alert too, or a stale "plug_disagree" keeps speaking for a meter that
     // stopped answering. It becomes "unknown", not "ok": silence is not
     // agreement.
     const bool was_disagree = g_verdict == -1;
     g_verdict = 0;
-    if (was_disagree) {
-      char alert[128];
-      alert_json(alert, sizeof(alert));
-      mqtt_link::publish_alert(alert);
-    }
+    if (was_disagree)
+      publish_current_alert();
     return;
   }
   const float e = kBaselineW[speed];
@@ -141,18 +283,27 @@ void judge() {
   // fell out" -- exactly the failure that ran the fan unnoticed for a day on
   // 2026-08-13 -- and a Home Assistant automation can only act on it if the
   // device says it out loud.
+  //
+  // Not while the cycling profile holds, though: a cycling fan flips this
+  // verdict every minute or two, and 87 DISAGREE/agree lines in one night
+  // (2026-08-20) said less than the one CYCLING line now does. The episode's
+  // own onset/trace/heartbeat/ended lines and the plug_cycling alert carry
+  // the story; the verdict keeps updating silently underneath.
+  const bool quiet = g_cycle.cycling;
   if (next == -1 && g_verdict != -1) {
-    eventlog::log("plug", "DISAGREE speed=%d expect=%.1fW measured=%.1fW", speed, e, g_watts);
-    char alert[128];
     g_verdict = next;
-    alert_json(alert, sizeof(alert));
-    mqtt_link::publish_alert(alert);
+    if (!quiet) {
+      eventlog::log("plug", "DISAGREE speed=%d expect=%.1fW measured=%.1fW(~sp%d)", speed, e,
+                    g_watts, implied_speed(g_watts));
+      publish_current_alert();
+    }
   } else if (next == 1 && g_verdict == -1) {
-    eventlog::log("plug", "agree again speed=%d measured=%.1fW", speed, g_watts);
-    char alert[128];
     g_verdict = next;
-    alert_json(alert, sizeof(alert));
-    mqtt_link::publish_alert(alert);
+    if (!quiet) {
+      eventlog::log("plug", "agree again speed=%d measured=%.1fW(~sp%d)", speed, g_watts,
+                    implied_speed(g_watts));
+      publish_current_alert();
+    }
   }
   g_verdict = next;
 }
@@ -199,8 +350,44 @@ int verdict() { return g_verdict; }
 
 float expected_w(int speed) { return (speed >= 0 && speed <= 12) ? kBaselineW[speed] : NAN; }
 
+bool cycling() { return g_cycle.cycling; }
+uint8_t flips() { return g_cycle.flips_in_window(); }
+Bucket take_bucket() {
+  Bucket b{-1, NAN, NAN};
+  if (enabled() && g_ever_read) {
+    const uint8_t n = g_cycle.take_bucket_flips();
+    b.flips = static_cast<int8_t>(n > 127 ? 127 : n);
+    if (g_bucket.n_w) {
+      b.min_w = g_bucket.min_w;
+      b.max_w = g_bucket.max_w;
+    }
+  }
+  g_bucket.reset();
+  return b;
+}
+
+int measured_speed() { return g_ever_read ? implied_speed(g_watts) : -1; }
+
+uint16_t poll_interval_s() { return static_cast<uint16_t>(kPollMs / 1000); }
+
+uint8_t trace_count() { return g_trace.size(); }
+
+Reading trace_at(uint8_t i) {
+  return i < g_trace.size() ? g_trace.at(i) : Reading{Reading::kNoRead, 0, 0};
+}
+
 void alert_json(char* out, size_t cap) {
   const int speed = fan::speed();
+  if (g_cycle.cycling) {
+    // Outranks the verdict: "cycling" is the more specific finding, and an
+    // automation that only knew plug_disagree would see it flap every minute.
+    snprintf(out, cap,
+             "{\"kind\":\"plug_cycling\",\"speed\":%d,\"flips\":%u,\"peak_w\":%.1f,"
+             "\"trough_w\":%.1f}",
+             speed, g_cycle.flips_in_window(), g_cycle.peak_w,
+             g_cycle.trough_w >= kNoTrough ? 0.0f : g_cycle.trough_w);
+    return;
+  }
   if (g_verdict == -1 && speed >= 0 && speed <= 12) {
     snprintf(out, cap,
              "{\"kind\":\"plug_disagree\",\"speed\":%d,\"expect_w\":%.1f,"
