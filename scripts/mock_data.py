@@ -74,7 +74,11 @@ def _window(days: int) -> "tuple[int, int]":
     2400 s apart, 60 d returns 284 rows ~5 h apart. The `rows` knob is what the
     card actually HOLDS -- a short card cannot fill any window.
     """
-    stored = min(int(SCEN["rows"]), days * DAY_ROWS)
+    # `rows=none` is the documented way to put the knob back to "full card"
+    # (coerce_scen stores None); int(None) here crashed every history request
+    # after that reset (found 2026-08-20, dogfooding the knobs themselves).
+    rows_knob = SCEN["rows"] if SCEN["rows"] is not None else 60 * DAY_ROWS
+    stored = min(int(rows_knob), days * DAY_ROWS)
     stride = stored // MAX_PTS + 1 if stored > MAX_PTS else 1
     return (stored + stride - 1) // stride, STEP * stride
 
@@ -158,6 +162,29 @@ def _history_uncached(days: int) -> Json:  # NOSONAR -- the branches ARE the sce
     # exercised by the default data set.
     base_w = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.8, 37.8]
     watts = [round(base_w[min(sp, 12)] + (i % 3) * 0.2, 1) for i, sp in enumerate(spd)]
+    # The cycling profile's column: flips the meter confirmed per bucket. None
+    # before the meter existed (the same era as the gas nulls), 0 on a steady
+    # fan, and under the plug=cycling scenario the last two hours carry the
+    # 2026-08-20 signature -- watts jumping between stopped and flat out with
+    # a flip count on every row -- so the power row's red tint is reachable.
+    pre_meter = max(1, n // 3)
+    flips: list[int | None] = [None if i < pre_meter else 0 for i in range(n)]
+    # The bucket's draw range. A steady fan's range is the sampling wobble;
+    # a cycling one's spans stopped to flat out, which is the whole point of
+    # recording a range instead of one snapshot per five minutes.
+    w_min: list[float | None] = [
+        None if i < pre_meter else round(w - 0.3, 1) for i, w in enumerate(watts)
+    ]
+    w_max: list[float | None] = [
+        None if i < pre_meter else round(w + 0.3, 1) for i, w in enumerate(watts)
+    ]
+    if SCEN["plug"] == "cycling":
+        for i in range(max(pre_meter, n - 24), n):
+            flips[i] = 2 + (i % 5)
+            watts[i] = 45.1 if i % 2 else 4.3
+            w_min[i] = 4.3
+            w_max[i] = 45.6
+            spd[i] = 10
     vocr: list[int | None] = []
     noxr: list[int | None] = []
     voc: list[int | None] = []
@@ -208,6 +235,9 @@ def _history_uncached(days: int) -> Json:  # NOSONAR -- the branches ARE the sce
         "interval_s": STEP,
         "ts": ts,
         "watts": watts,
+        "flips": flips,
+        "w_min": w_min,
+        "w_max": w_max,
         "voc_raw": vocr,
         "nox_raw": noxr,
         "voc": voc,

@@ -9,7 +9,9 @@
 #include <cstdio>
 
 #include "config.h"
-#include "soc/gpio_periph.h"
+#include "fan/control.h"
+#include "net/http_tx.h"
+#include "net/plug.h"
 #include "sensors/battery.h"
 #include "storage/sdcard.h"
 
@@ -166,12 +168,6 @@ void register_routes(WebServer& http, const char* token) {
   g_http = &http;
   g_token = token;
   http.on("/api/sdtest", handle_sd_test);
-  // Read the fan pin's own pad while RMT drives it. Exists because on
-  // 2026-08-13 the fan ignored a whole calibration sweep, rmtWriteLooping
-  // reported success, and nothing could say whether the waveform physically
-  // left the chip. Samples ~30 ms (three wave periods), counts transitions
-  // and the high fraction; INPUT_OUTPUT keeps the RMT matrix routing intact
-  // while enabling the input buffer.
   // Every device answering on the I2C bus. Exists for sensor bring-up: the
   // SHT41 (0x44) and SGP41 (0x59) arrived on a STEMMA chain 2026-08-13 and
   // the first question is always "does the bus even see them".
@@ -189,32 +185,57 @@ void register_routes(WebServer& http, const char* token) {
     snprintf(out + n, sizeof(out) - n, "]}");
     g_http->send(200, "application/json", out);
   });
+  // Read the fan pin's own pad while LEDC drives it. Exists because on
+  // 2026-08-13 the fan ignored a whole calibration sweep, rmtWriteLooping
+  // reported success, and nothing could say whether the waveform physically
+  // left the chip. The probe itself lives in fan::probe_pad now, so the
+  // cycling profile can log the same reading unattended.
   http.on("/api/pinprobe", []() {
     if (!authorized())
       return;
-    // Input buffer ONLY, straight at the IO_MUX. gpio_set_direction() looked
-    // right and was a trap: it reroutes the pad's output select to simple
-    // GPIO, silently disconnecting LEDC/RMT -- the probe then reports the
-    // stuck-low line the probe itself just created.
-    REG_SET_BIT(GPIO_PIN_MUX_REG[FAN_PWM_PIN], FUN_IE);
+    float high_pct = 0;
     uint32_t transitions = 0;
-    uint32_t highs = 0;
-    uint32_t n = 0;
-    int last = digitalRead(FAN_PWM_PIN);
-    const uint32_t t0 = micros();
-    while (micros() - t0 < 30000) {
-      const int v = digitalRead(FAN_PWM_PIN);
-      highs += v;
-      ++n;
-      if (v != last) {
-        ++transitions;
-        last = v;
-      }
-    }
+    fan::probe_pad(&high_pct, &transitions);
     char out[128];
-    snprintf(out, sizeof(out), "{\"samples\":%lu,\"high_pct\":%.1f,\"transitions\":%lu}",
-             (unsigned long)n, n ? 100.0 * highs / n : 0.0, (unsigned long)transitions);
+    snprintf(out, sizeof(out), "{\"high_pct\":%.1f,\"transitions\":%lu,\"want_high_us\":%u}",
+             static_cast<double>(high_pct), (unsigned long)transitions, fan::commanded_high_us());
     g_http->send(200, "application/json", out);
+  });
+  // Every raw meter poll the device still remembers: 15 minutes of 15 s
+  // samples, streamed rather than summarised. The flight recorder holds 24
+  // lines and a fan can cycle faster than one line per five minutes, so the
+  // shape of an episode cannot live on the tape -- it lives here, costs
+  // nothing until asked for, and is what turns "the meter looks noisy" into
+  // a sequence anyone can read.
+  http.on("/api/plugtrace", []() {
+    if (!authorized())
+      return;
+    const uint8_t n = plug::trace_count();
+    http_tx::Chunked tx(g_http->client(), "application/json");
+    tx.printf("{\"poll_s\":%u,\"n\":%u,\"w\":[", static_cast<unsigned>(plug::poll_interval_s()),
+              static_cast<unsigned>(n));
+    for (uint8_t i = 0; i < n && tx.ok(); i++) {
+      const plug::Reading r = plug::trace_at(i);
+      char num[16];
+      if (r.dw == plug::Reading::kNoRead) {
+        snprintf(num, sizeof(num), "null");
+      } else {
+        // Tenths straight out of the encoding: no float formatting, so a
+        // corrupt sample cannot render a hundred digits into the stream.
+        snprintf(num, sizeof(num), "%u.%u", static_cast<unsigned>(r.dw / 10),
+                 static_cast<unsigned>(r.dw % 10));
+      }
+      tx.print(num);
+      tx.print(i + 1 < n ? "," : "");
+    }
+    tx.print("],\"spd\":[");
+    for (uint8_t i = 0; i < n && tx.ok(); i++)
+      tx.printf(i + 1 < n ? "%d," : "%d", static_cast<int>(plug::trace_at(i).speed));
+    tx.print("],\"cls\":[");
+    for (uint8_t i = 0; i < n && tx.ok(); i++)
+      tx.printf(i + 1 < n ? "%d," : "%d", static_cast<int>(plug::trace_at(i).cls));
+    tx.print("]}");
+    tx.end();
   });
   http.on("/api/battdebug", []() {
     if (!authorized())

@@ -160,6 +160,78 @@ def test_out_of_range_speed_is_refused(mock):
         assert status == 400, f"speed={bad!r} should be refused"
 
 
+def test_a_cycling_fan_is_reported_distinctly_from_a_disagreement(mock):
+    """The cycling profile's wire shape (net/plug_cycle.h via PlugState).
+
+    `cycling` and `flips` ride beside the verdict so the console can say "the
+    fan is switching itself on and off" instead of "the meter does not match",
+    which is what the 2026-08-20 night looked like through the verdict alone.
+    """
+    try:
+        scen(plug="cycling")
+        plug = get_json("/api/state")["plug"]
+        assert plug["cycling"] is True
+        assert plug["flips"] >= 4  # onset needs four confirmed flips
+        assert plug["verdict"] == -1
+        # The history carries the per-bucket count so the chart can tint it.
+        h = get_json("/api/history?days=1")
+        assert len(h["flips"]) == len(h["ts"])
+        assert any((f or 0) > 0 for f in h["flips"][-24:])
+        assert all(f is None or f >= 0 for f in h["flips"])
+        # And the range that makes it legible: one snapshot per five minutes
+        # is what drew nine hours of cycling as jitter.
+        assert len(h["w_min"]) == len(h["w_max"]) == len(h["ts"])
+        assert any(
+            lo is not None and hi is not None and hi - lo > 10
+            for lo, hi in zip(h["w_min"][-24:], h["w_max"][-24:])
+        ), "a cycling bucket must record a wide draw range"
+    finally:
+        scen(plug="ok")
+    plug = get_json("/api/state")["plug"]
+    assert plug["cycling"] is False
+    assert plug["flips"] == 0
+    assert all(not (f or 0) for f in get_json("/api/history?days=1")["flips"])
+
+
+def test_the_state_says_what_the_speed_should_draw(mock):
+    """`45.1 W` means nothing on its own.
+
+    expect_w and implied_spd ride WITH the reading so the console (and a
+    person reading /api/state over curl at 3 a.m.) can see "measured 45, the
+    commanded speed draws 30, that looks like speed 12" without a lookup
+    table in their head. The 2026-08-20 tape carried only the commanded
+    number and the raw watts, which is why nine hours of it read as noise.
+    """
+    req("/api/set?speed=9", "POST")
+    plug = get_json("/api/state")["plug"]
+    assert plug["expect_w"] == pytest.approx(plug["w"], abs=0.6)
+    assert plug["implied_spd"] == 9
+
+
+def test_the_raw_meter_trace_is_served_and_guarded(mock):
+    """/api/plugtrace: the shape an episode has, which no log line can hold.
+
+    Token-guarded like the rest of web_debug.cpp, and parallel arrays of the
+    same length -- a trace whose columns disagree would pair one poll's watts
+    with another's speed.
+    """
+    status, _ = req("/api/plugtrace")
+    assert status == 403, "the trace must be token-guarded like its neighbours"
+    tr = get_json("/api/plugtrace?token=iliving-ota")
+    assert tr["poll_s"] == 15
+    assert tr["n"] == len(tr["w"]) == len(tr["spd"]) == len(tr["cls"])
+    assert all(c in (-1, 0, 1) for c in tr["cls"])
+    try:
+        scen(plug="cycling")
+        cyc = get_json("/api/plugtrace?token=iliving-ota")
+        # Alternating stopped/running is the signature the 5-minute row cannot
+        # show: the samples must actually swing, not sit at one level.
+        assert min(cyc["w"]) < 10 < max(cyc["w"])
+        assert 1 in cyc["cls"] and -1 in cyc["cls"]
+    finally:
+        scen(plug="ok")
+
+
 # ------------------------------------------------------------------ history
 
 
@@ -211,6 +283,20 @@ def test_a_range_the_card_cannot_answer_is_503_not_substituted_data(mock):
             assert b"error" in body
     finally:
         scen(card=True)
+
+
+def test_resetting_the_rows_knob_does_not_break_history(mock):
+    """rows=none is the documented reset; it crashed every later history and
+    boots request with int(None) until 2026-08-20 (found dogfooding the
+    knobs). A reset knob must behave exactly like an untouched one."""
+    scen(rows=3)
+    scen(rows="none")
+    try:
+        h = get_json("/api/history?days=1")
+        assert len(h["ts"]) > 3, "reset card still answering like a 3-row one"
+        get_json("/api/boots?days=1")
+    finally:
+        scen(rows=60 * 288)
 
 
 def test_an_outage_is_visible_as_a_gap_in_the_timestamps(mock):
@@ -283,9 +369,32 @@ def test_uptime_and_boots_allow_frame_ordering(mock):
 
 
 def test_token_guarded_routes_refuse_without_one(mock):
-    for path in ("/api/restart", "/api/sdformat", "/api/sdpurge", "/update"):
+    for path in ("/api/restart", "/api/sdformat", "/api/sdpurge", "/update", "/api/provision"):
         status, _ = req(path, "POST")
         assert status == 403, f"{path} must not act without a token"
+
+
+def test_provisioning_applies_only_what_it_was_given(mock):
+    """The credentials form: changed fields only, validated before applied,
+    and the device info afterwards reports what was stored -- never a password."""
+    before = get_json("/api/device")
+    status, body = req("/api/provision?mqtt_port=99999&token=iliving-ota", "POST")
+    assert status == 400 and b"mqtt_port" in body
+    status, body = req("/api/provision?ssid=&token=iliving-ota", "POST")
+    assert status == 400, "an empty SSID must be refused, not stored"
+    status, body = req(
+        "/api/provision?ssid=new-net&pass=s3cret&mqtt_user=fan2&token=iliving-ota", "POST"
+    )
+    assert status == 200, body
+    after = get_json("/api/device")
+    assert after["ssid"] == "new-net" and after["mqtt_user"] == "fan2"
+    assert after["broker"] == before["broker"], "untouched fields must stay"
+    assert "s3cret" not in json.dumps(after), "a password must never come back down"
+    # put it back for the neighbours
+    req(
+        f"/api/provision?ssid={before['ssid']}&mqtt_user={before['mqtt_user']}&token=iliving-ota",
+        "POST",
+    )
 
 
 def test_core_dump_reads_require_a_token(mock):
@@ -366,3 +475,23 @@ def test_every_scenario_knob_is_in_the_playwright_reset(mock):
         f"missing from the reset: {sorted(set(SCEN_SPEC) - reset_keys)}, "
         f"unknown to the mock: {sorted(reset_keys - set(SCEN_SPEC))}"
     )
+
+
+def test_an_accepted_update_reboots_onto_the_knobbed_version(mock):
+    """The one-click install watches boots/fw/confirmed after /update; the mock
+    must move them the way the board does, and only for the right token."""
+    before = get_json("/api/state")
+    scen(ota_fw="9.9.9")
+    try:
+        r = urllib.request.Request(
+            BASE + "/update?token=iliving-ota", method="POST", data=b"fake-image"
+        )
+        with urllib.request.urlopen(r, timeout=5) as f:
+            assert f.status == 200
+        after = get_json("/api/state")
+        assert after["boots"] == before["boots"] + 1
+        assert after["fw"] == "9.9.9" and after["confirmed"] is True
+        assert after["slot"] != before["slot"]
+    finally:
+        scen(ota_fw="none", fw=before["fw"])  # put the board back for the neighbours
+    assert get_json("/api/state")["fw"] == before["fw"], "the fw knob must restore it"

@@ -6,3 +6,16 @@
 # scripts/calibrate_fan_power.py:37 reads HA_TOKEN from the environment
 # (os.environ.get) -- no literal secret ever existed on the line.
 412031a60882bfdb1ebc979db86ddc0e691fdb4d:scripts/calibrate_fan_power.py:bare-credential-assignment:37
+
+# scripts/mock_device.py:357 on this commit assigned the firmware's PUBLIC
+# default OTA token (config.h FAN_OTA_TOKEN, committed by design) to a mock
+# constant; the next commit reads it from config.h instead of repeating it.
+cd9195ee7df0786d063d09c514eb1539cc368389:scripts/mock_device.py:bare-credential-assignment:357
+
+# Same line after the fix: the mock now assigns DEFAULT_TOKEN from a call
+# (firmware_default_token(), which reads config.h), not from a value, but the
+# bare-credential rule keys on the assignment shape alone. The line now
+# carries gitleaks:allow; this covers the commit in the PR range that
+# predates the annotation.
+bdf8273daa45a072d2bbf067b3fa8863b63f461b:scripts/mock_device.py:bare-credential-assignment:371
+

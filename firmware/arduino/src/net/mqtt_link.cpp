@@ -6,17 +6,15 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 #include "config.h"
+#include "net/creds.h"
 #include "fan/control.h"
 #include "net/plug.h"
-#include "sensors/climate.h"
 #include "system/eventlog.h"
 #include "system/ota_rollback.h"
-#include "system/timeutil.h"
 
 namespace mqtt_link {
 namespace {
@@ -35,20 +33,12 @@ void on_message(char* topic, uint8_t* payload, unsigned int len) {
     return;
   memcpy(buf, payload, len);
   buf[len] = '\0';
-  if (strstr(topic, "/ts") != nullptr &&
-      strncmp(topic, MQTT_SUB_BASE, strlen(MQTT_SUB_BASE)) == 0) {
-    const long e = strtol(buf, nullptr, 10);
-    if (e > kEpochSanityFloor)
-      climate::set_outdoor_epoch(e);
-    return;
-  }
-  if (strcmp(topic, kTopicOutdoor) == 0) {
-    char* end = nullptr;
-    const float f = strtof(buf, &end);
-    if (end != buf && isfinite(f) && f > -60 && f < 150)
-      climate::set_outside_f(f);
-    return;
-  }
+  // The outdoor temperature used to arrive here too, on the subscribed
+  // home/outdoor "/temp_f" with a "/ts" epoch beside it. It was a relay of
+  // a weather SERVICE, not a yard sensor, and it raced the firmware's own
+  // open-meteo poll for the same variable -- see sensors/outdoor.h. Removed
+  // in 1.23.0: the fan fetches its own weather and this link carries fan
+  // commands only.
   if (strcmp(topic, kTopicSet) != 0 || len == 0 || len > 2)
     return;
   char* end = nullptr;
@@ -130,7 +120,8 @@ static void ensure_connected() {
   // that is the prime suspect for the ~16 s device-wide freeze measured from
   // the network on 1.14.8, which no sample or SD-flush timing accounted for.
   const uint32_t t_connect = millis();
-  const bool ok = g_mqtt.connect(id, MQTT_USER, MQTT_PASS, kTopicAvail, 0, true, "offline");
+  const bool ok =
+      g_mqtt.connect(id, creds::mqtt_user(), creds::mqtt_pass(), kTopicAvail, 0, true, "offline");
   const uint32_t connect_ms = millis() - t_connect;
   if (ok) {
     eventlog::log("mqtt", "up (down %lums rc=%d connect=%lums)", (unsigned long)down_ms, why,
@@ -149,8 +140,6 @@ static void ensure_connected() {
       g_mqtt.publish(kTopicAlert, alert, true);
     }
     g_mqtt.subscribe(kTopicSet);
-    g_mqtt.subscribe(kTopicOutdoor);
-    g_mqtt.subscribe(MQTT_SUB_BASE "/ts");
   } else {
     // A FAILED attempt burns the socket timeout in full, so it is the more
     // expensive of the two paths and belongs on the tape, not just on a
@@ -177,7 +166,8 @@ void note_link_state() {
 }  // namespace
 
 void init() {
-  g_mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  // PubSubClient keeps the POINTER, not a copy; creds' buffers are static.
+  g_mqtt.setServer(creds::mqtt_host(), creds::mqtt_port());
   g_mqtt.setCallback(on_message);
   // 60 s, not PubSubClient's 15 s default. The e-ink refresh blocks the loop
   // for ~17 s every 5 minutes, and no keepalive can be sent while it runs; the

@@ -120,6 +120,9 @@ struct GraphScratch {
   int16_t* ni = nullptr;
   int8_t* sp = nullptr;
   int8_t* cg = nullptr;
+  int8_t* f = nullptr;
+  float* wn = nullptr;
+  float* wx = nullptr;
   bool ready = false;
 };
 GraphScratch g_scratch;
@@ -148,9 +151,13 @@ bool scratch_ready() {
   g_scratch.nr = psram_array<int32_t>(kGraphMaxPts);
   g_scratch.vi = psram_array<int16_t>(kGraphMaxPts);
   g_scratch.ni = psram_array<int16_t>(kGraphMaxPts);
+  g_scratch.f = psram_array<int8_t>(kGraphMaxPts);
+  g_scratch.wn = psram_array<float>(kGraphMaxPts);
+  g_scratch.wx = psram_array<float>(kGraphMaxPts);
   g_scratch.ready = g_scratch.ts && g_scratch.t && g_scratch.h && g_scratch.p && g_scratch.o &&
                     g_scratch.b && g_scratch.sp && g_scratch.cg && g_scratch.w && g_scratch.vr &&
-                    g_scratch.nr && g_scratch.vi && g_scratch.ni;
+                    g_scratch.nr && g_scratch.vi && g_scratch.ni && g_scratch.f && g_scratch.wn &&
+                    g_scratch.wx;
   if (!g_scratch.ready) {
     // Release the blocks that DID succeed. Without this a partial failure
     // leaked them and the next chart request allocated a fresh partial set --
@@ -169,6 +176,9 @@ bool scratch_ready() {
     free(g_scratch.nr);
     free(g_scratch.vi);
     free(g_scratch.ni);
+    free(g_scratch.f);
+    free(g_scratch.wn);
+    free(g_scratch.wx);
     g_scratch = GraphScratch{};
     eventlog::log("web", "graph scratch alloc failed");
   }
@@ -193,6 +203,9 @@ struct SeriesView {
   const int32_t* nr;
   const int16_t* vi;
   const int16_t* ni;
+  const int8_t* f;
+  const float* wn;
+  const float* wx;
 };
 
 void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
@@ -220,6 +233,15 @@ void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
   write_gas(tx, WN_VOC, v.vi, n);
   tx.print(",");
   write_gas(tx, WN_NOX, v.ni, n);
+  tx.print(",");
+  // Same encoding as the gas columns: -1 (no meter / pre-1.21.0 row) is null.
+  write_gas(tx, WN_FLIPS, v.f, n);
+  tx.print(",");
+  // The bucket's draw range. One `watts` snapshot per five minutes is what
+  // charted a fan cycling every minute as jitter; these two make it a band.
+  write_series(tx, WN_W_MIN, v.wn, n, 1);
+  tx.print(",");
+  write_series(tx, WN_W_MAX, v.wx, n, 1);
   tx.print("}");
 }
 
@@ -227,7 +249,7 @@ void write_all_series(http_tx::Chunked& tx, const SeriesView& v, uint16_t n) {
 // the ring fallback, and two literals had already started to count as
 // duplication before they could start to disagree.
 // clang-format off
-constexpr const char* kCsvHeader = "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox\n";  // NOLINT(whitespace/line_length)
+constexpr const char* kCsvHeader = "epoch,temp_c,rh,hpa,outside_f,speed,batt_v,chg,watts,voc_raw,nox_raw,voc,nox,flips,w_min,w_max\n";  // NOLINT(whitespace/line_length)
 // clang-format on
 
 void handle_history() {
@@ -277,8 +299,8 @@ void handle_history() {
   http_tx::Chunked tx(g_http->client(), "application/json");
   if (have_card) {
     const GraphScratch& s = g_scratch;
-    const sdcard::Samples dst{s.ts, s.t, s.h,  s.p,  s.o,  s.b, s.sp,
-                              s.cg, s.w, s.vr, s.nr, s.vi, s.ni};
+    const sdcard::Samples dst{s.ts, s.t,  s.h,  s.p,  s.o,  s.b, s.sp, s.cg,
+                              s.w,  s.vr, s.nr, s.vi, s.ni, s.f, s.wn, s.wx};
     const time_t cutoff = time(nullptr) - (time_t)days * 86400;
     const uint16_t n = sdcard::read_range(cutoff, dst, kGraphMaxPts);
     // interval_s is now only a nominal hint for gap detection; ts[] carries
@@ -286,18 +308,20 @@ void handle_history() {
     // requested_span/actual_span whenever the card held less than the window.
     tx.printf("{\"source\":\"sd\",\"interval_s\":%ld,", step);
     write_ts(tx, s.ts, n);
-    write_all_series(tx, {s.t, s.h, s.p, s.o, s.b, s.w, s.sp, s.cg, s.vr, s.nr, s.vi, s.ni}, n);
+    write_all_series(
+        tx, {s.t, s.h, s.p, s.o, s.b, s.w, s.sp, s.cg, s.vr, s.nr, s.vi, s.ni, s.f, s.wn, s.wx}, n);
   } else {
     // No card and days=1: the ring is all there is, and the response says so
     // rather than letting the caller assume persistence it does not have.
     const uint16_t rows = history::count();
     tx.printf("{\"source\":\"ring\",\"interval_s\":%ld,", step);
     write_ts_derived(tx, history::end_ts(), rows, step);
-    write_all_series(tx,
-                     {history::temp(), history::rh(), history::hpa(), history::out_f(),
-                      history::batt_v(), history::watts(), history::speed(), history::chg(),
-                      history::voc_raw(), history::nox_raw(), history::voc(), history::nox()},
-                     rows);
+    write_all_series(
+        tx,
+        {history::temp(), history::rh(), history::hpa(), history::out_f(), history::batt_v(),
+         history::watts(), history::speed(), history::chg(), history::voc_raw(), history::nox_raw(),
+         history::voc(), history::nox(), history::flips(), history::w_min(), history::w_max()},
+        rows);
   }
   tx.end();
 }
@@ -343,15 +367,18 @@ void handle_csv() {
   for (uint16_t i = 0; i < n && tx.ok(); i++) {
     const long ts =
         history::end_ts() ? (long)history::end_ts() - (long)(n - 1 - i) * (kSampleMs / 1000) : 0;
-    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d\n", ts, history::temp()[i],
-              history::rh()[i], history::hpa()[i],
+    tx.printf("%ld,%.2f,%.0f,%.1f,%.1f,%d,%.2f,%d,%.1f,%ld,%ld,%d,%d,%d,%.1f,%.1f\n", ts,
+              history::temp()[i], history::rh()[i], history::hpa()[i],
               isnan(history::out_f()[i]) ? -999.0f : history::out_f()[i],
               static_cast<int>(history::speed()[i]),
               isnan(history::batt_v()[i]) ? -999.0f : history::batt_v()[i],
               static_cast<int>(history::chg()[i]),
               isnan(history::watts()[i]) ? -999.0f : history::watts()[i],
               (long)history::voc_raw()[i], (long)history::nox_raw()[i],
-              static_cast<int>(history::voc()[i]), static_cast<int>(history::nox()[i]));
+              static_cast<int>(history::voc()[i]), static_cast<int>(history::nox()[i]),
+              static_cast<int>(history::flips()[i]),
+              isnan(history::w_min()[i]) ? -999.0f : history::w_min()[i],
+              isnan(history::w_max()[i]) ? -999.0f : history::w_max()[i]);
   }
   tx.end();
 }

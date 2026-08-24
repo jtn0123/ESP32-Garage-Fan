@@ -116,6 +116,37 @@ jobs:
           name: firmware-${{ steps.ver.outputs.fw_version }}
           path: dist/*
 
+      # The update CHANNEL: the same OTA image and checksum, published a second
+      # time to GitHub Pages. Release assets cannot be fetched by a browser from
+      # another origin (github.com answers the asset download with no CORS
+      # headers -- measured 2026-08-20: "Failed to fetch" from the console),
+      # and the ESP32-S2 cannot fetch them itself (no TLS, see net/weather.h).
+      # Pages serves everything with Access-Control-Allow-Origin: *, so the
+      # console's one-click install (web/src/updater.ts) downloads from here,
+      # verifies the checksum and hands the bytes to /update. Only the newest
+      # release lives on the channel; the Release itself keeps every version.
+      - name: Stage the update channel
+        run: |
+          set -euo pipefail
+          V=${{ steps.ver.outputs.fw_version }}
+          TAG=${{ steps.ver.outputs.tag }}
+          mkdir -p site/firmware
+          cp "dist/garage-fan-v$V.bin" "dist/garage-fan-v$V.bin.sha256" site/firmware/
+          SUM=$(cut -d' ' -f1 "dist/garage-fan-v$V.bin.sha256")
+          SIZE=$(wc -c < "dist/garage-fan-v$V.bin" | tr -d ' ')
+          printf '{"version":"%s","tag":"%s","bin":"%s","sha256":"%s","size":%s,"published":"%s"}\n' \
+            "$V" "$TAG" "garage-fan-v$V.bin" "$SUM" "$SIZE" "$(date -u +%FT%TZ)" \
+            > site/firmware/manifest.json
+          printf '<!doctype html><title>garage-fan update channel</title><p>Firmware update channel for <a href="https://github.com/%s">%s</a>. Latest: %s.</p>\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" "$TAG" > site/index.html
+          cat site/firmware/manifest.json
+
+      # SHA-pinned per githubactions:S7637 — see the other third-party actions.
+      - name: Upload the update channel
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
       # SHA-pinned per githubactions:S7637 — see the other third-party actions.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -132,4 +163,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-
+  # Publishes the update channel staged above. Separate job because Pages
+  # deployment needs id-token:write and pages:write, which the release build
+  # has no business holding.
+  publish-channel:
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # SHA-pinned per githubactions:S7637 — see the other third-party actions.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

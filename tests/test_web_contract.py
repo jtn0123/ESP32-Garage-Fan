@@ -188,7 +188,7 @@ def test_history_branches_agree():
     emitter = find_function("write_all_series")
     series = [
         "temp_c", "rh", "hpa", "out_f", "batt_v", "spd", "chg",
-        "watts", "voc_raw", "nox_raw", "voc", "nox",
+        "watts", "voc_raw", "nox_raw", "voc", "nox", "flips", "w_min", "w_max",
     ]  # fmt: skip
     for name in series:
         # WN_<NAME>, since the emitter spells keys via the generated macros.
@@ -294,3 +294,21 @@ def test_mock_accepts_every_config_arg_the_firmware_does():
         f"The mock will answer 200 and change nothing, so the console looks like it "
         f"applied the setting."
     )
+
+
+def test_mock_provisions_exactly_the_args_the_firmware_does():
+    """/api/provision: the mock's PROVISION_KEYS must be the firmware's kArgs,
+    in both directions, for the same reason as the config-arg test above --
+    a field the console can set against the mock but the device drops is a
+    silently broken form, and here the field is a password."""
+    cpp = (SRC / "net" / "web_provision.cpp").read_text()
+    m = re.search(r"kArgs\[\]\s*=\s*\{(.*?)\};", cpp, re.S)
+    assert m, "kArgs not found in web_provision.cpp"
+    firmware_args = set(re.findall(r'"(\w+)"', m.group(1)))
+    mock = (ROOT / "scripts" / "mock_device.py").read_text()
+    k = re.search(r"PROVISION_KEYS\s*=\s*\((.*?)\)", mock, re.S)
+    assert k, "PROVISION_KEYS not found in mock_device.py"
+    mock_args = set(re.findall(r'"(\w+)"', k.group(1)))
+    assert (
+        firmware_args == mock_args
+    ), f"firmware accepts {sorted(firmware_args)}, mock accepts {sorted(mock_args)}"

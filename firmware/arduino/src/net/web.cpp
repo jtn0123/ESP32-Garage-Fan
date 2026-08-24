@@ -18,6 +18,7 @@
 #include "fan/control.h"
 #include "generated_page.h"
 #include "generated_wire.h"
+#include "net/creds.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
@@ -27,6 +28,7 @@
 #include "net/web_history.h"
 #include "net/web_maint.h"
 #include "net/web_ota.h"
+#include "net/web_provision.h"
 #include "net/wifi_link.h"
 #include "sensors/air.h"
 #include "sensors/battery.h"
@@ -98,13 +100,23 @@ void state_json(char* out, size_t cap) {
   }
   // The watt meter on the fan's supply, or null when the poller is disabled
   // or has never read. verdict: 1 agree, -1 disagree, 0 cannot say.
-  char plugs[112];
+  char plugs[224];
   if (plug::enabled() && plug::age_s() >= 0) {
     char vs[16] = "null";
     if (!isnan(plug::volts()))
       snprintf(vs, sizeof(vs), "%.1f", plug::volts());
-    snprintf(plugs, sizeof(plugs), "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d}",
-             plug::watts(), vs, (long)plug::age_s(), plug::verdict());
+    // expect_w and implied_spd travel WITH the reading: "45.1 W" means
+    // nothing on its own, and beside "should be 30.2 at speed 10" it means
+    // everything. Null while a raw duty is driven -- there is no table entry.
+    char ew[16] = "null";
+    const float expect = plug::expected_w(fan::speed());
+    if (!isnan(expect))
+      snprintf(ew, sizeof(ew), "%.1f", expect);
+    snprintf(plugs, sizeof(plugs),
+             "{" WK_W "%.1f," WK_V "%s," WK_AGE_S "%ld," WK_VERDICT "%d," WK_CYCLING "%s," WK_FLIPS
+             "%u," WK_EXPECT_W "%s," WK_IMPLIED_SPD "%d}",
+             plug::watts(), vs, (long)plug::age_s(), plug::verdict(),
+             plug::cycling() ? "true" : "false", plug::flips(), ew, plug::measured_speed());
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }
@@ -167,17 +179,25 @@ static void handle_device() {
     n += snprintf(high + n, sizeof(high) - n, i ? ",%u" : "%u", kHighUs[i]);
   uint8_t mac[6] = {0};
   WiFi.macAddress(mac);
-  char ssid[80], host[80];
-  json_str(ssid, sizeof(ssid), WIFI_SSID);
-  json_str(host, sizeof(host), MQTT_HOST);
-  char out[512];
+  // Identity strings come from creds (NVS-backed) so the page shows what the
+  // board is actually using, not what some build once compiled in. Secrets
+  // (passwords) are never emitted; the user name and coordinates are what the
+  // provisioning form needs to pre-fill.
+  char ssid[80], host[80], user[80], lat[24], lon[24];
+  json_str(ssid, sizeof(ssid), creds::wifi_ssid());
+  json_str(host, sizeof(host), creds::mqtt_host());
+  json_str(user, sizeof(user), creds::mqtt_user());
+  json_str(lat, sizeof(lat), creds::weather_lat());
+  json_str(lon, sizeof(lon), creds::weather_lon());
+  char out[640];
   snprintf(out, sizeof(out),
            "{" WK_ID "\"%s-%02x%02x%02x\"," WK_HOST "\"%s\"," WK_REPO "\"%s\"," WK_BROKER
-           "\"%s:%d\"," WK_SSID "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_TOPIC_OUT "\"%s\"," WK_PERIOD_US
-           "%u," WK_SAMPLE_S "%lu," WK_HIGH_US "[%s]}",
-           FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host, MQTT_PORT,
-           ssid, kTopicSet, kTopicOutdoor, (unsigned)kPeriodUs, (unsigned long)(kSampleMs / 1000),
-           high);
+           "\"%s:%u\"," WK_SSID "\"%s\"," WK_MQTT_USER "\"%s\"," WK_LAT "\"%s\"," WK_LON
+           "\"%s\"," WK_TOPIC_SET "\"%s\"," WK_PERIOD_US "%u," WK_SAMPLE_S "%lu," WK_HIGH_US
+           "[%s]}",
+           FAN_HOSTNAME, mac[3], mac[4], mac[5], FAN_HOSTNAME, FAN_GITHUB_REPO, host,
+           (unsigned)creds::mqtt_port(), ssid, user, lat, lon, kTopicSet, (unsigned)kPeriodUs,
+           (unsigned long)(kSampleMs / 1000), high);
   g_http.send(200, "application/json", out);
 }
 
@@ -348,6 +368,7 @@ void begin(Preferences* prefs) {
   web_maint::register_routes(g_http, g_token);
   web_debug::register_routes(g_http, g_token);
   web_ota::register_routes(g_http, g_token);
+  web_provision::register_routes(g_http, g_token);
   g_http.onNotFound([]() { g_http.send(404, "application/json", "{\"error\":\"404\"}"); });
 }
 
