@@ -24,7 +24,7 @@ export interface DeviceState {
   auto_min: number; // speed auto rests at once equalised (0 = off)
   on_f: number; // engage differential, degrees F
   off_f: number; // release differential, degrees F
-  outside_f: number | null; // null when the yard feed is missing or stale
+  outside_f: number | null; // null when the weather poll is missing or stale
   fw: string; // FW_VERSION -- the update check compares exactly this
   slot: string; // "app0" | "app1"
   confirmed: boolean;
@@ -126,7 +126,6 @@ export interface DeviceInfo {
   lat: string; // weather coordinates as stored ("" = weather poller off)
   lon: string;
   topic_set: string;
-  topic_out: string;
   period_us: number; // PWM frame, measured: 9934
   sample_s: number;
   high_us: number[]; // index 0..12, the measured duty table

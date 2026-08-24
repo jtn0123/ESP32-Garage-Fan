@@ -192,12 +192,12 @@ def main() -> None:  # NOSONAR -- complexity predates this PR; only annotations 
     mqtt_user = str(os.getenv("MQTT_USER") or mqtt.get("user", "") or "")
     mqtt_pass = str(os.getenv("MQTT_PASSWORD") or mqtt.get("password", "") or "")
     mqtt_pub = base_topics.get("publish", "sensors/" + room_name.lower())
-    mqtt_sub = base_topics.get("subscribe", "home/outdoor")
 
     # Where this device lives, for the firmware's direct weather poll. From the
     # gitignored .env only (coordinates are private, like credentials): a clone
-    # without them builds with the poller disabled and the fan falls back to
-    # the MQTT outdoor feed alone. Rounded to 2 decimals (~1.1 km) because the
+    # without them builds with the poller disabled, and since 1.23.0 removed
+    # the MQTT outdoor feed that leaves auto with no reading at all -- it holds
+    # rather than guessing. Rounded to 2 decimals (~1.1 km) because the
     # request travels plain HTTP -- the ESP32-S2 cannot afford TLS's ~34 KB of
     # contiguous internal RAM (measured: "SSL - Memory allocation failed"),
     # and neighborhood-level is all a weather forecast needs anyway.
@@ -363,7 +363,6 @@ def main() -> None:  # NOSONAR -- complexity predates this PR; only annotations 
         f.write(f"#define MQTT_HOST {c_string(mqtt_host)}\n")
         f.write(f"#define MQTT_PORT {mqtt_port}\n")
         f.write(f"#define MQTT_PUB_BASE {c_string(mqtt_pub)}\n")
-        f.write(f"#define MQTT_SUB_BASE {c_string(mqtt_sub)}\n")
         f.write(f"#define MQTT_USER {c_string(mqtt_user)}\n")
         f.write(f"#define MQTT_PASS {c_string(mqtt_pass)}\n")
         f.write(f"#define WEATHER_LAT {c_string(weather_lat)}\n")

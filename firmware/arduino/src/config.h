@@ -111,12 +111,16 @@ inline constexpr const char* kTopicClimate = "garage/climate";
 // automation sees the state on subscribe, not only on the edge; republished
 // on every broker connect so a reboot cannot leave a stale alarm standing.
 inline constexpr const char* kTopicAlert = "garage/fan/alert";
-inline constexpr const char* kTopicOutdoor = MQTT_SUB_BASE "/temp_f";
+// There is no subscribed outdoor topic any more: the fan polls open-meteo
+// itself (net/weather) and sensors/outdoor.h explains why the second feed
+// had to go rather than be preferred.
 
 // ------------------------------------------------------------- cadences
 inline constexpr uint32_t kUnconfirmedDeadlineMs = 5 * 60 * 1000;
 inline constexpr uint32_t kSampleMs = 5 * 60 * 1000;  // ring + SD cadence
 inline constexpr uint32_t kAutoTickMs = 30 * 1000;
+// Three missed 10-minute weather polls. Past this the reading expires and
+// fan_auto_decide sees NAN, which it reads as "hold speed and latch".
 inline constexpr uint32_t kOutdoorStaleMs = 30 * 60 * 1000;
 inline constexpr uint32_t kMqttGraceMs = 10 * 1000;  // retained-replay window
 

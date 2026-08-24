@@ -157,8 +157,8 @@ export function buildGroups(d: SettingsDeps): Group[] {
         ),
         text(
           'Outside temperature',
-          'Subscribed topic the yard reading arrives on. A reading older than 30 minutes counts as stale and auto holds.',
-          info?.topic_out ?? '–',
+          'Fetched from open-meteo every 10 minutes and averaged over the last three polls, so one jumpy forecast step cannot move the fan. Older than 30 minutes counts as stale and auto holds.',
+          info?.lat && info?.lon ? `open-meteo · ${info.lat}, ${info.lon}` : 'open-meteo',
         ),
         text(
           'Sample interval',
