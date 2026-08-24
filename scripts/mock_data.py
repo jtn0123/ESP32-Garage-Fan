@@ -217,6 +217,7 @@ def _history_uncached(days: int) -> Json:  # NOSONAR -- the branches ARE the sce
                 "ts": (ts[i - 1] + ts[i]) // 2,
                 "n": 82,
                 "cause": "brownout",
+                "fw": "1.26.0",
             }
         ]
     if SCEN["corrupt"]:  # what a bad CSV row must become
