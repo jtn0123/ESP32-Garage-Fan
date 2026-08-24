@@ -65,6 +65,21 @@ export const setSpeed = (speed: number): Promise<DeviceState> =>
 export const setConfig = (query: string): Promise<DeviceState> =>
   json<DeviceState>(`/api/config?${query}`, 'POST');
 
+/** POST /api/provision?fields...&token=... -- see provision.ts. */
+export async function provision(
+  query: string,
+  token: string,
+): Promise<{ ok: boolean; error?: string; note?: string }> {
+  const res = await fetch(`/api/provision?${query}&token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+  });
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; note?: string };
+  const out: { ok: boolean; error?: string; note?: string } = { ok: res.ok && body.ok === true };
+  if (body.error) out.error = body.error;
+  if (body.note) out.note = body.note;
+  return out;
+}
+
 /** Token-guarded maintenance. Returns the raw body so the caller can show it. */
 async function guarded(path: string, token: string): Promise<string> {
   // POST to match the firmware: these routes reboot the board or erase the
@@ -93,12 +108,16 @@ export async function uploadFirmware(file: File, token: string): Promise<string>
 }
 
 /**
- * Live state over server-sent events on port 8081.
+ * Live state over server-sent events, one port above the page's own.
  *
  * Separate port because the firmware serves SSE from its own WiFiServer rather
- * than the WebServer -- see sse_accept(). Failure is silent on purpose: the
- * 15 s poll is the fallback and already covers it.
+ * than the WebServer -- see sse_accept(). The device serves the console on 80
+ * and the stream on 8081; the mock serves the console on an arbitrary port and
+ * the stream one above it, which is what lets the e2e suite cover this path at
+ * all. Failure is silent on purpose: the 15 s poll is the fallback and already
+ * covers it.
  */
+const SSE_PORT = location.port ? Number(location.port) + 1 : 8081;
 let stream: EventSource | null = null;
 
 export function subscribe(onState: (s: DeviceState) => void): void {
@@ -107,7 +126,7 @@ export function subscribe(onState: (s: DeviceState) => void): void {
   // running and both kept reconnecting forever.
   stream?.close();
   try {
-    const es = new EventSource(`http://${location.hostname}:8081/`);
+    const es = new EventSource(`http://${location.hostname}:${SSE_PORT}/`);
     stream = es;
     es.onmessage = (ev) => {
       try {

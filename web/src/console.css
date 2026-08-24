@@ -327,7 +327,11 @@ body{padding:0 16px 32px}
 /* 11 px of ink was the entire hit area for `7D` -- and this row is how you
    reach the 7-day chart. The glyph stays small; the target does not. The row
    had 180 px of empty space to its left, so the padding is free. */
-#ranges{gap:6px;padding-bottom:0}
+/* Six ranges no longer fit beside the chip strip on a 320 px phone: six 44 px
+   thumb targets plus their gaps is 294 px on their own. So the strip takes its
+   own line and wraps within it. Shrinking the chips to make them fit would
+   undo the only thing this block exists for. */
+#ranges{gap:6px;padding-bottom:0;margin-left:0;flex-wrap:wrap;width:100%}
 #ranges button{padding:12px 8px;min-height:44px;min-width:44px}
 /* 250 px of temperature chart is 40% of a phone screen. 220 still carries the
    diurnal shape and the differential band, and the 30 px it gives back are
@@ -396,3 +400,11 @@ body{padding:0 16px 32px}
   background: #e8e4dc;
 }
 .pnlmsg { font-size: 11px; color: var(--dim); }
+.prov{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.provgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;max-width:420px}
+.provgrid .fld{max-width:100%;width:100%;box-sizing:border-box}
+#prov_go{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
+#provmsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;min-height:1em}
+.updinstall{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
+#updmsg{font:500 11.5px var(--mono);color:var(--dim)}
+#upd_go:disabled{opacity:.5;cursor:progress}

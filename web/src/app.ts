@@ -23,7 +23,7 @@ import { buildRail } from './rail.js';
 import { paintTip } from './status_bits.js';
 import { attachScrub, endScrub } from './scrub.js';
 import { drawPreview, drawScope } from './pwm.js';
-import { build } from './series.js';
+import { build, tail } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
 import type { DeviceState } from './types.js';
@@ -238,15 +238,24 @@ async function loadHistory(): Promise<void> {
     // Boots ride along but must never be able to fail the chart: an older
     // firmware has no /api/boots, and a missing explanation is not a reason
     // to withhold the data it would have explained.
+    // A range under a day is a window on the 24 h response, not its own query:
+    // the firmware speaks days=1|7|30|60 and that payload already holds every
+    // row a 6 or 12 hour view needs. One fetch, then sliced. See series.tail.
+    const fetchDays = Math.max(1, Math.ceil(view.days));
     const [raw, boots] = await Promise.all([
-      api.getHistory(view.days),
-      api.getBoots(view.days).catch(() => ({ boots: [] })),
+      api.getHistory(fetchDays),
+      api.getBoots(fetchDays).catch(() => ({ boots: [] })),
     ]);
     if (seq !== historySeq) return; // superseded by a newer range request
     view.historyError = null;
-    view.history = raw;
-    view.boots = boots.boots ?? [];
-    view.series = build(raw);
+    const shown = view.days < 1 ? tail(raw, view.days * 24) : raw;
+    view.history = shown;
+    // Restart marks have to be cut to the same window. A boot older than the
+    // first row left in `shown` has no x position on this axis, and drawing it
+    // anyway pins it to the left edge -- a restart that never happened there.
+    const from = shown.ts?.[0] ?? 0;
+    view.boots = (boots.boots ?? []).filter((b) => from <= 0 || b.ts >= from);
+    view.series = build(shown);
     drawAll();
     paintHero();
   } catch (err) {

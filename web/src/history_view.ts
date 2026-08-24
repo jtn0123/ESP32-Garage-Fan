@@ -12,11 +12,12 @@ import {
   drawAxis,
   drawBattery,
   drawFanSpeed,
+  drawPower,
   drawSimple,
   drawTemperature,
 } from './charts.js';
 import { $, at, el } from './dom.js';
-import { ago, hoursMinutes, moment } from './format.js';
+import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
 import type { Series } from './series.js';
 import { sampleIndex, view } from './state.js';
 import { OR, OUT } from './theme.js';
@@ -68,7 +69,7 @@ export function paintChartTitle(): void {
   const i = sampleIndex();
   const t = view.scrub >= 0 && s && i >= 0 ? s.ts(i) : null;
   if (t === null || !s) {
-    title.textContent = view.days === 1 ? 'LAST 24 HOURS' : `LAST ${view.days} DAYS`;
+    title.textContent = rangeLabel(view.days);
     title.className = 'ct';
     return;
   }
@@ -112,7 +113,7 @@ export function paintCaption(): void {
   if (coveredH !== null && coveredH < view.days * 24 * 0.67) {
     return note(
       `the card only goes back ${hoursMinutes(coveredH * 3600)} — the rest of this ` +
-        `${view.days}-day window is older than anything it holds`,
+        `${rangeNoun(view.days)} window is older than anything it holds`,
     );
   }
   cap.textContent = CHART_HINT;
@@ -139,6 +140,25 @@ export function speedReadout(spd: number | undefined): string {
 }
 
 /** "4.19 V" / "4.19 V ⚡ charging" / '' -- the battery row. */
+/**
+ * What the meter saw in one bucket: "45.1 W", "4.3–45.6 W" when the draw
+ * moved inside those five minutes, and "· cycling ×3" when those swings were
+ * confirmed run/stop flips. The snapshot alone is what let a fan cycling
+ * every minute read as an ordinary reading at whatever instant it was taken.
+ */
+export function powerReadout(
+  w: number | null,
+  flips: number | null,
+  lo: number | null = null,
+  hi: number | null = null,
+): string {
+  if (w === null) return '';
+  // A range worth printing: more than a watt of spread inside one bucket.
+  const spread = lo !== null && hi !== null && hi - lo > 1;
+  const base = spread ? `${lo!.toFixed(1)}–${hi!.toFixed(1)} W` : `${w.toFixed(1)} W`;
+  return flips !== null && flips > 0 ? `${base} · cycling ×${flips}` : base;
+}
+
 export function battReadout(volts: number | null, charging: boolean): string {
   if (volts === null) return '';
   return `${volts.toFixed(2)} V${charging ? ' ⚡ charging' : ''}`;
@@ -159,7 +179,7 @@ function paintReadouts(): void {
   $('roP').textContent = hpa === null ? '' : `${hpa.toFixed(1)} mb`;
   $('roB').textContent = battReadout(at(s.bv, i), s.chg[i] === 1);
   const w = at(s.w, i);
-  $('roW').textContent = w === null ? '' : `${w.toFixed(1)} W`;
+  $('roW').textContent = powerReadout(w, at(s.flips, i), at(s.wmin, i), at(s.wmax, i));
   $('roV').textContent = gasReadout(at(s.voc, i), at(s.vocr, i));
   $('roN').textContent = gasReadout(at(s.nox, i), at(s.noxr, i));
 }
@@ -202,10 +222,7 @@ export function drawAll(): void {
       (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
-  if (view.rows.power) {
-    drawSimple($<HTMLCanvasElement>('cv_w'), s, s.w, SERIES_COLOURS.power,
-      (v) => v.toFixed(1), 'no plug data yet', view.scrub);
-  }
+  if (view.rows.power) drawPower($<HTMLCanvasElement>('cv_w'), s, view.scrub);
   // Gas rows plot the INDEX once the algorithm produces one, and the raw
   // ticks before that -- the user asked to watch the warm-up, not to stare at
   // a flat zero for the hours Sensirion's blackout lasts.

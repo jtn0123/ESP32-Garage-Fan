@@ -31,11 +31,22 @@ float inside_c();
 /** Did the BME280 barometer answer its last transaction? */
 bool ok();
 
-/** Yard reading from MQTT, already degF on the wire. */
+/**
+ * One outdoor poll, degF on the wire. The firmware's own open-meteo fetch
+ * (net/weather) is the ONLY caller: the Home Assistant relay that used to
+ * race it was removed in 1.23.0 -- see sensors/outdoor.h for what that race
+ * did to the differential.
+ */
 void set_outside_f(float f);
-/** Bridge-published epoch for the yard reading, when the feed provides one. */
-void set_outdoor_epoch(long epoch);
-/** Yard temperature in degC, NAN once stale (30 min, or by bridge epoch). */
+
+/** Outdoor temperature in degC, smoothed over the last polls; NAN once the
+ *  feed goes stale, which auto reads as "hold, never guess". */
 float outside_c_fresh();
+
+/** The last raw poll in degC, unsmoothed -- telemetry only, never control. */
+float outside_c_raw();
+
+/** True when no usable outdoor reading is held (the fan is flying blind). */
+bool outside_stale();
 
 }  // namespace climate

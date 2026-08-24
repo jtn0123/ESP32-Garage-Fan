@@ -58,6 +58,9 @@ const int16_t* voc() { return ring().vi; }
 const int16_t* nox() { return ring().ni; }
 const int8_t* speed() { return ring().s; }
 const int8_t* chg() { return ring().c; }
+const int8_t* flips() { return ring().f; }
+const float* w_min() { return ring().wn; }
+const float* w_max() { return ring().wx; }
 
 void temp_stats(float* mn, float* mx, float* avg) { ring().temp_stats(mn, mx, avg); }
 
