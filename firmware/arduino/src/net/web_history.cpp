@@ -414,9 +414,12 @@ void handle_boots() {
         long ts = 0;
         unsigned long boots = 0;
         char cause[24] = "";
+        char fw[16] = "";
         // %23[^\n,] stops at the separator AND the newline, so a truncated
-        // final line cannot drag the next record into this one's cause.
-        if (sscanf(line, "%ld,%lu,%23[^\n,]", &ts, &boots, cause) < 2)
+        // final line cannot drag the next record into this one's cause. The
+        // fourth field arrived in 1.26.0; older rows simply do not have it,
+        // and the JSON omits the key rather than inventing a version.
+        if (sscanf(line, "%ld,%lu,%23[^\n,],%15[^\n,]", &ts, &boots, cause, fw) < 2)
           return true;  // skip a malformed row rather than tearing the body
         // The cause lands inside a JSON string, and the file is bytes on a
         // card that anything could have written -- a quote or a backslash in
@@ -430,9 +433,18 @@ void handle_boots() {
           if (!safe)
             *p = '_';
         }
-        if (!c->tx->printf(c->n ? ",{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"}"
-                                : "{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"}",
+        // Same by-construction rule for the version: digits and dots is what
+        // gen_device_header emits, so anything else on the card is corruption
+        // and drops the field rather than risking the document.
+        bool fw_ok = fw[0] != '\0';
+        for (const char* p = fw; fw_ok && *p; ++p) fw_ok = (*p >= '0' && *p <= '9') || *p == '.';
+        if (!c->tx->printf(c->n ? ",{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\""
+                                : "{" WK_TS "%ld," WK_N "%lu," WK_CAUSE "\"%s\"",
                            ts, boots, cause[0] ? cause : "unknown"))
+          return false;
+        if (fw_ok && !c->tx->printf("," WK_FW "\"%s\"", fw))
+          return false;
+        if (!c->tx->print("}"))
           return false;
         c->n++;
         return true;
