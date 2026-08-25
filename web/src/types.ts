@@ -183,6 +183,9 @@ export interface BootMark {
   n: number;
   /** How the PREVIOUS life ended: "brownout", "panic", "sw_reset", ... */
   cause: string;
+  /** Firmware version that came up at this boot. Absent on rows written
+   *  before 1.26.0 -- the chart then falls back to the cause alone. */
+  fw?: string;
 }
 
 export interface Boots {

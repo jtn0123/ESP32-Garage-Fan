@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "config.h"
 #include "esp_task_wdt.h"
 #include "storage/line_reader.h"
 #include "system/crashlog.h"
@@ -58,12 +59,15 @@ void tick() {
       return;
     }
   }
-  // The cause is crashlog's word for how the PREVIOUS life ended, which is
-  // exactly what the operator wants beside a gap: "brownout", "panic",
-  // "sw_reset" (an OTA or a requested restart).
+  // The cause is crashlog's word for how the PREVIOUS life ended ("brownout",
+  // "panic", "sw_reset"); the version is what THIS life is running. Together
+  // they let the chart say "this is where 1.26.0 went on" instead of the
+  // cause's ambiguous "sw_reset" -- which covers an OTA and a plain requested
+  // restart indistinguishably.
   char line[64];
-  const int n = snprintf(line, sizeof(line), "%ld,%lu,%s\n", static_cast<long>(booted),
-                         static_cast<unsigned long>(crashlog::boots()), crashlog::last_death());
+  const int n =
+      snprintf(line, sizeof(line), "%ld,%lu,%s,%s\n", static_cast<long>(booted),
+               static_cast<unsigned long>(crashlog::boots()), crashlog::last_death(), FW_VERSION);
   if (n <= 0 || n >= static_cast<int>(sizeof(line))) {
     f.close();
     g_written = true;  // unformattable, and retrying cannot change that

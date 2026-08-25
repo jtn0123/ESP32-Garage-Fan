@@ -259,35 +259,92 @@ function fillDifferential({ c, W, H }: Surface, s: Series, sc: Scale): void {
 }
 
 /**
+ * One label per restart, or one per CLUSTER of restarts.
+ *
+ * A deploy session is three or four reboots inside an hour -- 38 to 80 px
+ * apart on the 6 h view, 9 to 20 on the 24 h one -- and the label is ~97 px
+ * wide, so per-mark labels are guaranteed to scribble over each other at
+ * exactly the moment they matter most. Greedy left-to-right: a mark joins the
+ * group when its stem lands before the previous label (plus breathing room)
+ * has ended. Exported for the unit tests; the maths is the whole feature.
+ */
+export function clusterMarks(xs: readonly number[], labelW: number, pad = 8): number[][] {
+  const groups: number[][] = [];
+  for (let i = 0; i < xs.length; i++) {
+    const g = groups[groups.length - 1];
+    if (g !== undefined && (xs[i] ?? 0) - (xs[g[0] ?? 0] ?? 0) < labelW + pad) g.push(i);
+    else groups.push([i]);
+  }
+  return groups;
+}
+
+/**
+ * What a group's one label says.
+ *
+ * The version, when the record carries one, is the headline: "sw_reset" names
+ * an OTA and a plain requested restart indistinguishably, and the question a
+ * mark actually answers on this fan is "which firmware went on here". Rows
+ * from before 1.26.0 have no version and fall back to the cause alone.
+ */
+export function bootLabel(group: readonly BootMark[]): string {
+  const last = group[group.length - 1];
+  if (last === undefined) return '';
+  const fw = [...group].reverse().find((b) => b.fw)?.fw;
+  if (group.length === 1) {
+    const cause = last.cause === 'unknown' ? 'restart' : `restart · ${last.cause}`;
+    return fw ? `${cause} → ${fw}` : cause;
+  }
+  return fw ? `${group.length} restarts → ${fw}` : `${group.length} restarts`;
+}
+
+/**
  * Restart stems, drawn last so nothing hides them.
  *
  * This is the half the outage band cannot supply: the band says "no data
  * here", the mark says "because it rebooted, and this is how the last life
  * ended". Restarts happen BETWEEN rows, hence xAtTime rather than a row index.
+ * Every restart keeps its own stem and flag; only the LABEL is shared when
+ * stems sit closer than the words (see clusterMarks).
  */
 function drawBootMarks({ c, W, H }: Surface, s: Series, boots: readonly BootMark[]): void {
+  const placed: { x: number; b: BootMark }[] = [];
   for (const b of boots) {
     const x = xAtTime(s, b.ts, W);
-    if (x === null) continue;
-    const flip = x > W - 70;  // near the right edge, label leftwards
+    if (x !== null) placed.push({ x, b });
+  }
+  if (placed.length === 0) return;
+  placed.sort((a, b) => a.x - b.x);
+
+  c.font = '9px "JetBrains Mono",monospace';
+  const widest = Math.max(...placed.map((p) => c.measureText(bootLabel([p.b])).width));
+  const groups = clusterMarks(placed.map((p) => p.x), widest);
+
+  for (const p of placed) {
     c.strokeStyle = RESTART_C;
     c.lineWidth = 1.4;
     c.setLineDash([3, 3]);
     c.beginPath();
-    c.moveTo(x + 0.5, 0);
-    c.lineTo(x + 0.5, H - 2);
+    c.moveTo(p.x + 0.5, 0);
+    c.lineTo(p.x + 0.5, H - 2);
     c.stroke();
     c.setLineDash([]);
     c.fillStyle = RESTART_C;
     c.beginPath();  // a small dropped flag, so the stem reads as an event
-    c.moveTo(x, 1);
-    c.lineTo(x + 7, 4.5);
-    c.lineTo(x, 8);
+    c.moveTo(p.x, 1);
+    c.lineTo(p.x + 7, 4.5);
+    c.lineTo(p.x, 8);
     c.closePath();
     c.fill();
-    c.font = '9px "JetBrains Mono",monospace';
+  }
+  c.fillStyle = RESTART_C;
+  for (const g of groups) {
+    const marks = g.map((i) => placed[i]!);
+    const label = bootLabel(marks.map((m) => m.b));
+    const first = marks[0]!.x;
+    const flip = first + c.measureText(label).width + 9 > W - R;
     c.textAlign = flip ? 'right' : 'left';
-    c.fillText(b.cause === 'unknown' ? 'restart' : `restart · ${b.cause}`, x + (flip ? -9 : 9), 9);
+    const anchor = flip ? (marks[marks.length - 1]!.x) : first;
+    c.fillText(label, anchor + (flip ? -9 : 9), 9);
   }
 }
 

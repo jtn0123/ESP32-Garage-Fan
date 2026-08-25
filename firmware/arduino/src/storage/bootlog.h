@@ -25,7 +25,7 @@ namespace bootlog {
  */
 void tick();
 
-/** Stream `epoch,boots,cause` lines at or after `cutoff`, oldest first. */
+/** Stream `epoch,boots,cause[,fw]` lines at or after `cutoff`, oldest first. */
 uint32_t stream(time_t cutoff, sdcard::LineSink sink, void* ctx);
 
 }  // namespace bootlog
