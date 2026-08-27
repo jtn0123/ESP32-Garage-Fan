@@ -4,6 +4,14 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # The fantape log reader. It has no dependencies today and the point is to
+  # keep it that way, so this entry exists to notice if one ever arrives --
+  # and to keep the Rust edition/toolchain honest if that changes.
+  - package-ecosystem: "cargo"
+    directory: "/tools/fantape"
+    schedule:
+      interval: "weekly"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

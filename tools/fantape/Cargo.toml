@@ -1,0 +1,22 @@
+[package]
+name = "fantape"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Read the garage fan's flight recorder and say what the fan is actually doing."
+license = "MIT"
+publish = false
+
+# No dependencies, on purpose.
+#
+# This tool talks to one plain-HTTP device on the LAN and parses two formats
+# this repo defines. An HTTP client crate would bring a TLS stack and a few
+# hundred transitive packages to fetch `http://10.x.x.x/events.log`, and a JSON
+# crate would bring a derive macro to read four fixed arrays. Neither buys
+# anything here, and both would put a Cargo.lock full of other people's code in
+# front of a tool whose whole job is to be trustworthy at 2am.
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+strip = true
