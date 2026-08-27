@@ -111,10 +111,15 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 /* ---- scope ---- */
 #scope{margin-top:16px;border:1px solid #1c2b3d;border-radius:10px;background:linear-gradient(180deg,#0b131d 0%,#080d14 100%);padding:0 0 15px;box-shadow:0 0 0 1px rgba(59,130,246,.06),0 18px 44px rgba(0,0,0,.5)}
 #scbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid #16212e;flex-wrap:wrap}
+/* The scope's readouts were #4a5a6e on near-black: 2.5:1, against the 4.5:1
+   that 9 px text needs. --dim is 4.9:1 on the darkest end of the panel's
+   gradient and is the token the rest of the console already de-emphasises
+   with. #scdot below stays as it is: it carries no text and no meaning --
+   the state it decorates is spelled out in #scstate beside it. */
 #scdot{width:7px;height:7px;border-radius:50%;background:#3d4653}
 #sctitle{font:700 10px var(--mono);letter-spacing:.16em;color:#cfe0f2}
-#scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:#4a5a6e}
-#scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:#4a5a6e}
+#scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:var(--dim)}
+#scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:var(--dim)}
 #scknobs span{padding:3px 7px;border:1px solid #1c2b3d;border-radius:3px}
 /* The scope's only way out, at 50x13 before this. Hit area only, again: the
    scope bar is a fixed-height strip and padding would reflow it. */

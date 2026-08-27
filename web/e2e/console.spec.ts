@@ -341,3 +341,60 @@ test('every touch control on the console screen is at least 44 px', async ({ pag
   await page.locator('#scclose').click();
   await expect(page.locator('#scope')).toHaveClass(/hide/);
 });
+
+/**
+ * The scope's readouts have to be legible, not merely present.
+ *
+ * They shipped at #4a5a6e on near-black -- 2.5:1, against the 4.5:1 that 9 px
+ * text needs, on a panel read on a phone in a garage. A colour is one token
+ * away from regressing at any time and nothing else here would notice, so the
+ * ratio is computed rather than eyeballed.
+ *
+ * #scdot is deliberately absent: it carries no text and no meaning of its own,
+ * and the state it decorates is spelled out in #scstate beside it.
+ */
+test('the scope readouts meet the contrast minimum', async ({ page }) => {
+  await openConsole(page);
+  const ratios = await page.evaluate(() => {
+    const channel = (v: number): number =>
+      v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    const lum = (rgb: string): number => {
+      const [r, g, b] = rgb.match(/\d+(\.\d+)?/g)!.slice(0, 3).map(Number) as [
+        number,
+        number,
+        number,
+      ];
+      return (
+        0.2126 * channel(r / 255) + 0.7152 * channel(g / 255) + 0.0722 * channel(b / 255)
+      );
+    };
+    // Walk up for the first ancestor that actually paints a background: the
+    // readouts sit on the scope's gradient, not on their own fill.
+    const backdrop = (el: Element): string => {
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const bg = getComputedStyle(n).backgroundColor;
+        if (bg && !/rgba?\([^)]*,\s*0\s*\)/.test(bg) && bg !== 'transparent') return bg;
+      }
+      return 'rgb(0, 0, 0)';
+    };
+    return ['scstate', 'scknobs'].map((id) => {
+      const el = document.getElementById(id)!;
+      const a = lum(getComputedStyle(el).color);
+      const b = lum(backdrop(el));
+      const [hi, lo] = a > b ? [a, b] : [b, a];
+      return { id, ratio: (hi + 0.05) / (lo + 0.05) };
+    });
+  });
+  for (const { id, ratio } of ratios) {
+    expect(ratio, `#${id} is ${ratio.toFixed(2)}:1 against its backdrop`).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  }
+});
+
+test('the page declares its language', async ({ page }) => {
+  // Screen readers pick a pronunciation from this; without it they guess from
+  // the system locale and read a console full of English abbreviations wrong.
+  await openConsole(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+});
