@@ -1,7 +1,7 @@
 # Development dependencies for the ESP32-Garage-Fan project
 
 # Code formatting and linting
-ruff>=0.16.3
+ruff>=0.16.4
 black>=26.5.1
 
 # Type checking
