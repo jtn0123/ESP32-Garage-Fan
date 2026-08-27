@@ -1,5 +1,5 @@
 {
-  "//": "Checker only -- esbuild does the emitting, tsc never writes a file. Full `strict` plus the two flags that catch the bugs this page is actually prone to: noUncheckedIndexedAccess (every history series is an array indexed by a scrub position that may be past the end) and exactOptionalPropertyTypes (the /api/state payload has genuinely optional fields like `batt`, and conflating absent with undefined is how the old page ended up rendering 'undefined%'). Run via `npm run typecheck`.",
+  "//": "Checker only -- esbuild does the emitting, tsc never writes a file. Full `strict` plus the two flags that catch the bugs this page is actually prone to: noUncheckedIndexedAccess (every history series is an array indexed by a scrub position that may be past the end) and exactOptionalPropertyTypes (the /api/state payload has genuinely optional fields like `batt`, and conflating absent with undefined is how the old page ended up rendering 'undefined%'). Run via `bun run typecheck`.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

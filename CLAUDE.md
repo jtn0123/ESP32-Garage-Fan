@@ -37,10 +37,10 @@ It is a SEPARATE project now.
   rename or add a wire field, change both sides or pytest fails.
 - The web console is TypeScript under `web/`. Never hand-edit
   `web/dist/console.html` or `src/generated_page.h`: both are build output.
-- Console tests come in two layers. `web/tests/` is jsdom units (`npm test`).
+- Console tests come in two layers. `web/tests/` is jsdom units (`bun run test`).
   `web/e2e/` drives a real browser against `scripts/mock_device.py`, which
   serves `web/dist/console.html` verbatim — so it exercises the bytes that ship
-  (`npm run test:e2e`; `npm run check` runs everything). Add a case there for
+  (`bun run test:e2e`; `bun run check` runs everything). Add a case there for
   any new control: the unit tests stub the API and never click anything, so
   button-to-request wiring is covered nowhere else. Scenario knobs (`/_scen`)
   drive the states hardware rarely reaches; specs that flip them live in

@@ -3,7 +3,7 @@
  * Phone-sized screenshot sweep of the console, for looking at it rather than
  * asserting on it.
  *
- *   npm run build && node shots.mjs round3 [--port 8123]
+ *   bun run build && bun shots.mjs round3 [--port 8123]
  *
  * The argument names a sweep, not a path: every sweep lands in the gitignored
  * <repo>/.shots/<name>/, so a run can never write outside the working copy.
@@ -21,7 +21,7 @@
  * and for the same reason -- the mock keeps state in module globals, so
  * sharing one with a test run lets each corrupt the other's screen.
  *
- * Renders web/dist/console.html, so `npm run build` first or the sweep shows
+ * Renders web/dist/console.html, so `bun run build` first or the sweep shows
  * the previous bundle.
  */
 import { spawn } from 'node:child_process';
