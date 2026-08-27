@@ -22,19 +22,18 @@ force-sort-within-sections = true
 [tool.mypy]
 python_version = "3.11"
 namespace_packages = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-# Every def in scripts/ carries annotations as of the quality round; new
-# untyped code is a CI failure (the mypy entry in the lint matrix).
-disallow_untyped_defs = true
+# `strict` rather than the individual flags it turns on. scripts/ passed it
+# with one finding (an entity id read out of untyped JSON and returned as a
+# str), so this is a ratchet against new looseness, not a backlog. It subsumes
+# the flags that used to be listed here -- disallow_untyped_defs,
+# warn_redundant_casts, warn_unused_ignores, strict_optional -- and adds the
+# ones that matter at the JSON boundary this repo lives on: warn_return_any,
+# disallow_any_generics, disallow_untyped_calls and strict_equality.
+#
+# Scope is scripts/ (what CI checks). tests/ is not strict-clean yet.
+strict = true
 no_implicit_optional = true
-strict_optional = true
 
-[[tool.mypy.overrides]]
-module = [
-    "serial.*",
-]
-ignore_missing_imports = true
 
 [tool.pyright]
 pythonVersion = "3.11"

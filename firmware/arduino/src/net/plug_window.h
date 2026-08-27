@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 
+#include <cmath>
 #include <cstdio>
 
 #include "system/fixed_fmt.h"
@@ -33,7 +34,7 @@ inline constexpr size_t kLogMsgCap = 80;
  * Returns -1 when there is no reading to place.
  */
 inline int nearest_speed(const float* table, uint8_t n, float w) {
-  if (!table || n == 0 || w != w)  // w != w: NaN
+  if (!table || n == 0 || std::isnan(w))
     return -1;
   uint8_t best = 0;
   for (uint8_t i = 1; i < n; i++) {
@@ -64,7 +65,7 @@ struct Reading {
 /** Encode a reading; anything past 6553.4 W saturates rather than wrapping. */
 inline Reading encode_reading(float w, int speed, int cls) {
   Reading r{Reading::kNoRead, static_cast<int8_t>(speed), static_cast<int8_t>(cls)};
-  if (w == w && w >= 0.0f) {  // w == w: not NaN
+  if (!std::isnan(w) && w >= 0.0f) {
     const float dw = w * 10.0f + 0.5f;
     r.dw = dw >= 65534.0f ? 65534 : static_cast<uint16_t>(dw);
   }
@@ -128,7 +129,7 @@ struct Window {
       run++;
     else if (cls < 0)
       stop++;
-    if (w != w) {  // NaN: the meter did not answer
+    if (std::isnan(w)) {  // the meter did not answer
       missed++;
       return;
     }
