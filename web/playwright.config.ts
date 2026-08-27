@@ -32,10 +32,18 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] ? 2 : 0,
-  // Each worker now owns a mock process, so workers no longer contend for one
-  // server -- but each one is still a browser plus a Python process, so this
-  // stays modest rather than defaulting to half the cores.
-  workers: process.env['CI'] ? 2 : 4,
+  // Each worker owns a mock process, so workers no longer contend for one
+  // server -- but each is still a browser PLUS a Python process, which is why
+  // this is not simply the core count.
+  //
+  // 3 on CI, not Playwright's default of 2: this suite is the slowest job in
+  // the pipeline by a wide margin (~4m of a ~5m run), and it is almost all
+  // waiting. Measured locally at 249 tests: 2 -> 212s, 3 -> 159s, 4 -> 131s.
+  // A standard GitHub runner has 4 vCPUs, so 3 workers means 3 browsers and 3
+  // mocks with a core still free; 4 would leave nothing for the runner itself
+  // and trade wall-clock for flakiness, which is a bad trade in a suite whose
+  // failures already cost a rerun.
+  workers: process.env['CI'] ? 3 : 4,
   // CI also writes the HTML report: `github` annotates the failing line in the
   // diff and `list` scrolls past in the log, but neither survives as something
   // you can open afterwards. The workflow uploads playwright-report/ next to
