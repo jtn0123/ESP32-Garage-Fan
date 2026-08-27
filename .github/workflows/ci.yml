@@ -331,7 +331,20 @@ jobs:
               pip install cpplint
               ;;
             mypy)
-              pip install --only-binary :all: mypy==1.20.0
+              # pytest too, not just mypy: tests/ is in scope now and it imports
+              # pytest. Without the library installed mypy cannot resolve it,
+              # and every @pytest.fixture and @parametrize then reports
+              # untyped-decorator -- 17 errors that say nothing about the code.
+              # pytest ships inline types, so the library alone is the whole
+              # fix; no stub package is involved.
+              #
+              # Pinned and wheel-only for the same reason mypy is: this job
+              # exists to read the source, so nothing it installs should be
+              # able to RUN anything, and a lint result that changes because a
+              # transitive resolve moved is not a lint result. requirements.txt
+              # would bring three libraries nothing here type-checks against,
+              # under ranges rather than pins.
+              pip install --only-binary :all: mypy==1.20.0 pytest==9.1.1
               ;;
             clang-format)
               sudo apt-get update
@@ -365,7 +378,7 @@ jobs:
               # Strictness lives in pyproject.toml ([tool.mypy] has
               # disallow_untyped_defs); this stays a bare invocation so local
               # runs and CI cannot drift.
-              mypy scripts/ 2>&1 | tee mypy.txt
+              mypy scripts/ tests/ 2>&1 | tee mypy.txt
               ;;
             cpplint)
               FILES=$(find firmware/arduino/src -type f \( -name "*.cpp" -o -name "*.h" \))

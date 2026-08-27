@@ -55,7 +55,7 @@ def run_sed(expr: str, payload: str) -> str:
     return out.stdout.strip()
 
 
-def test_every_state_field_extracts_on_this_sed():
+def test_every_state_field_extracts_on_this_sed() -> None:
     """Each extraction must return something from a real payload.
 
     An expression that yields "" is the exact failure mode: deploy.sh treats
@@ -72,7 +72,7 @@ def test_every_state_field_extracts_on_this_sed():
     )
 
 
-def test_extracted_values_are_correct():
+def test_extracted_values_are_correct() -> None:
     exprs = sed_exprs()
     expected = {
         "fw": "1.14.29",
@@ -86,7 +86,7 @@ def test_extracted_values_are_correct():
         assert run_sed(exprs[name], LIVE_STATE) == want, f"{name} extracted wrongly"
 
 
-def test_confirmed_false_is_distinguished_from_missing():
+def test_confirmed_false_is_distinguished_from_missing() -> None:
     """A false must read as "false", not as empty.
 
     deploy.sh branches on `confirmed = true`; if false and missing both came
@@ -96,7 +96,7 @@ def test_confirmed_false_is_distinguished_from_missing():
     assert run_sed(expr, LIVE_STATE.replace('"confirmed":true', '"confirmed":false')) == "false"
 
 
-def test_no_gnu_only_bre_in_state_extractions():
+def test_no_gnu_only_bre_in_state_extractions() -> None:
     """Static guard, so this cannot regress on a GNU-sed developer machine.
 
     The runtime tests above only fail where sed is BSD. Someone working on
@@ -110,7 +110,7 @@ def test_no_gnu_only_bre_in_state_extractions():
     )
 
 
-def test_truncated_payload_yields_empty_so_the_smoke_check_fails_closed():
+def test_truncated_payload_yields_empty_so_the_smoke_check_fails_closed() -> None:
     """deploy.sh requires cause/sd_mb/drops to be non-empty and aborts otherwise.
 
     That guard only works if a truncated body really does produce empty rather

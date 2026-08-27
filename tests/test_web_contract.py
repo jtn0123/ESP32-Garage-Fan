@@ -121,25 +121,25 @@ def check(function: str, *ts_names: str) -> None:
     )
 
 
-def test_state_json_matches_devicestate():
+def test_state_json_matches_devicestate() -> None:
     # BatteryState and PlugState are nested under DeviceState (batt, plug) and
     # written by the same function, so all three interfaces mirror one writer.
     check("state_json", "DeviceState", "BatteryState", "PlugState")
 
 
-def test_handle_device_matches_deviceinfo():
+def test_handle_device_matches_deviceinfo() -> None:
     check("handle_device", "DeviceInfo")
 
 
-def test_handle_stats_matches_stats():
+def test_handle_stats_matches_stats() -> None:
     check("handle_stats", "Stats")
 
 
-def test_handle_sensors_matches_sensors():
+def test_handle_sensors_matches_sensors() -> None:
     check("handle_sensors", "Sensors")
 
 
-def test_handle_history_matches_history():
+def test_handle_history_matches_history() -> None:
     # ApiError covers the 400 branch: days is required to be 1|7|30|60 and the
     # rejection body is part of the wire contract like any other response.
     # The series keys live in write_all_series (the shared emitter both
@@ -153,13 +153,13 @@ def test_handle_history_matches_history():
     )
 
 
-def test_handle_boots_matches_boots():
+def test_handle_boots_matches_boots() -> None:
     # The restart marks the charts hang their outage labels on. BootMark is
     # nested inside Boots (the `boots` array), so one writer mirrors both.
     check("handle_boots", "Boots", "BootMark", "ApiError")
 
 
-def test_duty_table_matches_protocol():
+def test_duty_table_matches_protocol() -> None:
     """kHighUs is measured off the wall controller; the console renders it via
     /api/device. Pin the values so neither side can be 'tidied' silently."""
     expected = [0, 3477, 4072, 4868, 5066, 5661, 6159, 6754, 7251, 7847, 8344, 8940, 9437]
@@ -171,7 +171,7 @@ def test_duty_table_matches_protocol():
         assert values == expected, "the measured duty table changed -- PROTOCOL.md is ground truth"
 
 
-def test_history_branches_agree():
+def test_history_branches_agree() -> None:
     """Both /api/history branches must emit the SAME series.
 
     The 7/30-day path used to run through a different writer that emitted only
@@ -212,7 +212,7 @@ def test_history_branches_agree():
     ), "both branches must report which store answered"
 
 
-def test_handle_sd_purge_matches_purgeresult():
+def test_handle_sd_purge_matches_purgeresult() -> None:
     """The purge response is part of the wire contract like any other.
 
     It was the one endpoint whose fields nothing pinned, and it grew three of
@@ -233,7 +233,7 @@ def test_handle_sd_purge_matches_purgeresult():
 #
 # tests/test_http_contract.py pins the behaviour against the mock; this pins the
 # firmware itself, which is the thing that actually serves the bytes.
-def test_core_dump_handlers_check_the_token():
+def test_core_dump_handlers_check_the_token() -> None:
     # The handlers moved to web_maint.cpp in the web.cpp split; scan wherever
     # they live so a future move breaks on "not found", not on a stale path.
     web = "\n".join(p.read_text() for p in (SRC / "net").glob("web*.cpp"))
@@ -259,7 +259,7 @@ def test_core_dump_handlers_check_the_token():
 # That is not hypothetical. `onf` and `offf` -- the auto-mode differential --
 # were absent here, so the two steppers that set it had never been exercised end
 # to end by anything at all.
-def test_mock_accepts_every_config_arg_the_firmware_does():
+def test_mock_accepts_every_config_arg_the_firmware_does() -> None:
     web = (SRC / "net" / "web.cpp").read_text()
     body = re.search(r"static void handle_config\(\)\s*\{(.*?)\n\}", web, re.S)
     assert body, "handle_config() not found -- did it move or get renamed?"
@@ -296,7 +296,7 @@ def test_mock_accepts_every_config_arg_the_firmware_does():
     )
 
 
-def test_mock_provisions_exactly_the_args_the_firmware_does():
+def test_mock_provisions_exactly_the_args_the_firmware_does() -> None:
     """/api/provision: the mock's PROVISION_KEYS must be the firmware's kArgs,
     in both directions, for the same reason as the config-arg test above --
     a field the console can set against the mock but the device drops is a

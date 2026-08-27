@@ -13,21 +13,13 @@ flash (2026-08-12). If this test fails after an encoder change, the C port in
 ui/qr_v1.h is wrong too until proven otherwise -- they are the same algorithm.
 """
 
-import importlib.util
-import pathlib
-import sys
+from types import ModuleType
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+from conftest import load_script
 
 
-def _load_mock():
-    spec = importlib.util.spec_from_file_location(
-        "mock_device", ROOT / "scripts" / "mock_device.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["mock_device"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+def _load_mock() -> ModuleType:
+    return load_script("mock_device")
 
 
 # Each row of the 21x21 matrix packed as 21 bits -> 6 hex digits, MSB = x0.
@@ -83,7 +75,7 @@ EXPECTED = {
 }
 
 
-def test_the_mock_encoder_matches_the_reference_library():
+def test_the_mock_encoder_matches_the_reference_library() -> None:
     mock = _load_mock()
     for payload, rows in EXPECTED.items():
         got = mock.qr_v1_encode(payload)
@@ -92,7 +84,7 @@ def test_the_mock_encoder_matches_the_reference_library():
         assert packed == rows, f"{payload}: matrix diverges from segno's"
 
 
-def test_the_encoder_refuses_what_cannot_fit_or_scan():
+def test_the_encoder_refuses_what_cannot_fit_or_scan() -> None:
     mock = _load_mock()
     # Lowercase is outside QR's alphanumeric set; silently encoding it in byte
     # mode would need V2 and not fit the panel spot. Refuse, never guess.
