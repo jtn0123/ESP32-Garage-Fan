@@ -20,7 +20,7 @@ import { defineConfig, devices } from '@playwright/test';
  * The mock serves web/dist/console.html verbatim -- the same bytes that get
  * embedded into src/generated_page.h and shipped to the board -- so these tests
  * exercise the artifact that actually deploys, not a dev server rendering of it.
- * `npm run test:e2e` rebuilds first so the bundle under test is current.
+ * `bun run test:e2e` rebuilds first so the bundle under test is current.
  *
  * What this can and cannot prove: the mock implements the SPEC, not the
  * firmware. Passing here means the console and the documented contract agree.

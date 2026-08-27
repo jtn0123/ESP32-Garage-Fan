@@ -1,20 +1,55 @@
 {
-  "//": "Checker only -- esbuild does the emitting, tsc never writes a file. Full `strict` plus the two flags that catch the bugs this page is actually prone to: noUncheckedIndexedAccess (every history series is an array indexed by a scrub position that may be past the end) and exactOptionalPropertyTypes (the /api/state payload has genuinely optional fields like `batt`, and conflating absent with undefined is how the old page ended up rendering 'undefined%'). Run via `npm run typecheck`.",
+  "//": "Checker only -- esbuild does the emitting, tsc never writes a file. Run via `bun run typecheck`. Every flag below reports zero errors against the source as it stands: they were added as a ratchet against future mistakes, not as a backlog to work off.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
+
     "strict": true,
+    // The two that earned their place by catching real bugs on this page:
+    // every history series is an array indexed by a scrub position that may be
+    // past the end, and the /api/state payload has genuinely optional fields
+    // like `batt` -- conflating absent with undefined is how the old page
+    // ended up rendering 'undefined%'.
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "skipLibCheck": true,
+    "noImplicitOverride": true,
+
+    // A key that only exists on an index signature is not a known property, so
+    // reading it has to look like a lookup. This is what makes `process.env['CI']`
+    // read differently from a typo'd `config.retires`.
+    "noPropertyAccessFromIndexSignature": true,
+
+    // Unreachable code and unused labels are almost always a mistake caught
+    // mid-edit -- an early return left behind, a condition inverted. These are
+    // warnings by default; here they fail the build.
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+
+    // esbuild compiles each file alone and cannot see across them, so anything
+    // needing whole-program knowledge is a bug it will never report. These three
+    // make tsc reject exactly what esbuild cannot handle: erasableSyntaxOnly
+    // bans the constructs (enums, parameter properties, namespaces) that need
+    // real emit rather than type stripping.
+    "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+
+    // An import kept only for its side effects still has to resolve.
+    "noUncheckedSideEffectImports": true,
+
+    // skipLibCheck off costs ~0.5s and buys the guarantee that a dependency
+    // bump cannot land a type error nobody sees. The bumps are the risky
+    // moment, which is exactly when this earns its keep.
+    "skipLibCheck": false,
+
     "types": ["vitest/globals", "node"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts", "playwright.config.ts"]

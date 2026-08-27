@@ -22,19 +22,25 @@ force-sort-within-sections = true
 [tool.mypy]
 python_version = "3.11"
 namespace_packages = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-# Every def in scripts/ carries annotations as of the quality round; new
-# untyped code is a CI failure (the mypy entry in the lint matrix).
-disallow_untyped_defs = true
+# scripts/ is a directory of standalone tools, not an installed package, so the
+# tests reach it by path. Telling mypy the same thing is what lets it follow
+# `import mock_state` instead of giving up with import-not-found -- and once it
+# follows, it type-checks the call across that boundary.
+mypy_path = "scripts"
+# `strict` rather than the individual flags it turns on. scripts/ passed it
+# with one finding (an entity id read out of untyped JSON and returned as a
+# str), so this is a ratchet against new looseness, not a backlog. It subsumes
+# the flags that used to be listed here -- disallow_untyped_defs,
+# warn_redundant_casts, warn_unused_ignores, strict_optional -- and adds the
+# ones that matter at the JSON boundary this repo lives on: warn_return_any,
+# disallow_any_generics, disallow_untyped_calls and strict_equality.
+#
+# Scope is scripts/ AND tests/. The tests earn it: they are what stands between
+# a wire-format change and a device that ships a page the console cannot read,
+# so an untyped helper there is worth as much as one in the code it checks.
+strict = true
 no_implicit_optional = true
-strict_optional = true
 
-[[tool.mypy.overrides]]
-module = [
-    "serial.*",
-]
-ignore_missing_imports = true
 
 [tool.pyright]
 pythonVersion = "3.11"

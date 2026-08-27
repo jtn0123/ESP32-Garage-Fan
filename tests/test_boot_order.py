@@ -52,13 +52,13 @@ def prologue() -> str:
     return body[:idx]
 
 
-def test_watchdog_is_armed_in_setup():
+def test_watchdog_is_armed_in_setup() -> None:
     body = strip_comments(setup_body())
     assert "esp_task_wdt_init" in body, "setup() must arm the task watchdog"
     assert "esp_task_wdt_add(NULL)" in body, "the loop task must be watched"
 
 
-def test_the_watchdog_is_configured_before_the_task_registers():
+def test_the_watchdog_is_configured_before_the_task_registers() -> None:
     """init must precede add, or the prologue check measures nothing.
 
     Every other test here slices the body at ``esp_task_wdt_add``. If add moved
@@ -94,7 +94,7 @@ def test_the_watchdog_is_configured_before_the_task_registers():
         "web::begin",
     ],
 )
-def test_hangable_calls_run_under_the_watchdog(call):
+def test_hangable_calls_run_under_the_watchdog(call: str) -> None:
     body = strip_comments(setup_body())
     if call not in body:
         pytest.skip(f"{call} is no longer in setup()")
@@ -105,7 +105,7 @@ def test_hangable_calls_run_under_the_watchdog(call):
     )
 
 
-def test_coredump_probe_is_never_in_the_boot_prologue():
+def test_coredump_probe_is_never_in_the_boot_prologue() -> None:
     """The exact call that bricked the board. It must not creep back up."""
     pro = prologue()
     for needle in ("coredump", "esp_core_dump", "esp_partition_find"):
@@ -115,7 +115,7 @@ def test_coredump_probe_is_never_in_the_boot_prologue():
         )
 
 
-def test_prologue_is_short_and_only_pin_safe_states():
+def test_prologue_is_short_and_only_pin_safe_states() -> None:
     """A tight budget: the fan's safe-state pins, Serial, and the watchdog.
 
     Asserting on a line count is crude, but the failure mode here is drift --

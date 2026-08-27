@@ -1,11 +1,12 @@
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(ROOT, "scripts"))
+from conftest import ROOT as _ROOT
+
+ROOT = str(_ROOT)
 
 
-def test_gen_header_emits_wifi_country_and_bssid_channel():
+def test_gen_header_emits_wifi_country_and_bssid_channel() -> None:
     # Simulate a device.yaml dict
     data = {
         "room_name": "Test",

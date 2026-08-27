@@ -106,41 +106,53 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # npm ci runs dependency lifecycle scripts; nothing after checkout
-          # needs Git auth, so do not leave the token in .git/config for them.
+          # Nothing after checkout needs Git auth, so do not leave the token
+          # sitting in .git/config where an installed dependency could read it.
           persist-credentials: false
 
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      # One binary instead of node + npm + npx. bun runs the same tools the
+      # repo already pins -- tsc, vitest, esbuild via build.mjs, playwright --
+      # so nothing about the OUTPUT changes; web/dist/console.html stays
+      # byte-identical. Only the runtime and the installer are different.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          bun-version: '1.3.14'
 
+      # --frozen-lockfile is the `npm ci` guarantee: fail rather than silently
+      # resolve something bun.lock did not pin.
+      #
+      # --ignore-scripts for the same reason the e2e job has it: this runner
+      # installs dependencies and then executes them, so a compromised
+      # postinstall would run with the workspace in reach. The old `npm ci`
+      # here did not have it -- an existing gap this closes in passing.
+      # Nothing in this job needs lifecycle scripts: esbuild resolves its
+      # platform binary through optionalDependencies, and tsc and vitest are
+      # plain bins.
       - name: Install
         working-directory: web
-        run: npm ci
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Typecheck
         working-directory: web
-        run: npm run typecheck
+        run: bun run typecheck
 
       - name: Unit tests
         working-directory: web
-        run: npm test
+        run: bun run test
 
       # web/dist/console.html is a committed build artifact: the firmware build
-      # runs with only Python and PlatformIO, so `pio run` must never need npm.
+      # runs with only Python and PlatformIO, so `pio run` must never need bun.
       # That trade only holds if the committed copy really is what the source
       # produces -- otherwise the device ships a page nobody can regenerate.
       - name: Rebuild and check the committed bundle is current
         working-directory: web
         run: |
           set -euo pipefail
-          npm run build
+          bun run build
           if ! git diff --exit-code -- dist/console.html; then
             echo "::error::web/dist/console.html is stale."
-            echo "Run 'npm --prefix web run build' and commit the result."
+            echo "Run 'bun --cwd web run build' and commit the result."
             exit 1
           fi
 
@@ -158,12 +170,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          bun-version: '1.3.14'
 
       # The mock is the device under test here; it needs nothing but the stdlib.
       - name: Setup Python
@@ -178,24 +188,24 @@ jobs:
       # Playwright CLI is a plain bin, so both work without lifecycle scripts.
       - name: Install
         working-directory: web
-        run: npm ci --ignore-scripts
+        run: bun install --frozen-lockfile --ignore-scripts
 
-      # `npm run`, not `npx`: npx fetches a package on demand at whatever
+      # `bun run`, not `bunx`: bunx fetches a package on demand at whatever
       # version it resolves, while this runs the playwright already pinned by
-      # package-lock.json and just installed above.
+      # bun.lock and just installed above.
       - name: Install browsers
         working-directory: web
-        run: npm run e2e:browsers
+        run: bun run e2e:browsers
 
       - name: Run the suite
         working-directory: web
-        run: npm run test:e2e
+        run: bun run test:e2e
 
       # Traces and screenshots for whatever failed. Without these a red run in
       # CI is far harder to read than the same failure locally.
       - name: Upload the report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: |
@@ -321,7 +331,20 @@ jobs:
               pip install cpplint
               ;;
             mypy)
-              pip install --only-binary :all: mypy==1.20.0
+              # pytest too, not just mypy: tests/ is in scope now and it imports
+              # pytest. Without the library installed mypy cannot resolve it,
+              # and every @pytest.fixture and @parametrize then reports
+              # untyped-decorator -- 17 errors that say nothing about the code.
+              # pytest ships inline types, so the library alone is the whole
+              # fix; no stub package is involved.
+              #
+              # Pinned and wheel-only for the same reason mypy is: this job
+              # exists to read the source, so nothing it installs should be
+              # able to RUN anything, and a lint result that changes because a
+              # transitive resolve moved is not a lint result. requirements.txt
+              # would bring three libraries nothing here type-checks against,
+              # under ranges rather than pins.
+              pip install --only-binary :all: mypy==1.20.0 pytest==9.1.1
               ;;
             clang-format)
               sudo apt-get update
@@ -355,7 +378,7 @@ jobs:
               # Strictness lives in pyproject.toml ([tool.mypy] has
               # disallow_untyped_defs); this stays a bare invocation so local
               # runs and CI cannot drift.
-              mypy scripts/ 2>&1 | tee mypy.txt
+              mypy scripts/ tests/ 2>&1 | tee mypy.txt
               ;;
             cpplint)
               FILES=$(find firmware/arduino/src -type f \( -name "*.cpp" -o -name "*.h" \))

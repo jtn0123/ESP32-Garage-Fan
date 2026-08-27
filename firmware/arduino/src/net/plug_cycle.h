@@ -40,6 +40,8 @@
 
 #include <stdint.h>
 
+#include <cmath>
+
 namespace plug {
 
 struct CycleCfg {
@@ -72,7 +74,7 @@ inline constexpr float kNoTrough = 1e9f;
  * "this is cycling" can never come from two different rules.
  */
 inline int8_t classify(float w, float expect_w, const CycleCfg& cfg = kCycleDefaults) {
-  if (w != w || expect_w != expect_w || expect_w < cfg.min_expect_w)  // x != x: NaN
+  if (std::isnan(w) || std::isnan(expect_w) || expect_w < cfg.min_expect_w)
     return 0;
   if (w >= expect_w * cfg.run_frac)
     return 1;
@@ -102,9 +104,17 @@ struct CycleDetector {
   float trough_w = 0;        // quietest reading since onset (kNoTrough = none yet)
   uint8_t bucket_flips = 0;  // flips since take_bucket_flips(), for history
 
-  /** Flips inside the last `polls` polls. */
-  uint8_t flips_in(uint8_t polls) const {
-    const uint64_t mask = polls >= 64 ? ~0ULL : ((1ULL << polls) - 1);
+  /**
+   * Flips inside the last `span` polls.
+   *
+   * `span`, not `polls`: this type has a `polls` MEMBER (polls since onset),
+   * and a parameter of that name silently wins inside the body. The two mean
+   * different things -- one is how long the episode has run, the other is how
+   * far back to look -- so a reader who guessed wrong would misread the whole
+   * detector. -Wshadow on the native envs is what keeps this honest.
+   */
+  uint8_t flips_in(uint8_t span) const {
+    const uint64_t mask = span >= 64 ? ~0ULL : ((1ULL << span) - 1);
     uint64_t v = flip_bits & mask;
     uint8_t n = 0;
     while (v) {
