@@ -131,7 +131,7 @@ jobs:
       # plain bins.
       - name: Install
         working-directory: web
-        run: bun install --frozen-lockfile --ignore-scripts
+        run: bash ../scripts/bun_install_ci.sh
 
       - name: Typecheck
         working-directory: web
@@ -188,7 +188,7 @@ jobs:
       # Playwright CLI is a plain bin, so both work without lifecycle scripts.
       - name: Install
         working-directory: web
-        run: bun install --frozen-lockfile --ignore-scripts
+        run: bash ../scripts/bun_install_ci.sh
 
       # `bun run`, not `bunx`: bunx fetches a package on demand at whatever
       # version it resolves, while this runs the playwright already pinned by
