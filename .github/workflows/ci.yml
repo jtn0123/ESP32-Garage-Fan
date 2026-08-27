@@ -331,7 +331,14 @@ jobs:
               pip install cpplint
               ;;
             mypy)
+              # requirements.txt too, not just mypy: tests/ is in scope now and
+              # it imports pytest. Without the library installed mypy cannot
+              # resolve it, and every @pytest.fixture and @parametrize then
+              # reports untyped-decorator -- 17 errors that say nothing about
+              # the code. pytest ships inline types, so installing it is the
+              # whole fix; no stub package is involved.
               pip install --only-binary :all: mypy==1.20.0
+              pip install -r requirements.txt
               ;;
             clang-format)
               sudo apt-get update
