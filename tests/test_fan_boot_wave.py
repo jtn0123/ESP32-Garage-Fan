@@ -39,7 +39,7 @@ def _restore_body() -> str:
     raise AssertionError("unbalanced braces in restore()")
 
 
-def test_restore_drives_the_wave_outside_every_conditional():
+def test_restore_drives_the_wave_outside_every_conditional() -> None:
     body = _restore_body()
     # A brace-free `if (...) set_wave(...);` sits at function depth and would
     # fool the brace counter below; reject the form outright.

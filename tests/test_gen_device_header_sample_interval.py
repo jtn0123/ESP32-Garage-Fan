@@ -8,56 +8,49 @@ Below the minimum the BME280 self-heats and reads high, which is why an
 out-of-range value is rejected rather than used.
 """
 
-import os
-import sys
-
+import gen_device_header as gdh
 import pytest
-
-ROOT = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(ROOT, "scripts"))
-
-import gen_device_header as gdh  # noqa: E402
 
 
 class TestResolveSampleInterval:
-    def test_defaults_to_five_minutes(self):
+    def test_defaults_to_five_minutes(self) -> None:
         assert gdh.resolve_sample_interval({}, env={}) == 300
 
-    def test_reads_yaml_value(self):
+    def test_reads_yaml_value(self) -> None:
         assert gdh.resolve_sample_interval({"sample_interval": "10m"}, env={}) == 600
 
-    def test_accepts_plain_seconds(self):
+    def test_accepts_plain_seconds(self) -> None:
         assert gdh.resolve_sample_interval({"sample_interval": "90"}, env={}) == 90
 
-    def test_env_overrides_yaml(self):
+    def test_env_overrides_yaml(self) -> None:
         data = {"sample_interval": "10m"}
         assert gdh.resolve_sample_interval(data, env={"SAMPLE_INTERVAL": "2m"}) == 120
 
-    def test_blank_env_falls_back_to_yaml(self):
+    def test_blank_env_falls_back_to_yaml(self) -> None:
         data = {"sample_interval": "7m"}
         assert gdh.resolve_sample_interval(data, env={"SAMPLE_INTERVAL": "  "}) == 420
 
     @pytest.mark.parametrize("value", ["5", "0", "59"])
-    def test_rejects_below_minimum(self, value, capsys):
+    def test_rejects_below_minimum(self, value: str, capsys: pytest.CaptureFixture[str]) -> None:
         # Too-frequent sampling self-heats the sensor, so this must not pass through.
         assert gdh.resolve_sample_interval({"sample_interval": value}, env={}) == 300
         assert "outside" in capsys.readouterr().out
 
     @pytest.mark.parametrize("value", ["2h", "86400"])
-    def test_rejects_above_maximum(self, value, capsys):
+    def test_rejects_above_maximum(self, value: str, capsys: pytest.CaptureFixture[str]) -> None:
         assert gdh.resolve_sample_interval({"sample_interval": value}, env={}) == 300
         assert "outside" in capsys.readouterr().out
 
-    def test_rejects_out_of_range_env_value(self, capsys):
+    def test_rejects_out_of_range_env_value(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert gdh.resolve_sample_interval({}, env={"SAMPLE_INTERVAL": "1s"}) == 300
         assert "outside" in capsys.readouterr().out
 
     @pytest.mark.parametrize("value", ["60", "3600"])
-    def test_bounds_are_inclusive(self, value, capsys):
+    def test_bounds_are_inclusive(self, value: str, capsys: pytest.CaptureFixture[str]) -> None:
         assert gdh.resolve_sample_interval({"sample_interval": value}, env={}) == int(value)
         assert "outside" not in capsys.readouterr().out
 
-    def test_falls_back_to_process_environment(self, monkeypatch):
+    def test_falls_back_to_process_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """env=None is the production call from main(); it must read os.environ."""
         monkeypatch.setenv("SAMPLE_INTERVAL", "4m")
         assert gdh.resolve_sample_interval({"sample_interval": "10m"}) == 240

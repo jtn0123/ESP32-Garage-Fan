@@ -365,7 +365,7 @@ jobs:
               # Strictness lives in pyproject.toml ([tool.mypy] has
               # disallow_untyped_defs); this stays a bare invocation so local
               # runs and CI cannot drift.
-              mypy scripts/ 2>&1 | tee mypy.txt
+              mypy scripts/ tests/ 2>&1 | tee mypy.txt
               ;;
             cpplint)
               FILES=$(find firmware/arduino/src -type f \( -name "*.cpp" -o -name "*.h" \))

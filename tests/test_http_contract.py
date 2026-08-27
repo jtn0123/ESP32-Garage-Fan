@@ -10,6 +10,7 @@ and not sufficient, which is the same caveat written at the top of the mock.
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ import socket
 import subprocess
 import sys
 import time
+from typing import Any
 import urllib.error
 import urllib.request
 
@@ -56,7 +58,7 @@ def _free(port: int) -> bool:
 
 
 @pytest.fixture(scope="module")
-def mock():
+def mock() -> Iterator[subprocess.Popen[bytes]]:
     if not CONSOLE.exists():
         pytest.skip("web/dist/console.html not built")
     proc = subprocess.Popen(
@@ -89,7 +91,7 @@ def mock():
     assert "Traceback" not in err, f"mock raised during the suite:\n{err[-2000:]}"
 
 
-def req(path: str, method: str = "GET", origin: str | None = None):
+def req(path: str, method: str = "GET", origin: str | None = None) -> tuple[int, bytes]:
     r = urllib.request.Request(BASE + path, method=method)
     if origin:
         r.add_header("Origin", origin)
@@ -100,13 +102,15 @@ def req(path: str, method: str = "GET", origin: str | None = None):
         return e.code, e.read()
 
 
-def get_json(path: str):
+def get_json(path: str) -> Any:
+    """Any on purpose: this is the wire, and the wire is untyped. Every caller
+    asserts the shape it needs, which is the honest place for that check."""
     status, body = req(path)
     assert status == 200, f"{path} -> {status}"
     return json.loads(body)
 
 
-def scen(**kw):
+def scen(**kw: object) -> None:
     q = "&".join(f"{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in kw.items())
     status, _ = req(f"/_scen?{q}")
     assert status == 200, f"scenario {q} rejected"
@@ -116,21 +120,21 @@ def scen(**kw):
 
 
 @pytest.mark.parametrize("path", ["/api/set?speed=0", "/api/config?auto=0", "/api/raw?high_pct=0"])
-def test_mutating_routes_refuse_GET(mock, path):
+def test_mutating_routes_refuse_GET(mock: subprocess.Popen[bytes], path: str) -> None:
     """They answered GET until 1.14.23, so any page could fire them with <img>."""
     status, _ = req(path)
     assert status == 404, f"GET {path} should not reach a mutating handler"
 
 
 @pytest.mark.parametrize("path", ["/api/set?speed=0", "/api/config?auto=0"])
-def test_mutating_routes_refuse_a_foreign_origin(mock, path):
+def test_mutating_routes_refuse_a_foreign_origin(mock: subprocess.Popen[bytes], path: str) -> None:
     """POST-only is not enough: a cross-origin form POSTs without a preflight."""
     status, body = req(path, "POST", origin="http://evil.example")
     assert status == 403
     assert b"cross-origin" in body
 
 
-def test_lookalike_origins_are_refused(mock):
+def test_lookalike_origins_are_refused(mock: subprocess.Popen[bytes]) -> None:
     for origin in (
         "http://127.0.0.1.evil.example",
         "http://localhost.evil.example",
@@ -141,26 +145,28 @@ def test_lookalike_origins_are_refused(mock):
         assert status == 403, f"{origin} should not be accepted as self"
 
 
-def test_the_console_origin_is_accepted(mock):
+def test_the_console_origin_is_accepted(mock: subprocess.Popen[bytes]) -> None:
     status, _ = req("/api/set?speed=4", "POST", origin=BASE)
     assert status == 200
     assert get_json("/api/state")["speed"] == 4
 
 
-def test_a_non_browser_caller_with_no_origin_is_accepted(mock):
+def test_a_non_browser_caller_with_no_origin_is_accepted(mock: subprocess.Popen[bytes]) -> None:
     """curl and deploy.sh send no Origin; rejecting them buys nothing."""
     status, _ = req("/api/set?speed=6", "POST")
     assert status == 200
     assert get_json("/api/state")["speed"] == 6
 
 
-def test_out_of_range_speed_is_refused(mock):
+def test_out_of_range_speed_is_refused(mock: subprocess.Popen[bytes]) -> None:
     for bad in ("13", "-1", "abc", ""):
         status, _ = req(f"/api/set?speed={bad}", "POST")
         assert status == 400, f"speed={bad!r} should be refused"
 
 
-def test_a_cycling_fan_is_reported_distinctly_from_a_disagreement(mock):
+def test_a_cycling_fan_is_reported_distinctly_from_a_disagreement(
+    mock: subprocess.Popen[bytes],
+) -> None:
     """The cycling profile's wire shape (net/plug_cycle.h via PlugState).
 
     `cycling` and `flips` ride beside the verdict so the console can say "the
@@ -193,7 +199,7 @@ def test_a_cycling_fan_is_reported_distinctly_from_a_disagreement(mock):
     assert all(not (f or 0) for f in get_json("/api/history?days=1")["flips"])
 
 
-def test_the_state_says_what_the_speed_should_draw(mock):
+def test_the_state_says_what_the_speed_should_draw(mock: subprocess.Popen[bytes]) -> None:
     """`45.1 W` means nothing on its own.
 
     expect_w and implied_spd ride WITH the reading so the console (and a
@@ -208,7 +214,7 @@ def test_the_state_says_what_the_speed_should_draw(mock):
     assert plug["implied_spd"] == 9
 
 
-def test_the_raw_meter_trace_is_served_and_guarded(mock):
+def test_the_raw_meter_trace_is_served_and_guarded(mock: subprocess.Popen[bytes]) -> None:
     """/api/plugtrace: the shape an episode has, which no log line can hold.
 
     Token-guarded like the rest of web_debug.cpp, and parallel arrays of the
@@ -236,7 +242,9 @@ def test_the_raw_meter_trace_is_served_and_guarded(mock):
 
 
 @pytest.mark.parametrize("days", ["1", "7", "30", "60"])
-def test_history_returns_one_shape_for_every_range(mock, days):
+def test_history_returns_one_shape_for_every_range(
+    mock: subprocess.Popen[bytes], days: str
+) -> None:
     """The 7/30-day path used to omit ts and four of the seven series."""
     scen(card=True, synced=True)
     h = get_json(f"/api/history?days={days}")
@@ -250,7 +258,7 @@ def test_history_returns_one_shape_for_every_range(mock, days):
     ), f"days={days} series lengths disagree: { {n: len(h[n]) for n in series} }"
 
 
-def test_history_timestamps_are_real_and_ascending(mock):
+def test_history_timestamps_are_real_and_ascending(mock: subprocess.Popen[bytes]) -> None:
     h = get_json("/api/history?days=1")
     ts = h["ts"]
     # Before indexing: all() over an empty list is true, so an empty series
@@ -262,18 +270,20 @@ def test_history_timestamps_are_real_and_ascending(mock):
 
 
 @pytest.mark.parametrize("days", ["0", "2", "90", "abc", ""])
-def test_history_rejects_undocumented_ranges(mock, days):
+def test_history_rejects_undocumented_ranges(mock: subprocess.Popen[bytes], days: str) -> None:
     """A malformed question gets an error, not the ring wearing the label."""
     status, _ = req(f"/api/history?days={days}")
     assert status == 400
 
 
-def test_history_without_days_is_refused(mock):
+def test_history_without_days_is_refused(mock: subprocess.Popen[bytes]) -> None:
     status, _ = req("/api/history")
     assert status == 400
 
 
-def test_a_range_the_card_cannot_answer_is_503_not_substituted_data(mock):
+def test_a_range_the_card_cannot_answer_is_503_not_substituted_data(
+    mock: subprocess.Popen[bytes],
+) -> None:
     """Serving 24 h of RAM under a 30-day request is the failure this prevents."""
     scen(card=False)
     try:
@@ -285,7 +295,7 @@ def test_a_range_the_card_cannot_answer_is_503_not_substituted_data(mock):
         scen(card=True)
 
 
-def test_resetting_the_rows_knob_does_not_break_history(mock):
+def test_resetting_the_rows_knob_does_not_break_history(mock: subprocess.Popen[bytes]) -> None:
     """rows=none is the documented reset; it crashed every later history and
     boots request with int(None) until 2026-08-20 (found dogfooding the
     knobs). A reset knob must behave exactly like an untouched one."""
@@ -299,7 +309,7 @@ def test_resetting_the_rows_knob_does_not_break_history(mock):
         scen(rows=60 * 288)
 
 
-def test_an_outage_is_visible_as_a_gap_in_the_timestamps(mock):
+def test_an_outage_is_visible_as_a_gap_in_the_timestamps(mock: subprocess.Popen[bytes]) -> None:
     scen(card=True, gap_at=50)
     try:
         h = get_json("/api/history?days=1")
@@ -313,7 +323,7 @@ def test_an_outage_is_visible_as_a_gap_in_the_timestamps(mock):
 # ----------------------------------------------------------------- download
 
 
-def test_download_csv_has_the_full_column_set(mock):
+def test_download_csv_has_the_full_column_set(mock: subprocess.Popen[bytes]) -> None:
     # The firmware's kCsvHeader, verbatim. This pinned the pre-1.14.47 set of
     # eight for weeks without anyone noticing, because the whole module was
     # being SKIPPED whenever port 8099 was busy -- which is why the port is
@@ -326,14 +336,14 @@ def test_download_csv_has_the_full_column_set(mock):
     )
 
 
-def test_download_csv_spans_the_same_range_the_charts_offer(mock):
+def test_download_csv_spans_the_same_range_the_charts_offer(mock: subprocess.Popen[bytes]) -> None:
     """60 days is a chart range, so it must also be an export range."""
     status, _ = req("/download.csv?days=60")
     assert status == 200
 
 
 @pytest.mark.parametrize("days", ["0", "61", "abc"])
-def test_download_csv_rejects_a_bad_range(mock, days):
+def test_download_csv_rejects_a_bad_range(mock: subprocess.Popen[bytes], days: str) -> None:
     """It used to clamp silently and label the file with the wrong span."""
     status, _ = req(f"/download.csv?days={days}")
     assert status == 400
@@ -342,7 +352,9 @@ def test_download_csv_rejects_a_bad_range(mock, days):
 # --------------------------------------------------------------------- misc
 
 
-def test_state_carries_everything_the_console_and_deploy_need(mock):
+def test_state_carries_everything_the_console_and_deploy_need(
+    mock: subprocess.Popen[bytes],
+) -> None:
     s = get_json("/api/state")
     for field in (
         "fw",
@@ -360,7 +372,7 @@ def test_state_carries_everything_the_console_and_deploy_need(mock):
         assert field in s, f"/api/state is missing {field}"
 
 
-def test_uptime_and_boots_allow_frame_ordering(mock):
+def test_uptime_and_boots_allow_frame_ordering(mock: subprocess.Popen[bytes]) -> None:
     """The console orders frames by (boots, uptime_s); both must be present."""
     a = get_json("/api/state")
     req("/api/set?speed=2", "POST")
@@ -368,13 +380,13 @@ def test_uptime_and_boots_allow_frame_ordering(mock):
     assert (b["boots"], b["uptime_s"]) >= (a["boots"], a["uptime_s"])
 
 
-def test_token_guarded_routes_refuse_without_one(mock):
+def test_token_guarded_routes_refuse_without_one(mock: subprocess.Popen[bytes]) -> None:
     for path in ("/api/restart", "/api/sdformat", "/api/sdpurge", "/update", "/api/provision"):
         status, _ = req(path, "POST")
         assert status == 403, f"{path} must not act without a token"
 
 
-def test_provisioning_applies_only_what_it_was_given(mock):
+def test_provisioning_applies_only_what_it_was_given(mock: subprocess.Popen[bytes]) -> None:
     """The credentials form: changed fields only, validated before applied,
     and the device info afterwards reports what was stored -- never a password."""
     before = get_json("/api/device")
@@ -397,7 +409,7 @@ def test_provisioning_applies_only_what_it_was_given(mock):
     )
 
 
-def test_core_dump_reads_require_a_token(mock):
+def test_core_dump_reads_require_a_token(mock: subprocess.Popen[bytes]) -> None:
     """A read that hands over the credential guarding every write.
 
     A core dump is a snapshot of RAM at the fault, and RAM holds g_token, the
@@ -411,19 +423,19 @@ def test_core_dump_reads_require_a_token(mock):
         assert status == 403, f"{path} must not serve a RAM image without a token"
 
 
-def test_unknown_routes_are_404_json(mock):
+def test_unknown_routes_are_404_json(mock: subprocess.Popen[bytes]) -> None:
     status, body = req("/api/nope")
     assert status == 404
     assert json.loads(body)["error"] == "404"
 
 
-def test_the_console_page_is_served(mock):
+def test_the_console_page_is_served(mock: subprocess.Popen[bytes]) -> None:
     status, body = req("/")
     assert status == 200
     assert body.lstrip().startswith(b"<!doctype html>")
 
 
-def test_display_frame_has_two_planes_of_the_right_size(mock):
+def test_display_frame_has_two_planes_of_the_right_size(mock: subprocess.Popen[bytes]) -> None:
     """The e-ink mirror's wire shape.
 
     The console blits these bytes straight to a canvas, so a wrong stride or a
@@ -442,7 +454,7 @@ def test_display_frame_has_two_planes_of_the_right_size(mock):
     assert d["age_s"] >= -1
 
 
-def test_display_refresh_is_post_only(mock):
+def test_display_refresh_is_post_only(mock: subprocess.Popen[bytes]) -> None:
     """Repainting parks the device for seconds; a GET must not be able to."""
     status, _ = req("/api/display/refresh", "POST")
     assert status == 200
@@ -450,7 +462,7 @@ def test_display_refresh_is_post_only(mock):
     assert status in (404, 405), "a GET must not trigger a panel repaint"
 
 
-def test_every_scenario_knob_is_in_the_playwright_reset(mock):
+def test_every_scenario_knob_is_in_the_playwright_reset(mock: subprocess.Popen[bytes]) -> None:
     """The e2e reset must restore EVERY knob, not the ones someone remembered.
 
     web/e2e/harness.ts resets the mock between tests from its own SCEN_DEFAULTS
@@ -477,7 +489,7 @@ def test_every_scenario_knob_is_in_the_playwright_reset(mock):
     )
 
 
-def test_an_accepted_update_reboots_onto_the_knobbed_version(mock):
+def test_an_accepted_update_reboots_onto_the_knobbed_version(mock: subprocess.Popen[bytes]) -> None:
     """The one-click install watches boots/fw/confirmed after /update; the mock
     must move them the way the board does, and only for the right token."""
     before = get_json("/api/state")
