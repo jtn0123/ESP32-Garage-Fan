@@ -87,3 +87,8 @@ web/.playwright/
 
 # Screenshot sweeps from web/shots.mjs (look at them, do not commit them)
 .shots/
+
+# Rust build output (tools/fantape). Cargo.lock IS committed: this is a
+# binary, so a reproducible build matters more than dependency flexibility --
+# even with no dependencies to pin today.
+tools/fantape/target/

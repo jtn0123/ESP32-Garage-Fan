@@ -46,6 +46,11 @@ It is a SEPARATE project now.
   drive the states hardware rarely reaches; specs that flip them live in
   `e2e/scenarios.spec.ts` and get their own mock process, because the knobs are
   global and would otherwise break whatever runs beside them.
+- `tools/fantape` is a host-side Rust CLI that reads `/events.log` and
+  `/api/plugtrace` off the device and prints the diagnosis in `docs/HARDWARE.md`
+  ("is the fan doing what it was told, and if not, which side is at fault").
+  Zero dependencies on purpose; `cargo test` needs no device. It is not on the
+  chip and not in the console, so it cannot break either.
 - `VERSION` at the repo root is the only firmware version. Do not hardcode one
   in C++ again.
 - The whole repo is the fan now. The inherited ESP32-Temp-Sensor room-node

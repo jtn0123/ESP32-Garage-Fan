@@ -246,6 +246,45 @@ jobs:
       - name: Run native test envs
         run: bash scripts/test-native.sh
 
+  # The host-side log reader. Not on the device and not in the console, so it
+  # cannot break either -- but it is the thing someone reaches for when the fan
+  # misbehaves, which is the worst moment to discover it does not build.
+  fantape:
+    name: fantape (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/fantape
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The toolchain the runner ships, pinned by its own image rather than by
+      # a third-party action: this crate has no dependencies and needs nothing
+      # newer than the 1.74 in Cargo.toml, so an action that downloads a
+      # toolchain would be more supply chain than the job is worth.
+      - name: Show toolchain
+        run: rustc --version && cargo --version
+
+      - name: Format
+        run: cargo fmt --check
+
+      # -D warnings, matching how the firmware builds under -Werror: a lint
+      # nobody has to fix is a lint nobody reads.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # --locked: fail if Cargo.lock would have to change. The lock is
+      # committed, so a silent resolve here would mean CI tested something
+      # other than what a clone builds.
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Release build
+        run: cargo build --release --locked
+
   tests-python:
     name: Python tests
     runs-on: ubuntu-latest
