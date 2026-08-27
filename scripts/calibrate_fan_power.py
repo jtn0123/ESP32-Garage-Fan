@@ -88,8 +88,11 @@ def ha_states() -> Any:
 def find_entity() -> str:
     if ENTITY:
         return ENTITY
-    hits = [
-        s["entity_id"]
+    # str(), not a bare index: _http hands back whatever json.load produced,
+    # so the entity id is Any until something coerces it. Naming the conversion
+    # here is what lets this function honestly promise a str.
+    hits: list[str] = [
+        str(s["entity_id"])
         for s in ha_states()
         if s["entity_id"].startswith("sensor.")
         and "power" in s["entity_id"]
