@@ -4,7 +4,7 @@
 // Output is committed at web/dist/console.html on purpose. The firmware build
 // runs on a machine with Python and PlatformIO and nothing else -- CI included
 // -- so `pio run` must never need npm. Treating the bundle like a vendored
-// artifact keeps a fresh clone buildable; `npm run build` regenerates it and CI
+// artifact keeps a fresh clone buildable; `bun run build` regenerates it and CI
 // fails the PR if the committed copy has drifted from the source.
 //
 // Everything is inlined (no external <script>/<link>) because the device serves
