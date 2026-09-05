@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "driver/gpio.h"
 #include "fan/auto_logic.h"
 #include "soc/gpio_periph.h"
 #include "system/eventlog.h"
@@ -206,13 +207,29 @@ void probe_pad(float* high_pct, uint32_t* transitions) {
   // GPIO, silently disconnecting LEDC/RMT -- the probe then reports the
   // stuck-low line the probe itself just created.
   REG_SET_BIT(GPIO_PIN_MUX_REG[FAN_PWM_PIN], FUN_IE);
+  // gpio_get_level(), NOT digitalRead(), and the difference is not stylistic.
+  //
+  // The pin is attached to LEDC, so Arduino's peripheral manager does not have
+  // it down as a GPIO. digitalRead() checks that on every call and logs
+  // "IO 18 is not set as GPIO" when it fails -- which our own vprintf hook
+  // then writes to the flight recorder. Measured on the device: 20 warnings
+  // per probe, 119 probes on one tape, 2118 of 2892 lines. The RAM ring holds
+  // 24 lines, so a single probe could evict every useful line in it.
+  //
+  // Worse than the noise: the logging is what made each read cost ~1.5 ms, so
+  // this 30 ms loop managed TWENTY samples. Three 100 Hz periods sampled 20
+  // times measures duty to about +/-5 points -- and log_window()'s MISMATCH
+  // alarm triggers at 5 points, so the instrument's own error was the size of
+  // the thing it was built to detect. gpio_get_level() reads the input
+  // register with no periman lookup and no logging, which is both silent and
+  // roughly four orders of magnitude more samples.
   uint32_t edges = 0;
   uint32_t highs = 0;
   uint32_t n = 0;
-  int last = digitalRead(FAN_PWM_PIN);
+  int last = gpio_get_level(static_cast<gpio_num_t>(FAN_PWM_PIN));
   const uint32_t t0 = micros();
   while (micros() - t0 < 30000) {
-    const int v = digitalRead(FAN_PWM_PIN);
+    const int v = gpio_get_level(static_cast<gpio_num_t>(FAN_PWM_PIN));
     highs += v;
     ++n;
     if (v != last) {
