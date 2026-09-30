@@ -14,10 +14,10 @@ import type {
   Stats,
 } from './types.js';
 
-async function json<T>(url: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
+async function json<T>(url: string, method: 'GET' | 'POST' = 'GET', init: RequestInit = {}): Promise<T> {
   // Timeout so a device that drops off the network mid-request fails the
   // call (and the poll retries) instead of holding a pending fetch forever.
-  const res = await fetch(url, { method, signal: AbortSignal.timeout(10_000) });
+  const res = await fetch(url, { ...init, method, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return (await res.json()) as T;
 }
@@ -62,16 +62,25 @@ export const getBoots = (days: number): Promise<Boots> =>
 export const setSpeed = (speed: number): Promise<DeviceState> =>
   json<DeviceState>(`/api/set?speed=${speed}`, 'POST');
 
-export const setConfig = (query: string): Promise<DeviceState> =>
-  json<DeviceState>(`/api/config?${query}`, 'POST');
+export const setConfig = (query: string): Promise<DeviceState> => {
+  const body = new URLSearchParams(query);
+  const token = body.get('auth') ?? '';
+  body.delete('auth');
+  return json<DeviceState>('/api/config', 'POST', {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Fan-Token': token },
+    body: body.toString(),
+  });
+};
 
-/** POST /api/provision?fields...&token=... -- see provision.ts. */
+/** Credentials in the form body; authorization in X-Fan-Token. */
 export async function provision(
   query: string,
   token: string,
 ): Promise<{ ok: boolean; error?: string; note?: string }> {
-  const res = await fetch(`/api/provision?${query}&token=${encodeURIComponent(token)}`, {
+  const res = await fetch('/api/provision', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Fan-Token': token },
+    body: query,
   });
   const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; note?: string };
   const out: { ok: boolean; error?: string; note?: string } = { ok: res.ok && body.ok === true };
@@ -84,7 +93,7 @@ export async function provision(
 async function guarded(path: string, token: string): Promise<string> {
   // POST to match the firmware: these routes reboot the board or erase the
   // card, and are registered POST-only so GET prefetchers can never fire them.
-  const res = await fetch(`${path}?token=${encodeURIComponent(token)}`, { method: 'POST' });
+  const res = await fetch(path, { method: 'POST', headers: { 'X-Fan-Token': token } });
   return res.text();
 }
 
@@ -103,7 +112,7 @@ export const purgeCard = (token: string): Promise<string> => guarded('/api/sdpur
 export async function uploadFirmware(file: File, token: string): Promise<string> {
   const body = new FormData();
   body.append('firmware', file);
-  const res = await fetch(`/update?token=${encodeURIComponent(token)}`, { method: 'POST', body });
+  const res = await fetch('/update', { method: 'POST', body, headers: { 'X-Fan-Token': token } });
   return res.text();
 }
 

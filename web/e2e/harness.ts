@@ -89,6 +89,11 @@ async function waitForMock(port: number, proc: ChildProcess): Promise<void> {
 }
 
 export const SCEN_DEFAULTS = {
+  actuator_fault: 'false',
+  mqtt: 'true',
+  confirmed: 'true',
+  inside_fresh: 'true',
+  outside_fresh: 'true',
   card: 'true',
   synced: 'true',
   // Rows the mock card HOLDS -- 60 days at 300 s, i.e. enough to fill every
@@ -379,12 +384,13 @@ export async function hasTouch(page: Page): Promise<boolean> {
 export async function openTip(page: Page, bit: Locator): Promise<void> {
   // The strip is the last thing on a long page, so it starts ~1500 px down:
   // page.touchscreen.tap() takes viewport coordinates and silently does nothing
-  // outside them, whereas hover() scrolls for you. Scroll first, measure after.
-  await bit.scrollIntoViewIfNeeded();
+  // outside them, whereas hover() scrolls and retargets replaced nodes for you.
+  // A separate desktop scroll can race the once-per-second SSE repaint.
   if (!(await hasTouch(page))) {
     await bit.hover();
     return;
   }
+  await bit.scrollIntoViewIfNeeded();
   const box = await bit.boundingBox();
   if (!box) throw new Error('the status bit has no box to tap');
   await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);

@@ -62,7 +62,7 @@ It is a SEPARATE project now.
   The duty table is measured, not derived — do not "clean it up". There is no
   tach or feedback line: D− was measured idling high, so anything needing RPM
   or stall detection needs new hardware first.
-- OTA: POST firmware.bin to `/update?token=...` (A/B slots; ota_rollback
+- OTA: POST firmware.bin to `/update` with `X-Fan-Token` (A/B slots; ota_rollback
   confirms an image only after it reaches the MQTT broker).
 - WiFi/MQTT credentials come from a gitignored `.env` at repo root via
   `scripts/gen_device_header.py` → `src/generated_config.h`. Fresh clones and

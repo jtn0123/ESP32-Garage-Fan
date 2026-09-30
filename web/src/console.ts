@@ -65,12 +65,14 @@ export function paintPwm(): void {
   const pct = ((w.highUs / w.periodUs) * 100).toFixed(1);
 
   const value = $('pwmval');
-  value.textContent = `${pct}%`;
+  value.textContent = view.state?.actuator_fault ? 'FAULT' : `${pct}%`;
   value.className = view.scopeOpen || view.previewOpen ? 'lit' : '';
   const hint = $('pwmhint');
   hint.textContent = view.scopeOpen ? 'LIVE ▾' : 'SIGNAL';
   hint.className = view.scopeOpen ? 'lit' : '';
-  $('pwmhigh').textContent = speed > 0 ? `${w.highUs} µs high` : 'line held low';
+  $('pwmhigh').textContent = view.state?.actuator_fault
+    ? 'PWM command rejected — last accepted setting shown'
+    : speed > 0 ? `${w.highUs} µs high` : 'line held low';
   $('pwmhz').textContent = `${(1e6 / w.periodUs).toFixed(1)} Hz`;
   if (!view.scopeOpen) return;
 
@@ -79,7 +81,7 @@ export function paintPwm(): void {
   dot.style.background = live ? OK : '#3d4653';
   dot.style.boxShadow = `0 0 9px ${live ? OK : '#3d4653'}`;
   const badge = $('scstate');
-  badge.textContent = live ? 'TRANSMITTING' : 'IDLE';
+  badge.textContent = view.state?.actuator_fault ? 'PWM FAILED' : live ? 'TRANSMITTING' : 'IDLE';
   badge.style.background = live ? 'rgba(34,160,107,.16)' : '#111823';
   badge.style.color = live ? OK : '#4a5a6e';
   $('scdiv').textContent = `${msPerDivision(w.periodUs)} ms/div`;

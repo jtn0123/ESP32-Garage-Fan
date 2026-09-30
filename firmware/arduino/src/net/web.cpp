@@ -19,12 +19,15 @@
 #include "generated_page.h"
 #include "generated_wire.h"
 #include "net/creds.h"
+#include "net/admin_token.h"
 #include "net/http_tx.h"
 #include "net/mqtt_link.h"
 #include "net/plug.h"
 #include "net/sse.h"
 #include "net/web_debug.h"
+#include "net/web_controls.h"
 #include "net/web_gate.h"
+#include "net/web_health.h"
 #include "net/web_history.h"
 #include "net/web_maint.h"
 #include "net/web_ota.h"
@@ -63,9 +66,6 @@ namespace {
 WebServer g_http(80);
 Preferences* g_prefs = nullptr;
 char g_token[40];
-
-bool token_ok(const String& presented) { return web_gate::token_ok(g_token, presented); }
-bool guard_origin() { return web_gate::guard_origin(g_http); }
 
 }  // namespace
 
@@ -130,7 +130,7 @@ void state_json(char* out, size_t cap) {
            "%lu," WK_SD_USED_MB "%lu," WK_SD_FREE_MB "%lu," WK_BATT "%s," WK_RSSI "%d," WK_DROPS
            "%lu," WK_MQTT "%s," WK_UPTIME_S "%lu," WK_IP "\"%s\"," WK_PLUG "%s," WK_GAS_ON
            "%s," WK_GAS_SPD "%d," WK_GAS_VOC "%d," WK_GAS_ACTIVE "%s," WK_WH_TODAY
-           "%.1f," WK_COST_KWH "%.3f}",
+           "%.1f," WK_COST_KWH "%.3f," WK_ACTUATOR_FAULT "%s}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
            fan::engage_f(), fan::release_f(), outside, kFwVersion, run ? run->label : "?",
            ota_rollback_image_confirmed() ? "true" : "false",
@@ -141,7 +141,8 @@ void state_json(char* out, size_t cap) {
            (unsigned long)wifi_link::drops(), mqtt_link::connected() ? "true" : "false",
            millis() / 1000UL, WiFi.localIP().toString().c_str(), plugs,
            fan::gas_boost_on() ? "true" : "false", fan::gas_speed(), fan::gas_voc_on(),
-           fan::gas_active() ? "true" : "false", odometer::wh_today(), odometer::cost_per_kwh());
+           fan::gas_active() ? "true" : "false", odometer::wh_today(), odometer::cost_per_kwh(),
+           fan::output_fault() ? "true" : "false");
 }
 
 void push_state() { sse::push(); }
@@ -162,7 +163,7 @@ static void json_str(char* dst, size_t cap, const char* src) {
 }
 
 static void handle_state() {
-  char buf[896];
+  char buf[960];
   state_json(buf, sizeof(buf));
   g_http.send(200, "application/json", buf);
 }
@@ -201,65 +202,6 @@ static void handle_device() {
   g_http.send(200, "application/json", out);
 }
 
-static void handle_config() {
-  if (!guard_origin())
-    return;
-
-  if (g_http.hasArg("auto"))
-    fan::set_auto(g_http.arg("auto").toInt() != 0);
-  if (g_http.hasArg("gason"))
-    fan::set_gas_boost(g_http.arg("gason").toInt() != 0);
-  if (g_http.hasArg("gasspd")) {
-    const int v = g_http.arg("gasspd").toInt();
-    if (v >= 1 && v <= 12)
-      fan::set_gas_speed(v);
-  }
-  if (g_http.hasArg("ckwh")) {
-    const float v = g_http.arg("ckwh").toFloat();
-    if (v >= 0.01f && v <= 2.0f)
-      odometer::set_cost_per_kwh(v);
-  }
-  if (g_http.hasArg("gasvoc")) {
-    // Floor of 100: the index recenters on 100 by construction, so a lower
-    // trigger would hold the boost latched on ordinary air.
-    const int v = g_http.arg("gasvoc").toInt();
-    if (v >= 100 && v <= 500)
-      fan::set_gas_voc_on(v);
-  }
-  if (g_http.hasArg("max")) {
-    const int m = g_http.arg("max").toInt();
-    if (m >= 1 && m <= 12)
-      fan::set_auto_max(m);
-  }
-  if (g_http.hasArg("min")) {
-    const int m = g_http.arg("min").toInt();
-    if (m >= 0 && m <= 12)
-      fan::set_auto_min(m);
-  }
-  if (g_http.hasArg("onf")) {
-    const float v = g_http.arg("onf").toFloat();
-    if (v >= 0.5f && v <= 20)
-      fan::set_engage_f(v);
-  }
-  if (g_http.hasArg("offf")) {
-    const float v = g_http.arg("offf").toFloat();
-    if (v >= 0 && v <= 20)
-      fan::set_release_f(v);
-  }
-  fan::enforce_hysteresis_gap();
-  if (g_http.hasArg("newtoken") && token_ok(g_http.arg("auth"))) {
-    const String nt = g_http.arg("newtoken");
-    if (nt.length() >= 6 && nt.length() < 39) {
-      snprintf(g_token, sizeof(g_token), "%s", nt.c_str());
-      if (g_prefs)
-        g_prefs->putString("token", g_token);
-      Serial.println("ota token changed");
-    }
-  }
-  push_state();
-  handle_state();
-}
-
 static void handle_sensors() {
   // A LIVE read, not the newest ring entry -- the console polls this once a
   // minute and calls the result `live`; it should be. Temp/RH are the SHT41
@@ -286,56 +228,19 @@ static void handle_sensors() {
   g_http.send(200, "application/json", buf);
 }
 
-// Calibration instrument: drive an arbitrary duty, no reflash per data point.
-static void handle_raw() {
-  if (!guard_origin())
-    return;
-
-  if (!g_http.hasArg("high_pct")) {
-    g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
-    return;
-  }
-  const int pct = g_http.arg("high_pct").toInt();
-  if (pct < 0 || pct > 100) {
-    g_http.send(400, "application/json", "{\"error\":\"high_pct 0-100\"}");
-    return;
-  }
-  fan::raw_high_us(static_cast<uint16_t>(static_cast<uint32_t>(kPeriodUs) * pct / 100));
-  char buf[48];
-  snprintf(buf, sizeof(buf), "{\"raw_high_pct\":%d}", pct);
-  g_http.send(200, "application/json", buf);
-}
-
-static void handle_set() {
-  if (!guard_origin())
-    return;
-
-  if (!g_http.hasArg("speed")) {
-    g_http.send(400, "application/json", "{\"error\":\"speed required\"}");
-    return;
-  }
-  const int v = g_http.arg("speed").toInt();
-  if (v < 0 || v > 12) {
-    g_http.send(400, "application/json", "{\"error\":\"0-12 only\"}");
-    return;
-  }
-  fan::apply(v, "http", /*manual=*/true);
-  handle_state();
-}
-
 }  // namespace
 
 void begin(Preferences* prefs) {
   g_prefs = prefs;
-  String tk = prefs ? prefs->getString("token", FAN_OTA_TOKEN) : String(FAN_OTA_TOKEN);
+  const String tk = admin_token::restore(prefs, FAN_OTA_TOKEN);
   snprintf(g_token, sizeof(g_token), "%s", tk.c_str());
   // WebServer discards every header it was not told to keep, so guard_origin()
   // would see nothing -- and, since "no Origin" means "non-browser caller",
   // would wave every cross-origin write straight through. This one line is
   // what makes the CSRF guard real rather than decorative.
   {
-    const char* kWanted[] = {"Origin"};
-    g_http.collectHeaders(kWanted, 1);
+    const char* kWanted[] = {"Origin", "X-Fan-Token"};
+    g_http.collectHeaders(kWanted, 2);
   }
   sse::set_state_source(state_json);
   g_http.on("/", []() {
@@ -354,9 +259,7 @@ void begin(Preferences* prefs) {
   // LAN by design -- and reachable by link prefetchers and history-restoring
   // browsers besides. The response is not readable cross-origin (no CORS
   // header here), but the write lands, which is the whole attack.
-  g_http.on("/api/set", HTTP_POST, handle_set);
-  g_http.on("/api/raw", HTTP_POST, handle_raw);
-  g_http.on("/api/config", HTTP_POST, handle_config);
+  web_controls::register_routes(g_http, prefs, g_token, handle_state, push_state);
   g_http.on("/api/sensors", handle_sensors);
   g_http.on("/manifest.json", []() {
     http_tx::send_big(g_http.client(), "application/json", kManifest, sizeof(kManifest) - 1);
@@ -365,6 +268,7 @@ void begin(Preferences* prefs) {
     http_tx::send_big(g_http.client(), "image/svg+xml", kIcon, sizeof(kIcon) - 1);
   });
   web_history::register_routes(g_http);
+  web_health::register_routes(g_http);
   web_maint::register_routes(g_http, g_token);
   web_debug::register_routes(g_http, g_token);
   web_ota::register_routes(g_http, g_token);

@@ -343,14 +343,18 @@ def main() -> None:  # NOSONAR -- complexity predates this PR; only annotations 
         if wifi_country:
             f.write(f"#define WIFI_COUNTRY {c_string(wifi_country)}\n")
         # OTA/update token: per-device secret from the gitignored .env. The
-        # firmware's config.h keeps a compile-time fallback for bench builds
-        # with no .env, and the device persists a runtime override in NVS, but
-        # a provisioned build should never ship the public default.
+        # firmware disables privileged routes without a private token; a valid
+        # runtime override already in NVS survives a release update.
         ota_token = str(os.getenv("FAN_OTA_TOKEN") or "")
-        if ota_token == "pick_a_long_random_token":
+        if ota_token and (
+            ota_token in {"pick_a_long_random_token", "iliving-ota"}
+            or not 6 <= len(ota_token) < 39
+            or "\r" in ota_token
+            or "\n" in ota_token
+        ):
             # The historical .env.example placeholder: as public as the
             # committed default, so baking it in would only feign security.
-            print("WARNING: FAN_OTA_TOKEN is the example placeholder; ignoring it")
+            print("WARNING: FAN_OTA_TOKEN is invalid or public; administrator access disabled")
             ota_token = ""
         if ota_token:
             f.write(f"#define FAN_OTA_TOKEN {c_string(ota_token)}\n")

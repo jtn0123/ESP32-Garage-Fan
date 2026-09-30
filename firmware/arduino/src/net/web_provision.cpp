@@ -26,55 +26,34 @@ void handle_provision() {
     return;
   if (!web_gate::guard_token(*g_http, g_token))
     return;
-  // Validate everything before storing anything: a half-applied set of
-  // credentials is the one outcome worse than a rejected one.
-  char bad[24] = "";
-  int given = 0;
-  for (const char* arg : kArgs) {
-    if (!g_http->hasArg(arg))
-      continue;
-    given++;
-    const String v = g_http->arg(arg);
-    // Dry-run the validation rules without persisting: set_field persists,
-    // so check the cheap invariants here and let set_field be authoritative
-    // for length once we commit.
-    if (strcmp(arg, "ssid") == 0 && v.length() == 0) {
-      snprintf(bad, sizeof(bad), "%s", arg);
-      break;
-    }
-    if (strcmp(arg, "mqtt_port") == 0) {
-      const long p = v.toInt();
-      if (p < 1 || p > 65535) {
-        snprintf(bad, sizeof(bad), "%s", arg);
-        break;
-      }
-    }
-  }
-  if (bad[0] != '\0') {
-    char body[64];
-    snprintf(body, sizeof(body), "{\"error\":\"bad %s\"}", bad);
-    g_http->send(400, "application/json", body);
-    return;
-  }
-  if (given == 0) {
-    g_http->send(400, "application/json", "{\"error\":\"no fields\"}");
-    return;
-  }
+  // Keep String storage alive throughout validation and the single commit.
+  String values[8];
+  creds::Input fields[8];
+  size_t given = 0;
   char applied[96] = "";
   size_t n = 0;
   for (const char* arg : kArgs) {
     if (!g_http->hasArg(arg))
       continue;
-    if (!creds::set_field(arg, g_http->arg(arg).c_str())) {
-      // Over-long value: storing stopped here, the earlier fields stand.
-      // Name it so the form can say which one rather than "failed".
-      char body[64];
-      snprintf(body, sizeof(body), "{\"error\":\"bad %s\"}", arg);
-      g_http->send(400, "application/json", body);
-      return;
-    }
-    if (n < sizeof(applied))
-      n += snprintf(applied + n, sizeof(applied) - n, n ? ",%s" : "%s", arg);
+    values[given] = g_http->arg(arg);
+    fields[given] = {arg, values[given].c_str()};
+    ++given;
+    n += snprintf(applied + n, sizeof(applied) - n, n ? ",%s" : "%s", arg);
+  }
+  if (given == 0) {
+    g_http->send(400, "application/json", "{\"error\":\"no fields\"}");
+    return;
+  }
+  const char* bad = "field";
+  const creds::Result result = creds::apply_fields(fields, given, &bad);
+  if (result != creds::Result::Ok) {
+    char body[80];
+    if (result == creds::Result::StorageFailure)
+      snprintf(body, sizeof(body), "{\"error\":\"credentials could not be saved\"}");
+    else
+      snprintf(body, sizeof(body), "{\"error\":\"bad %s\"}", bad);
+    g_http->send(result == creds::Result::StorageFailure ? 503 : 400, "application/json", body);
+    return;
   }
   // Field NAMES to the flight recorder, never values: this line is what
   // explains "the fan rebooted at 14:02 and came back on a new SSID".

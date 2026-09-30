@@ -131,6 +131,10 @@ def test_handle_device_matches_deviceinfo() -> None:
     check("handle_device", "DeviceInfo")
 
 
+def test_handle_health_matches_health() -> None:
+    check("handle_health", "Health")
+
+
 def test_handle_stats_matches_stats() -> None:
     check("handle_stats", "Stats")
 
@@ -260,10 +264,11 @@ def test_core_dump_handlers_check_the_token() -> None:
 # were absent here, so the two steppers that set it had never been exercised end
 # to end by anything at all.
 def test_mock_accepts_every_config_arg_the_firmware_does() -> None:
-    web = (SRC / "net" / "web.cpp").read_text()
+    web = (SRC / "net" / "web_controls.cpp").read_text()
     body = re.search(r"static void handle_config\(\)\s*\{(.*?)\n\}", web, re.S)
     assert body, "handle_config() not found -- did it move or get renamed?"
     firmware_args = set(re.findall(r'hasArg\("(\w+)"\)', body.group(1)))
+    firmware_args.update(re.findall(r'\{"(\w+)",', body.group(1)))
     assert firmware_args, "handle_config() parses no arguments; the regex is stale"
 
     mock = (ROOT / "scripts" / "mock_device.py").read_text()
