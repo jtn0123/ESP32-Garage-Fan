@@ -56,6 +56,13 @@ impl From<std::io::Error> for Error {
 ///
 /// `host` may carry a port ("10.0.0.5:8080"); port 80 is assumed otherwise.
 pub fn get(host: &str, path: &str) -> Result<String, Error> {
+    get_with_token(host, path, "")
+}
+
+pub fn get_with_token(host: &str, path: &str, token: &str) -> Result<String, Error> {
+    if token.contains(['\r', '\n']) {
+        return Err(Error::Malformed("invalid token header"));
+    }
     let authority = if host.contains(':') {
         host.to_string()
     } else {
@@ -74,9 +81,14 @@ pub fn get(host: &str, path: &str) -> Result<String, Error> {
 
     // HTTP/1.1 with an explicit close: the firmware's loop serves one request
     // at a time and keep-alive would just leave a socket occupied.
+    let auth = if token.is_empty() {
+        String::new()
+    } else {
+        format!("X-Fan-Token: {token}\r\n")
+    };
     write!(
         sock,
-        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: fantape\r\nConnection: close\r\nAccept: */*\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: fantape\r\nConnection: close\r\nAccept: */*\r\n{auth}\r\n"
     )?;
     sock.flush()?;
 
@@ -177,6 +189,44 @@ mod tests {
 
     fn parse(raw: &str) -> Result<String, Error> {
         read_response(BufReader::new(Cursor::new(raw.as_bytes().to_vec())))
+    }
+
+    #[test]
+    fn token_travels_in_a_header_and_not_the_request_url() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                request.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                .unwrap();
+            request
+        });
+        assert_eq!(
+            get_with_token(&host, "/api/plugtrace", "test-only-token").unwrap(),
+            "{}"
+        );
+        let request = server.join().unwrap();
+        assert!(request.starts_with("GET /api/plugtrace HTTP/1.1\r\n"));
+        assert!(request.contains("\r\nX-Fan-Token: test-only-token\r\n"));
+    }
+
+    #[test]
+    fn token_header_cannot_inject_another_header() {
+        assert!(matches!(
+            get_with_token("unused", "/api/plugtrace", "bad\r\ninjected: x"),
+            Err(Error::Malformed(_))
+        ));
     }
 
     #[test]

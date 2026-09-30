@@ -1,5 +1,5 @@
 #pragma once
-// The OTA upload endpoint: POST /update?token=..., streamed into the inactive
+// The OTA upload endpoint: POST /update with X-Fan-Token, streamed into the inactive
 // A/B slot. Split from web.cpp so the route file stays under the 500-line
 // ceiling; the flow itself (authorize at UPLOAD_FILE_START, write, reboot on
 // success, ota_rollback confirms only after the broker answers) is unchanged.

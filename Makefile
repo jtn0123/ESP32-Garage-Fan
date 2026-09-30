@@ -55,10 +55,10 @@ test-python: ## Run the pytest suite
 	@echo "$(CYAN)Running python tests...$(NC)"
 	@pytest -q
 
-web: ## Build the console bundle (needs node; output is committed)
+web: ## Check and build the console bundle (needs Bun; output is committed)
 	@echo "$(CYAN)Building web console...$(NC)"
-	@npm --prefix web ci --silent
-	@npm --prefix web run check
+	@cd web && bun install --frozen-lockfile --ignore-scripts
+	@cd web && bun run check
 
 lint: ## Run ruff, black and cpplint
 	@echo "$(CYAN)Linting...$(NC)"

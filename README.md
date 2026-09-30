@@ -30,11 +30,65 @@ cable into a computer: the fan drives 5 V out on VBUS.
   deploy script) are allowed, so add `-X POST` and nothing else
 - **MQTT** — `garage/fan/set` / `garage/fan/state` / `garage/fan/availability`,
   retained commands resume after power loss
-- **OTA updates** — `POST /update?token=...`, written to the inactive A/B
+- **OTA updates** — `POST /update with X-Fan-Token`, written to the inactive A/B
   slot; an image is confirmed only after it reaches the broker, and an
   unconfirmed image rolls back automatically after three failed boots
 - Network-loss-safe: the RMT peripheral keeps transmitting the last speed on
   its own hardware, even during flash writes
+
+## Uptime Kuma
+
+The current live monitor is [Garage fan controller #30](http://10.27.27.99:3001/dashboard/30)
+under Devices & network. It uses **HTTP(s) - Json Query** against
+`http://10.27.27.187/api/state`, so it works with the existing 1.26.0 firmware.
+The JSONata expression is below, with operator `==` and expected value `true`:
+
+```text
+$boolean(mqtt = true and confirmed = true and (auto = false or $type(outside_f) = "number") and (plug = null or (plug.age_s >= 0 and plug.age_s <= 120 and plug.verdict != -1 and plug.cycling = false)))
+```
+
+It checks every 60 seconds with a 20-second timeout and two retries. The live
+state API does not expose indoor freshness; the new endpoint below adds that
+check after a firmware deployment. At setup there were no Kuma notification
+channels configured, so this monitor records status but sends no alerts.
+
+The read-only `GET /health` endpoint is intended for an HTTP monitor. It
+returns HTTP **200** with `status: "up"` when MQTT is connected and the running
+firmware image is confirmed. In automatic mode, both the indoor and outdoor
+temperature readings must also be fresh. Otherwise it returns HTTP **503**
+with `status: "down"`; the `mqtt`, `confirmed`, `auto`, `inside_fresh`,
+`outside_fresh`, `power_ok` and `actuator_ok` flags identify the failing dependency. An enabled
+power meter must have a reading no more than 120 seconds old and report neither
+a power disagreement nor cycling. Manual mode does not require temperature
+data. The check reads cached state, performs no sensor or
+network requests, and needs no password. Missing SD storage or an optional
+barometer does not make the controller unavailable.
+
+On [your Uptime Kuma instance](http://10.27.27.99:3001/), switch the existing
+monitor to these settings after deploying firmware that includes the endpoint:
+
+| Setting | Value |
+|---|---|
+| Monitor type | HTTP(s) |
+| Friendly name | Garage fan controller |
+| URL | `http://10.27.27.187/health` (your current device) |
+| Method | GET |
+| Heartbeat interval | 60 seconds |
+| Request timeout | 20 seconds |
+| Retries | 2 |
+| Accepted status codes | `200` only |
+
+Use a reserved device IP reachable **from the Kuma server**; `.local` names
+often do not resolve inside containers. Select an existing notification
+channel if alerts are wanted. Boot, OTA, and the first outdoor-weather fetch
+can initially report down until the dependencies are ready. This check proves
+controller readiness, not blade rotation: there is no tachometer feedback.
+
+Kuma API keys authenticate the read-only `/metrics` endpoint, using HTTP Basic
+authentication with an empty username and the key as password. They cannot
+create monitors or sign in to the dashboard; monitor setup requires an
+authenticated dashboard session. Never put a Kuma key into the firmware or
+browser bundle. See [Kuma API keys](https://github.com/louislam/uptime-kuma/wiki/Prometheus-API-Keys).
 
 ## Hardware
 
@@ -49,12 +103,27 @@ carry it alone — a battery buffers it (and charges from it).
 
 ## Build
 
+Use Python 3.11+, PlatformIO from `requirements-firmware.txt`, and Bun 1.3.14
+for console work. Install the Python tools and the pinned browser first:
+
+```sh
+python -m pip install -r requirements.txt -r requirements-firmware.txt -r requirements-dev.txt
+cd web
+bun install --frozen-lockfile --ignore-scripts
+bun run e2e:browsers
+cd ..
+```
+
+The production-handler pytest regressions also require a C++17 compiler
+(Xcode command-line tools on macOS, or `g++` on Linux). Rust/Cargo is needed
+only for `cargo test --manifest-path tools/fantape/Cargo.toml`.
+
 ```
 make build          # build the fan controller firmware
 make flash          # build + flash over USB
 make deploy IP=...  # build + OTA + verify (defaults to garage-fan.local)
 make test           # native Unity tests + pytest
-make web            # typecheck + test + rebuild the console bundle (needs node)
+make web            # typecheck + test + rebuild the console bundle (needs Bun)
 ```
 
 The version in `VERSION` is the single source of truth: `gen_device_header.py`
@@ -71,7 +140,7 @@ Bump `VERSION` in the commit you actually want released, not before.
 The web console lives in `web/` as TypeScript and is bundled into one
 self-contained HTML file at `web/dist/console.html`, which **is committed** —
 the firmware build runs with only Python and PlatformIO, so `pio run` never
-needs node. A PlatformIO pre-script gzips that file into
+needs Bun. A PlatformIO pre-script gzips that file into
 `src/generated_page.h` (52 KB of HTML becomes 18 KB of flash) and the device
 serves it with `Content-Encoding: gzip`. If you edit anything under `web/src`,
 run `make web` and commit the regenerated bundle; CI fails the PR otherwise.
@@ -80,6 +149,28 @@ WiFi/MQTT credentials come from a gitignored `.env` at the repo root (copy
 `.env.example`), which `scripts/gen_device_header.py` turns into
 `src/generated_config.h` during the build. A clone without `.env` builds with
 empty credentials — `make deploy` refuses to ship such an image.
+
+Privileged requests use the `X-Fan-Token` header. Provisioning passwords and
+new tokens belong in POST form bodies. Never put credentials in a URL.
+An empty token, the former public default, or the example placeholder disables
+administrator access. Set a private 6–38 character `FAN_OTA_TOKEN` in `.env`
+for a local image, or retain an already valid private NVS token. The console
+asks for the token when its field is blank; it has no built-in token.
+Older firmware accepts query authentication only: use its existing updater or
+USB to install this protocol change, then use the new console/deploy tooling.
+If the old device uses the public token, build a private-token image and flash
+via USB to establish administrator access.
+
+Credentials now migrate from legacy NVS keys into one versioned snapshot.
+Validation or a failed NVS write leaves the previous snapshot intact and
+returns an error without rebooting. Rolling back to pre-snapshot firmware
+restores its legacy credentials; plan network changes accordingly.
+PWM failures return HTTP 503, keep the last accepted command, and report
+`actuator_fault` in state plus `actuator_ok: false` in health. This detects
+rejected LEDC commands, not blade motion.
+
+Console test dependencies override nanoid to 3.3.19 and undici to 8.11.2 to
+clear the audited advisories while upstream packages update their ranges.
 
 ## Lineage
 

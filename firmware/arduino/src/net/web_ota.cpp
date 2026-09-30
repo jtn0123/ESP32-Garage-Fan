@@ -22,6 +22,7 @@
 // or write() failure is reported as a failure instead of being printed to a
 // serial port that CLAUDE.md notes is usually not attached.
 #include "net/web_ota.h"
+#include "net/web_gate.h"
 
 #include <Arduino.h>
 #include <Update.h>
@@ -44,9 +45,7 @@ const char* g_fail_reason = nullptr;
 
 // Same rule as web.cpp's token_ok: an empty configured token authorizes
 // nothing.
-bool token_ok(const String& presented) {
-  return g_token && g_token[0] != '\0' && presented == g_token;
-}
+bool token_ok(const String& presented) { return web_gate::token_ok(g_token, presented); }
 
 // Put the Update engine and this module's flags back to a state where the NEXT
 // upload can succeed. Update.abort() clears _size, which is what makes
@@ -71,7 +70,7 @@ void handle_upload() {
   if (up.status == UPLOAD_FILE_START) {
     g_failed = false;
     g_fail_reason = nullptr;
-    g_authorized = token_ok(g_http->arg("token"));
+    g_authorized = token_ok(g_http->header("X-Fan-Token"));
     if (!g_authorized) {
       eventlog::log("ota", "rejected: bad token");
       return;

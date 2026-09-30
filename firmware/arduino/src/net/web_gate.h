@@ -9,22 +9,19 @@
 
 #include "config.h"
 #include "net/origin_check.h"
+#include "net/token_policy.h"
 #include "system/eventlog.h"
 
 namespace web_gate {
 
-// An empty configured token must never authorize anything: with token ""
-// and no ?token= argument, arg() returns "" and a bare equality check would
-// wave the request through. Unreachable with today's defaults, but this is
-// the line every privileged route stands behind, so it does not get to rely
-// on the defaults staying friendly.
+// Missing, public or placeholder credentials never grant access.
 inline bool token_ok(const char* token, const String& presented) {
-  return token[0] != '\0' && presented == token;
+  return token_policy::usable(token) && presented == token;
 }
 
-/** token_ok against ?token=, with the 403 already sent. True means go on. */
+/** Authorize the X-Fan-Token header, or send 403. */
 inline bool guard_token(WebServer& http, const char* token) {
-  if (token_ok(token, http.arg("token")))
+  if (token_ok(token, http.header("X-Fan-Token")))
     return true;
   http.send(403, "application/json", "{\"error\":\"bad token\"}");
   return false;

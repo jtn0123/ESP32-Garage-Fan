@@ -20,6 +20,7 @@ namespace {
 Preferences* g_prefs = nullptr;
 Notify g_notify = nullptr;
 bool g_ledc_ready = false;
+bool g_output_fault = false;
 uint16_t g_high_us = 0;  // what set_wave last drove, for probe_pad's "want"
 int g_speed = 0;
 bool g_auto_on = false;
@@ -56,15 +57,15 @@ uint8_t g_auto_log_ticks = 0;
 // flight recorder, never Serial -- a deployed S2's CDC drops prints.
 constexpr uint8_t kLedcBits = 12;
 
-void set_wave(uint16_t high_us) {
+bool set_wave(uint16_t high_us) {
   if (!g_ledc_ready) {
     if (!ledcAttach(FAN_PWM_PIN, 1000000UL / kPeriodUs, kLedcBits)) {
       eventlog::log("fan", "ledcAttach FAILED pin %d", FAN_PWM_PIN);
-      return;
+      g_output_fault = true;
+      return false;
     }
     g_ledc_ready = true;
   }
-  g_high_us = high_us;
   // duty 0 = solid LOW; duty 2^bits = solid HIGH, no one-tick glitch.
   uint32_t duty;
   if (high_us == 0)
@@ -75,8 +76,11 @@ void set_wave(uint16_t high_us) {
     duty = (static_cast<uint32_t>(high_us) * ((1UL << kLedcBits) - 1)) / kPeriodUs;
   if (!ledcWrite(FAN_PWM_PIN, duty)) {
     eventlog::log("fan", "ledcWrite FAILED duty=%lu", (unsigned long)duty);
-    return;
+    g_output_fault = true;
+    return false;
   }
+  g_high_us = high_us;
+  g_output_fault = false;
   // Read the pad back and put it on the SAME line, so every speed change
   // carries its own proof that the waveform left the chip. ledcWrite applies
   // the new duty at the next period boundary, hence the one-period wait --
@@ -88,6 +92,7 @@ void set_wave(uint16_t high_us) {
   probe_pad(&pad_pct, &edges);
   eventlog::log("fan", "duty %lu/4096 high_us=%u pad=%.0f%%/%lu", (unsigned long)duty, high_us,
                 static_cast<double>(pad_pct), (unsigned long)edges);
+  return true;
 }
 
 }  // namespace
@@ -96,6 +101,7 @@ void set_notify(Notify cb) { g_notify = cb; }
 
 void restore(Preferences* prefs) {
   g_prefs = prefs;
+  g_speed = 0;
   if (prefs) {
     g_auto_on = prefs->getBool("auto", false);
     g_auto_max = prefs->getInt("max", 9);
@@ -118,14 +124,19 @@ void restore(Preferences* prefs) {
   // auto could never fix it because apply(0) == g_speed short-circuits
   // (observed live 2026-08-13). An undriven control line is not "off"; it is
   // "whatever the fan feels like".
-  set_wave(kHighUs[g_speed]);  // resume before WiFi even exists
+  const bool driven = set_wave(kHighUs[g_speed]);  // resume before WiFi
+  if (!driven)
+    g_speed = -2;  // output unknown; do not claim the saved speed was applied
 }
 
 // source: "boot", "http", "mqtt", "auto" -- log flavour only; `manual` is the
 // decision (the human explicitly grabbed the wheel, so auto lets go).
-void apply(int v, const char* source, bool manual) {
+bool apply(int v, const char* source, bool manual) {
   if (v < 0 || v > 12)
-    return;
+    return false;
+  const bool changed = v != g_speed || g_output_fault;
+  if (changed && !set_wave(kHighUs[v]))
+    return false;
   // Manual override first: selecting the speed the fan already runs at is
   // still the human grabbing the wheel, so auto lets go even though the
   // waveform does not change.
@@ -135,15 +146,15 @@ void apply(int v, const char* source, bool manual) {
       g_prefs->putBool("auto", false);
     Serial.println("auto mode off (manual override)");
   }
-  if (v == g_speed)
-    return;
+  if (!changed)
+    return true;
   g_speed = v;
-  set_wave(kHighUs[v]);
   if (g_prefs)
     g_prefs->putInt("speed", v);  // survives power loss even broker-less
   if (g_notify)
     g_notify(v, strcmp(source, "mqtt") == 0);
   Serial.printf("speed -> %d via %s\n", v, source);
+  return true;
 }
 
 void tick_auto() {
@@ -187,14 +198,18 @@ void tick_auto() {
                       g_auto_high ? cfg.max_speed : cfg.min_speed, g_gas_high);
     eventlog::log("auto", "%s", msg);
   }
-  if (next != g_speed)
+  if (next != g_speed || g_output_fault)
     apply(next, "auto", false);
 }
 
-void raw_high_us(uint16_t high_us) {
-  set_wave(high_us);
+bool raw_high_us(uint16_t high_us) {
+  if (!set_wave(high_us))
+    return false;
   g_speed = -1;  // sentinel: /api/set?speed=0 must force a real re-apply
+  return true;
 }
+
+bool output_fault() { return g_output_fault; }
 
 int speed() { return g_speed; }
 

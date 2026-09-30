@@ -89,6 +89,11 @@ async function waitForMock(port: number, proc: ChildProcess): Promise<void> {
 }
 
 export const SCEN_DEFAULTS = {
+  actuator_fault: 'false',
+  mqtt: 'true',
+  confirmed: 'true',
+  inside_fresh: 'true',
+  outside_fresh: 'true',
   card: 'true',
   synced: 'true',
   // Rows the mock card HOLDS -- 60 days at 300 s, i.e. enough to fill every

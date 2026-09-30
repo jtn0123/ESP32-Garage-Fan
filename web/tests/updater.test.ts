@@ -60,7 +60,7 @@ describe('installUpdate', () => {
           : new Response(image),
       upload: async (_f, token) => {
         uploads.push(token);
-        return token === 'iliving-ota' ? '{"ok":true}' : '{"error":"bad token"}';
+        return token === 'example-update-token' ? '{"ok":true}' : '{"error":"bad token"}';
       },
       getState: async () => states.shift() ?? state({ fw: '9.9.9', boots: 85, confirmed: true }),
       state: () => state({}),
@@ -74,22 +74,34 @@ describe('installUpdate', () => {
 
   it('downloads, verifies, uploads and reports confirmed', async () => {
     const d = deps({});
-    const final = await installUpdate(status, 'o/r', 'iliving-ota', d);
+    const final = await installUpdate(status, 'o/r', 'example-update-token', d);
     expect(final).toMatch(/updated to v9.9.9 and confirmed/);
-    expect(d.uploads).toEqual(['iliving-ota']);
+    expect(d.uploads).toEqual(['example-update-token']);
     expect(d.log.join(' | ')).toMatch(/downloading .* checking .* verified .* uploaded/);
+  });
+
+  it('a blank token requires an explicit token and cancellation sends nothing', async () => {
+    const d = deps({ askToken: () => null });
+    expect(await installUpdate(status, 'o/r', '', d)).toMatch(/token is required/);
+    expect(d.uploads).toEqual([]);
+  });
+
+  it('a blank token uses the explicitly supplied answer', async () => {
+    const d = deps({ askToken: () => 'example-update-token' });
+    expect(await installUpdate(status, 'o/r', '', d)).toMatch(/confirmed/);
+    expect(d.uploads).toEqual(['example-update-token']);
   });
 
   it('a checksum mismatch aborts before anything is sent', async () => {
     const d = deps({ checksum: '0'.repeat(64) });
-    const final = await installUpdate(status, 'o/r', 'iliving-ota', d);
+    const final = await installUpdate(status, 'o/r', 'example-update-token', d);
     expect(final).toMatch(/ABORTED.*checksum/);
     expect(d.uploads).toEqual([]);
   });
 
   it('a missing channel file is explained, not thrown', async () => {
     const d = deps({ fetch: async () => new Response('', { status: 404 }) });
-    expect(await installUpdate(status, 'o/r', 'iliving-ota', d)).toMatch(/not on the update channel yet/);
+    expect(await installUpdate(status, 'o/r', 'example-update-token', d)).toMatch(/not on the update channel yet/);
     expect(d.uploads).toEqual([]);
   });
 
@@ -101,6 +113,6 @@ describe('installUpdate', () => {
 
   it('a reboot back onto the old version is reported as a rollback', async () => {
     const d = deps({ states: [state({ fw: '1.18.0', boots: 84 }), state({ fw: '1.18.0', boots: 87 })] });
-    expect(await installUpdate(status, 'o/r', 'iliving-ota', d)).toMatch(/rolled back/);
+    expect(await installUpdate(status, 'o/r', 'example-update-token', d)).toMatch(/rolled back/);
   });
 });

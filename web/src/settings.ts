@@ -12,7 +12,7 @@ import { el, show } from './dom.js';
 import { hoursMinutes, storage } from './format.js';
 import { view } from './state.js';
 import { provisionControl } from './provision.js';
-import { DEFAULT_TOKEN, installUpdate } from './updater.js';
+import { installUpdate } from './updater.js';
 import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
@@ -388,7 +388,7 @@ function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): H
     const repo = view.info?.repo;
     if (!repo) return;
     const field = document.getElementById('ota_t') as HTMLInputElement | null;
-    const token = field?.value || DEFAULT_TOKEN;
+    const token = field?.value ?? '';
     installing = true;
     go.disabled = true;
     void installUpdate(status, repo, token, {
@@ -396,7 +396,7 @@ function installControl(status: Extract<UpdateStatus, { kind: 'available' }>): H
       upload: api.uploadFirmware,
       getState: api.getState,
       state: () => view.state,
-      askToken: () => window.prompt('The controller refused the update token. Enter it to retry:'),
+      askToken: () => window.prompt('Enter the controller update token:'),
       say: (t) => (msg.textContent = t),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     })

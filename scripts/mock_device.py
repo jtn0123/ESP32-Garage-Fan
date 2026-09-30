@@ -30,7 +30,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import re
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -76,16 +75,6 @@ from mock_state import (  # noqa: E402
 
 # What parse_qs hands every handler: each query key to its list of values.
 Query = dict[str, list[str]]
-
-CONFIG_H = Path(__file__).resolve().parents[1] / "firmware" / "arduino" / "src" / "config.h"
-
-
-def firmware_default_token() -> str:
-    """FAN_OTA_TOKEN's compiled default, straight from config.h."""
-    m = re.search(r'#define FAN_OTA_TOKEN "([^"]*)"', CONFIG_H.read_text())
-    if not m or not m.group(1):
-        raise RuntimeError(f"FAN_OTA_TOKEN default not found in {CONFIG_H}")
-    return m.group(1)
 
 
 class H(BaseHTTPRequestHandler):
@@ -149,11 +138,18 @@ class H(BaseHTTPRequestHandler):
     def route(self) -> None:
         STATE["uptime_s"] = int(time.time() - BOOT) + 1837
         u = urlparse(self.path)
-        path, query = u.path, parse_qs(u.query)
+        path, query = u.path, parse_qs(u.query, keep_blank_values=True)
+        if (
+            path in ("/api/config", "/api/provision")
+            and self.command == "POST"
+            and self.headers.get("Content-Type", "").startswith("application/x-www-form-urlencoded")
+        ):
+            size = int(self.headers.get("Content-Length", "0"))
+            query.update(parse_qs(self.rfile.read(size).decode(), keep_blank_values=True))
 
         if path.startswith("/_"):
             return self._harness(path, query)
-        if SCEN["down"] and path.startswith("/api"):
+        if SCEN["down"] and (path.startswith("/api") or path == "/health"):
             self.close_connection = True  # the controller has gone away
             return
         handler = self.READS.get(path) or self.WRITES.get(path)
@@ -199,7 +195,38 @@ class H(BaseHTTPRequestHandler):
         # the reasoning live at the sink in _send, where the rule reports.
         return self._send(200, console_bytes(), "text/html")
 
+    def _health(self, _query: Query) -> None:
+        if self.command != "GET":
+            return self._json(404, {"error": "404"})
+        automatic = bool(STATE["auto"])
+        inside = bool(SCEN["inside_fresh"])
+        outside = bool(SCEN["outside_fresh"])
+        mqtt = bool(SCEN["mqtt"])
+        confirmed = bool(SCEN["confirmed"])
+        power_ok = SCEN["plug"] not in ("bad", "cycling")
+        ready = (
+            mqtt
+            and confirmed
+            and power_ok
+            and not SCEN["actuator_fault"]
+            and (not automatic or (inside and outside))
+        )
+        return self._json(
+            200 if ready else 503,
+            {
+                "status": "up" if ready else "down",
+                "mqtt": mqtt,
+                "confirmed": confirmed,
+                "auto": automatic,
+                "inside_fresh": inside,
+                "outside_fresh": outside,
+                "power_ok": power_ok,
+                "actuator_ok": not SCEN["actuator_fault"],
+            },
+        )
+
     def _state(self, _query: Query) -> None:
+        STATE["actuator_fault"] = SCEN["actuator_fault"]
         mode = SCEN["plug"]
         if mode == "none":
             STATE["plug"] = None
@@ -309,7 +336,7 @@ class H(BaseHTTPRequestHandler):
         STATE["uptime_s"] += 1  # so the console's ordering guard sees progress
         return self._json(200, STATE)
 
-    # Every argument handle_config() in net/web.cpp accepts. A key missing here
+    # Every argument handle_config() in net/web_controls.cpp accepts. A key missing here
     # is not a harmless omission: the mock answers 200 and echoes STATE back
     # unchanged, so the console looks like it applied a setting that went
     # nowhere. onf/offf were missing exactly that way, which is why the
@@ -317,11 +344,11 @@ class H(BaseHTTPRequestHandler):
     # tests/test_web_contract.py::test_mock_accepts_every_config_arg keeps this
     # in step with the firmware.
     CONFIG_KEYS: dict[str, tuple[str, Callable[[str], object]]] = {
-        "gason": ("gas_on", lambda v: v not in ("0", "false")),
+        "gason": ("gas_on", int),
         "gasspd": ("gas_spd", int),
         "gasvoc": ("gas_voc", int),
         "ckwh": ("cost_kwh", float),
-        "auto": ("auto", lambda v: v != "0"),
+        "auto": ("auto", int),
         "max": ("auto_max", int),
         "min": ("auto_min", int),
         "onf": ("on_f", float),
@@ -332,6 +359,8 @@ class H(BaseHTTPRequestHandler):
     # stored auto_max=99 and gas_voc=99999 and echoed them back, so the
     # console could be dogfooded into states the device would never produce.
     CONFIG_RANGE = {
+        "auto": (0, 1),
+        "gason": (0, 1),
         "max": (1, 12),
         "min": (0, 12),
         "gasspd": (1, 12),
@@ -342,22 +371,24 @@ class H(BaseHTTPRequestHandler):
     }
 
     def _config(self, query: Query) -> None:
+        updates: dict[str, object] = {}
         for arg, (key, cast) in self.CONFIG_KEYS.items():
             if arg not in query:
                 continue
+            raw = query[arg][0]
             try:
-                value = cast(query[arg][0])
+                if not raw or raw != raw.strip():
+                    raise ValueError("invalid numeric value")
+                value = cast(raw)
             except ValueError:
                 return self._json(400, {"error": f"bad {arg}"})
             span = self.CONFIG_RANGE.get(arg)
             if span is not None and isinstance(value, (int, float)):
                 lo, hi = span
                 if not (lo <= value <= hi):
-                    # Same shape as the firmware: out of range is ignored, not
-                    # an error. See the report -- both sides should arguably
-                    # 400 here, but the mock's job is to match what ships.
-                    continue
-            STATE[key] = value
+                    return self._json(400, {"error": f"bad {arg}"})
+            updates[key] = bool(value) if arg in ("auto", "gason") else value
+        STATE.update(updates)
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
 
@@ -398,18 +429,11 @@ class H(BaseHTTPRequestHandler):
     def _display_refresh(self, _query: Query) -> None:
         return self._json(200, {"ok": True})
 
-    # The firmware's OTA token default, read from config.h's FAN_OTA_TOKEN so
-    # there is one source of truth and no second copy to drift (or to look
-    # like a leaked credential to a scanner -- it is the committed public
-    # default, by the operator's choice). Routes that must be exercisable END
-    # TO END -- provisioning, and the update path -- accept exactly this value,
-    # so a spec can drive the success path as well as the refusal. The older
-    # destructive routes stay refuse-only below: a mock that can be asked to
-    # "format the card" and says yes teaches nothing.
-    DEFAULT_TOKEN = firmware_default_token()  # gitleaks:allow -- a call, not a value
+    # Test-only credential; production builds default to disabled admin access.
+    EXAMPLE_TOKEN = "example-update-token"
 
-    def _token_ok(self, query: Query) -> bool:
-        return query.get("token", [""])[0] == self.DEFAULT_TOKEN
+    def _token_ok(self, _query: Query) -> bool:
+        return self.headers.get("X-Fan-Token", "") == self.EXAMPLE_TOKEN
 
     # Every argument handle_provision() in net/web_provision.cpp accepts, in
     # the same order. tests/test_web_contract.py pins the two lists together.
@@ -512,6 +536,7 @@ class H(BaseHTTPRequestHandler):
         )
 
     READS = {
+        "/health": _health,
         "/": _page,
         "/index.html": _page,
         "/api/state": _state,

@@ -28,7 +28,7 @@ constexpr size_t kHostCap = 65;
 constexpr size_t kUserCap = 65;
 constexpr size_t kCoordCap = 17;  // "-123.4567" and then some
 
-// Load from NVS; seed NVS from the compiled defaults when it holds no SSID.
+// Load the snapshot, or migrate legacy NVS; seed a blank store from compiled defaults.
 // Must run before wifi_link::begin() and mqtt_link::init().
 void restore(Preferences* prefs);
 
@@ -44,10 +44,13 @@ const char* weather_lon();
 // True once an SSID is known from either source.
 bool provisioned();
 
-// Fields /api/provision may set, by their wire argument names. Returns false
-// (and stores nothing) for an unknown field, an over-long value, an empty
-// SSID or an out-of-range port. Persists to NVS and updates the live value;
-// the network stacks pick the change up on the next boot.
-bool set_field(const char* arg, const char* value);
+// Validate the whole request and persist one NVS snapshot before changing any
+// live values. A failed write or invalid field leaves the previous set intact.
+struct Input {
+  const char* arg;
+  const char* value;
+};
+enum class Result { Ok, Invalid, StorageFailure };
+Result apply_fields(const Input* fields, size_t count, const char** bad = nullptr);
 
 }  // namespace creds

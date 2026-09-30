@@ -11,6 +11,7 @@
 #include "config.h"
 #include "fan/control.h"
 #include "net/http_tx.h"
+#include "net/web_gate.h"
 #include "net/plug.h"
 #include "sensors/battery.h"
 #include "storage/sdcard.h"
@@ -21,14 +22,7 @@ namespace {
 WebServer* g_http = nullptr;
 const char* g_token = "";
 
-bool authorized() {
-  // Same rule as web.cpp's token_ok: an empty configured token authorizes
-  // nothing -- otherwise a missing ?token= argument compares "" == "".
-  if (g_token[0] != '\0' && g_http->arg("token") == g_token)
-    return true;
-  g_http->send(403, "application/json", "{\"error\":\"bad token\"}");
-  return false;
-}
+bool authorized() { return web_gate::guard_token(*g_http, g_token); }
 
 // One raw SPI-mode command; returns R1 (0xFF = no answer within 16 clocks).
 uint8_t sd_cmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
