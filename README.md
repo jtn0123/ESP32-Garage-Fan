@@ -157,9 +157,12 @@ administrator access. Set a private 6–38 character `FAN_OTA_TOKEN` in `.env`
 for a local image, or retain an already valid private NVS token. The console
 asks for the token when its field is blank; it has no built-in token.
 Older firmware accepts query authentication only: use its existing updater or
-USB to install this protocol change, then use the new console/deploy tooling.
-If the old device uses the public token, build a private-token image and flash
-via USB to establish administrator access.
+USB for the first upgrade, then use the new console/deploy tooling. For an old
+device still using the public default, a one-time legacy OTA can carry a
+private-token image; that image persists its private token into NVS at boot.
+Only the former public constant may appear in that migration URL. Private
+tokens must never be put in URLs. Multipart form authentication cannot bridge
+the old upload callback, which runs before form arguments are merged.
 
 Credentials now migrate from legacy NVS keys into one versioned snapshot.
 Validation or a failed NVS write leaves the previous snapshot intact and

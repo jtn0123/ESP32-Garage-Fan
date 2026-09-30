@@ -23,20 +23,25 @@
 
 Grades above are the original audit baseline. Findings below preserve the pre-fix evidence; executed items are marked done. Regrade the affected categories after reviewing these changes.
 
-Overall weights the concrete credential/control defects and insecure defaults more heavily than the strong module structure and extensive console suite. This is a sampled engineering audit, not physical validation, a penetration test or proof of full remote CI/Sonar health. The requested top 10 fixes are now implemented and locally verified; Uptime Kuma work is preserved. The new firmware has not been deployed and no physical fan failure was induced.
+Overall weights the concrete credential/control defects and insecure defaults more heavily than the strong module structure and extensive console suite. This is a sampled engineering audit, not physical validation, a penetration test or proof of full remote CI/Sonar health. The requested top 10 fixes are now implemented and locally verified; Uptime Kuma work is preserved. Firmware 1.27.0 has now been deployed and validated on the controller. No physical fan failure was induced.
 
 ## Validation and integration evidence
 
 **Completed-fix validation (2026-09-29):**
 
 - Firmware controller build passed without source warnings; the embedded gzip console matches `web/dist/console.html` exactly.
-- 163 Python tests passed, including 15 actual C++ handler cases. Seven handler regressions reproduce against the original code before the fixes.
-- `make web` passed from a fresh frozen Bun installation: TypeScript, 138 Vitest tests and 253 desktop/mobile browser tests. After the last mock-validation change, all 60 affected settings/provisioning/fault browser tests passed again.
+- 165 Python tests passed, including 17 actual C++ handler cases. Seven handler regressions reproduce against the original code before the fixes.
+- `make web` passed from a fresh frozen Bun installation: TypeScript, 138 Vitest tests and 253 desktop/mobile browser tests. A desktop hover race exposed by live SSE repainting was fixed; 40 repeated affected tests and the final full 253-test suite passed.
 - All 22 discovered native environments passed (241 cases); 39 Rust tests passed.
 - Ruff, Black, strict mypy, changed C++ cpplint/formatting and shell syntax checks passed. `bun audit` reports zero vulnerabilities.
-- Authentication is now header-based. Older firmware requires its existing updater or USB for the first upgrade; a device still using the public token requires a private-token USB image. Rolling back before the credential-snapshot format uses legacy credentials.
+- Authentication is now header-based. Older firmware requires its legacy updater or USB for the first upgrade; the former public query token supported a one-time OTA carrying a private-token image. Private credentials never went into URLs. Rolling back before the credential-snapshot format uses legacy credentials.
 - Build/browser temporary storage moved to `/Volumes/512Flash/garage-fan-validation-20260929` after an internal-disk ENOSPC failure. No unrelated files were removed.
-- No deployment, remote CI run, commit or push was performed. The existing Kuma monitor continues to use the currently deployed `/api/state` contract; `/health` is ready for deployment.
+- PR #69 is pushed; remote build, test, lint, security, CodeQL and Sonar checks pass. Both controller and rehearsal images build.
+- On 2026-09-30, the verified 1,263,120-byte ESP32-S2 image was installed in ota_0, confirmed through MQTT, and returned HTTP 200 from `/health` once weather/power dependencies warmed up. SHA256: `9c7837315a79844761b9546d960e3d95b653f9ae7f246b648ca2f492169e3ca7`. The first Python upload aborted after 119,188 bytes with the old image intact; standard curl multipart completed in 23.9 seconds.
+- Twenty-nine live API checks passed: reads/history/CSV/display, actual pad probe, private header authorization, public/query-token rejection, malformed numbers/late credential fields, atomic configuration rejection, cross-origin and GET-write rejection, and safe same-speed control. Unchanged credential provisioning and another reboot preserved the network, private token and controller configuration.
+- Live desktop (1280 px) and mobile (390 px) console DOM checks passed with no horizontal overflow; settings and display mirror loaded, password fields stayed blank, and auto controls changed real state and restored auto mode/speed 10. Shared-preview screenshot capture failed, so this is DOM/runtime evidence, not screenshot review.
+- Kuma monitor #30 now uses HTTP `/health`, accepted code 200 only, a 60-second interval, two retries and a 20-second timeout. Existing history and group remain intact; fresh server heartbeats return 200 - OK. No notification channel is configured.
+- These checks establish controller readiness and electrical output/power agreement, not tachometer or blade-rotation proof. Storage/driver failures are exercised in host tests, not induced on the live card or PWM hardware.
 
 **Original audit/integration baseline:**
 
