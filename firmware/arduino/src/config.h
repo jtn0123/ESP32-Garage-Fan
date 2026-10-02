@@ -53,7 +53,7 @@
 #define FAN_HOSTNAME "garage-fan"
 #endif
 #ifndef FAN_OTA_TOKEN
-#define FAN_OTA_TOKEN "iliving-ota"
+#define FAN_OTA_TOKEN ""
 #endif
 // GitHub project the console's update check queries. The device never talks to
 // GitHub itself -- it hands the browser this slug and the browser does the

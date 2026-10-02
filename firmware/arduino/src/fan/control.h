@@ -29,16 +29,19 @@ void restore(Preferences* prefs);
  * decides manual-ness -- retained MQTT replay right after connect is not
  * manual, and only the MQTT layer can know that.
  */
-void apply(int v, const char* source, bool manual);
+bool apply(int v, const char* source, bool manual);
 
 /** One 30 s auto-mode tick: refresh inside temp, run the thermostat. */
 void tick_auto();
 
 /** Drive a raw duty for calibration (/api/raw). Marks the speed as raw. */
-void raw_high_us(uint16_t high_us);
+bool raw_high_us(uint16_t high_us);
 
 /** Current speed 0..12, or negative while a raw duty is being driven. */
 int speed();
+
+/** LEDC rejected the latest command; this is not physical RPM feedback. */
+bool output_fault();
 
 /** The HIGH width the line is being driven with right now, us (0 = solid low). */
 uint16_t commanded_high_us();

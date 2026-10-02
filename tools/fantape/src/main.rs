@@ -19,7 +19,7 @@ USAGE:
   fantape <host> --trace-only skip the tape, fetch only the raw samples
 
 OPTIONS:
-  --token <t>   token for /api/plugtrace (default: iliving-ota)
+  --token <t>   token for /api/plugtrace (default: disabled)
   --no-trace    skip /api/plugtrace (it is token-guarded; the tape is not)
   -h, --help    this
 
@@ -47,7 +47,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args {
         host: None,
         file: None,
-        token: "iliving-ota".into(),
+        token: String::new(),
         trace: true,
         tape: true,
     };
@@ -108,8 +108,7 @@ fn run(args: Args) -> u8 {
     let mut traced = None;
     if args.trace {
         if let Some(host) = &args.host {
-            let path = format!("/api/plugtrace?token={}", args.token);
-            match http::get(host, &path) {
+            match http::get_with_token(host, "/api/plugtrace", &args.token) {
                 Ok(b) => traced = trace::parse(&b),
                 Err(e) => eprintln!("note: no raw trace ({e})"),
             }

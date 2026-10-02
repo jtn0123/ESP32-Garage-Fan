@@ -119,16 +119,16 @@ test('the gas boost controls reach the controller with their own keys', async ({
   // The toggle names its key...
   const row = page.locator('#groups .grow', { hasText: 'Gas boost' }).first();
   await row.locator('button.tgl').click();
-  await expect.poll(() => posts.some((r) => r.url().includes('gason='))).toBe(true);
+  await expect.poll(() => posts.some((r) => new URLSearchParams(r.postData() ?? '').has('gason'))).toBe(true);
   await row.locator('button.tgl').click(); // leave it as found
   // ...and so do both steppers. Without this the mock accepts anything and the
   // unit tests never click, so a typo'd key would 200 its way to production.
   const trig = page.locator('#groups .grow', { hasText: 'Gas boost · trigger' });
   await trig.locator('button').last().click();
-  await expect.poll(() => posts.some((r) => r.url().includes('gasvoc='))).toBe(true);
+  await expect.poll(() => posts.some((r) => new URLSearchParams(r.postData() ?? '').has('gasvoc'))).toBe(true);
   const spd = page.locator('#groups .grow', { hasText: 'Gas boost · speed' });
   await spd.locator('button').last().click();
-  await expect.poll(() => posts.some((r) => r.url().includes('gasspd='))).toBe(true);
+  await expect.poll(() => posts.some((r) => new URLSearchParams(r.postData() ?? '').has('gasspd'))).toBe(true);
 });
 
 test('the electricity price stepper reaches the controller as ckwh', async ({ page }) => {
@@ -136,7 +136,7 @@ test('the electricity price stepper reaches the controller as ckwh', async ({ pa
   const posts = recordRequests(page, /\/api\/config/);
   const row = page.locator('#groups .grow', { hasText: 'Electricity price' });
   await row.locator('button').last().click();
-  await expect.poll(() => posts.some((r) => r.url().includes('ckwh='))).toBe(true);
+  await expect.poll(() => posts.some((r) => new URLSearchParams(r.postData() ?? '').has('ckwh'))).toBe(true);
   await row.locator('button').first().click(); // leave the price as found
 });
 
@@ -262,7 +262,8 @@ test('the token field is used instead of prompting', async ({ page }) => {
   await expect.poll(() => posts.length).toBeGreaterThan(0);
   const req = posts[0];
   expect(req?.method()).toBe('POST');
-  expect(req?.url()).toContain('token=token-from-the-field');
+  expect(new URL(req!.url()).search).toBe('');
+  expect(req?.headers()['x-fan-token']).toBe('token-from-the-field');
 });
 
 /**

@@ -18,7 +18,8 @@
 
 /** GET /api/state -- also the payload pushed over SSE on port 8081. */
 export interface DeviceState {
-  speed: number; // 0..12, or negative while /api/raw holds a manual duty
+  actuator_fault?: boolean; // driver rejected a PWM command; no RPM feedback
+  speed: number; // 0..12; -1 raw duty, -2 output unknown after a boot driver failure
   auto: boolean;
   auto_max: number; // speed auto holds above the engage threshold
   auto_min: number; // speed auto rests at once equalised (0 = off)
@@ -328,4 +329,15 @@ export interface DisplayFrame {
   black: string;
   /** base64 of the red plane. Drawn over black; a pixel may be in both. */
   red: string;
+}
+/** Read-only external monitor response; HTTP 503 whenever status is down. */
+export interface Health {
+  status: 'up' | 'down';
+  mqtt: boolean;
+  confirmed: boolean;
+  auto: boolean;
+  inside_fresh: boolean;
+  outside_fresh: boolean;
+  power_ok: boolean;
+  actuator_ok: boolean;
 }

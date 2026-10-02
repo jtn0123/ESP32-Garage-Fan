@@ -14,11 +14,6 @@
 import { parseChecksum, sha256Hex, type UpdateStatus } from './update.js';
 import type { DeviceState } from './types.js';
 
-/** The firmware's compiled default (config.h FAN_OTA_TOKEN). Public by the
- * operator's choice; used when the token field is blank so the common case
- * is genuinely one click. A refused token falls back to asking. */
-export const DEFAULT_TOKEN = 'iliving-ota'; // gitleaks:allow -- config.h's committed public default
-
 /** Where release.yml publishes the channel for `owner/name`. */
 export function pagesUrl(repo: string, file: string): string {
   const [owner, name] = repo.split('/');
@@ -88,6 +83,8 @@ export async function installUpdate(
   const before = d.state();
   if (!before) return 'the controller has not answered yet; try again in a moment.';
   const snapshot = { fw: before.fw, boots: before.boots };
+  token = token || d.askToken() || '';
+  if (!token) return 'an update token is required — nothing was installed.';
   d.say(`verified — uploading ${st.latest}…`);
   const file = new File([blob], name);
   let body = await d.upload(file, token);

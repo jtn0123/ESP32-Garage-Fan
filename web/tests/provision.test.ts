@@ -49,6 +49,13 @@ describe('provision form', () => {
     expect(provisionQuery(info, f)).toBe('mqtt_port=1884');
   });
 
+  it('preserves surrounding whitespace in both passwords', () => {
+    const form = { ...formFromInfo(info), pass: ' example wifi ', mqtt_pass: ' example mqtt ' };
+    const body = new URLSearchParams(provisionQuery(info, form));
+    expect(body.get('pass')).toBe(' example wifi ');
+    expect(body.get('mqtt_pass')).toBe(' example mqtt ');
+  });
+
   it('refuses the inputs the firmware would refuse, before the round trip', () => {
     const ok = formFromInfo(info);
     expect(validate(ok)).toBeNull();

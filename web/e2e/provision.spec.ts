@@ -36,16 +36,19 @@ test('a changed field goes out with the token, and only that field', async ({ pa
   await openSettings(page);
   const posts = recordRequests(page, /\/api\/provision/);
   // Token from the prompt, then accept the reboot confirm.
-  page.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? 'iliving-ota' : ''));
+  page.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? 'example-update-token' : ''));
   await page.locator('#prov_mqtt_user').fill('fan-new');
   await page.locator('#prov_go').click();
   await expect(page.locator('#provmsg')).toHaveText(/rebooting onto the new settings/);
   expect(posts).toHaveLength(1);
   const url = new URL(posts[0]!.url());
-  expect([...url.searchParams.keys()].sort()).toEqual(['mqtt_user', 'token']);
-  expect(url.searchParams.get('mqtt_user')).toBe('fan-new');
+  expect(url.search).toBe('');
+  expect(posts[0]!.headers()['x-fan-token']).toBe('example-update-token');
+  expect(new URLSearchParams(posts[0]!.postData()!).get('mqtt_user')).toBe('fan-new');
   // Put the mock back for the neighbours sharing this worker.
-  await page.request.post(`${url.origin}/api/provision?mqtt_user=fan&token=iliving-ota`);
+  await page.request.post(`${url.origin}/api/provision`, {
+    headers: { 'X-Fan-Token': 'example-update-token' }, form: { mqtt_user: 'fan' },
+  });
 });
 
 test('a wrong token is refused and the form says why', async ({ page }) => {
@@ -63,4 +66,19 @@ test('an invalid port is stopped before it reaches the device', async ({ page })
   await page.locator('#prov_go').click();
   await expect(page.locator('#provmsg')).toHaveText(/port/);
   expect(posts).toHaveLength(0);
+});
+
+test('password whitespace survives the form without exposing credentials in URLs', async ({ page }) => {
+  await openSettings(page);
+  const posts = recordRequests(page, /\/api\/provision/);
+  page.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? 'example-update-token' : ''));
+  await page.locator('#prov_pass').fill(' wifi ');
+  await page.locator('#prov_mqtt_pass').fill(' mqtt ');
+  await page.locator('#prov_go').click();
+  await expect(page.locator('#provmsg')).toHaveText(/rebooting onto the new settings/);
+  expect(posts).toHaveLength(1);
+  expect(new URL(posts[0]!.url()).search).toBe('');
+  const body = new URLSearchParams(posts[0]!.postData()!);
+  expect(body.get('pass')).toBe(' wifi ');
+  expect(body.get('mqtt_pass')).toBe(' mqtt ');
 });
