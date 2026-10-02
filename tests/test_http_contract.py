@@ -21,6 +21,7 @@ import sys
 import time
 from typing import Any
 import urllib.error
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 import urllib.request
 
 import pytest
@@ -92,7 +93,17 @@ def mock() -> Iterator[subprocess.Popen[bytes]]:
 
 
 def req(path: str, method: str = "GET", origin: str | None = None) -> tuple[int, bytes]:
-    r = urllib.request.Request(BASE + path, method=method)
+    parts = urlsplit(path)
+    query = parse_qs(parts.query, keep_blank_values=True)
+    token = query.pop("token", [""])[0]
+    headers = {"X-Fan-Token": token} if token else {}
+    data = None
+    if method == "POST" and parts.path == "/api/provision":
+        data = urlencode(query, doseq=True).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        query = {}
+    path = urlunsplit(("", "", parts.path, urlencode(query, doseq=True), ""))
+    r = urllib.request.Request(BASE + path, method=method, headers=headers, data=data)
     if origin:
         r.add_header("Origin", origin)
     try:
@@ -117,6 +128,69 @@ def scen(**kw: object) -> None:
 
 
 # ------------------------------------------------------------------- writes
+
+
+def test_health_ready_and_read_only(mock: subprocess.Popen[bytes]) -> None:
+    status, body = req("/health")
+    assert status == 200
+    assert json.loads(body) == {
+        "status": "up",
+        "mqtt": True,
+        "confirmed": True,
+        "auto": True,
+        "inside_fresh": True,
+        "outside_fresh": True,
+        "power_ok": True,
+        "actuator_ok": True,
+    }
+    assert req("/health", "POST")[0] == 404
+
+
+@pytest.mark.parametrize("fault", ["mqtt", "confirmed", "inside_fresh", "outside_fresh"])
+def test_health_reports_control_dependencies(mock: subprocess.Popen[bytes], fault: str) -> None:
+    try:
+        scen(**{fault: False})
+        status, body = req("/health")
+        assert status == 503
+        health = json.loads(body)
+        assert health["status"] == "down"
+        assert health[fault] is False
+    finally:
+        scen(**{fault: True})
+
+
+def test_health_manual_mode_does_not_require_weather(mock: subprocess.Popen[bytes]) -> None:
+    try:
+        req("/api/config?auto=0", "POST")
+        scen(inside_fresh=False, outside_fresh=False, card=False)
+        assert req("/health")[0] == 200
+        scen(mqtt=False)
+        assert req("/health")[0] == 503
+    finally:
+        req("/api/config?auto=1", "POST")
+        scen(inside_fresh=True, outside_fresh=True, card=True, mqtt=True)
+
+
+def test_health_does_not_answer_when_controller_is_down(mock: subprocess.Popen[bytes]) -> None:
+    try:
+        scen(down=True)
+        with pytest.raises((OSError, urllib.error.URLError)):
+            req("/health")
+    finally:
+        scen(down=False)
+
+
+@pytest.mark.parametrize("profile,code", [("bad", 503), ("cycling", 503), ("none", 200)])
+def test_health_checks_an_optional_power_meter(
+    mock: subprocess.Popen[bytes], profile: str, code: int
+) -> None:
+    try:
+        scen(plug=profile)
+        status, body = req("/health")
+        assert status == code
+        assert json.loads(body)["power_ok"] is (code == 200)
+    finally:
+        scen(plug="ok")
 
 
 @pytest.mark.parametrize("path", ["/api/set?speed=0", "/api/config?auto=0", "/api/raw?high_pct=0"])
@@ -223,13 +297,13 @@ def test_the_raw_meter_trace_is_served_and_guarded(mock: subprocess.Popen[bytes]
     """
     status, _ = req("/api/plugtrace")
     assert status == 403, "the trace must be token-guarded like its neighbours"
-    tr = get_json("/api/plugtrace?token=iliving-ota")
+    tr = get_json("/api/plugtrace?token=example-update-token")
     assert tr["poll_s"] == 15
     assert tr["n"] == len(tr["w"]) == len(tr["spd"]) == len(tr["cls"])
     assert all(c in (-1, 0, 1) for c in tr["cls"])
     try:
         scen(plug="cycling")
-        cyc = get_json("/api/plugtrace?token=iliving-ota")
+        cyc = get_json("/api/plugtrace?token=example-update-token")
         # Alternating stopped/running is the signature the 5-minute row cannot
         # show: the samples must actually swing, not sit at one level.
         assert min(cyc["w"]) < 10 < max(cyc["w"])
@@ -390,12 +464,13 @@ def test_provisioning_applies_only_what_it_was_given(mock: subprocess.Popen[byte
     """The credentials form: changed fields only, validated before applied,
     and the device info afterwards reports what was stored -- never a password."""
     before = get_json("/api/device")
-    status, body = req("/api/provision?mqtt_port=99999&token=iliving-ota", "POST")
+    status, body = req("/api/provision?mqtt_port=99999&token=example-update-token", "POST")
     assert status == 400 and b"mqtt_port" in body
-    status, body = req("/api/provision?ssid=&token=iliving-ota", "POST")
+    status, body = req("/api/provision?ssid=&token=example-update-token", "POST")
     assert status == 400, "an empty SSID must be refused, not stored"
     status, body = req(
-        "/api/provision?ssid=new-net&pass=s3cret&mqtt_user=fan2&token=iliving-ota", "POST"
+        "/api/provision?ssid=new-net&pass=s3cret&mqtt_user=fan2&token=example-update-token",
+        "POST",
     )
     assert status == 200, body
     after = get_json("/api/device")
@@ -404,7 +479,7 @@ def test_provisioning_applies_only_what_it_was_given(mock: subprocess.Popen[byte
     assert "s3cret" not in json.dumps(after), "a password must never come back down"
     # put it back for the neighbours
     req(
-        f"/api/provision?ssid={before['ssid']}&mqtt_user={before['mqtt_user']}&token=iliving-ota",
+        f"/api/provision?ssid={before['ssid']}&mqtt_user={before['mqtt_user']}&token=example-update-token",
         "POST",
     )
 
@@ -496,7 +571,10 @@ def test_an_accepted_update_reboots_onto_the_knobbed_version(mock: subprocess.Po
     scen(ota_fw="9.9.9")
     try:
         r = urllib.request.Request(
-            BASE + "/update?token=iliving-ota", method="POST", data=b"fake-image"
+            BASE + "/update",
+            method="POST",
+            data=b"fake-image",
+            headers={"X-Fan-Token": "example-update-token"},
         )
         with urllib.request.urlopen(r, timeout=5) as f:
             assert f.status == 200
@@ -507,3 +585,22 @@ def test_an_accepted_update_reboots_onto_the_knobbed_version(mock: subprocess.Po
     finally:
         scen(ota_fw="none", fw=before["fw"])  # put the board back for the neighbours
     assert get_json("/api/state")["fw"] == before["fw"], "the fw knob must restore it"
+
+
+@pytest.mark.parametrize("bad", ["onf=nan", "onf=2junk", "auto=2", "gasvoc=99", "ckwh=inf"])
+def test_invalid_config_does_not_apply_earlier_fields(
+    mock: subprocess.Popen[bytes], bad: str
+) -> None:
+    before = get_json("/api/state")
+    assert req(f"/api/config?min=12&{bad}", "POST")[0] == 400
+    assert get_json("/api/state")["auto_min"] == before["auto_min"]
+
+
+def test_legacy_query_token_cannot_provision(mock: subprocess.Popen[bytes]) -> None:
+    # Bypass req's transport adapter to send the actual legacy URL.
+    r = urllib.request.Request(
+        BASE + "/api/provision?ssid=changed&token=example-update-token", method="POST"
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(r, timeout=5)
+    assert error.value.code == 403

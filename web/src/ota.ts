@@ -97,11 +97,15 @@ async function verifyImage(file: File): Promise<{ ok: boolean; note: string }> {
 
 export async function uploadFirmware(): Promise<void> {
   const file = (document.getElementById('ota_f') as HTMLInputElement | null)?.files?.[0];
-  const token = (document.getElementById('ota_t') as HTMLInputElement | null)?.value ?? '';
+  const token = tokenFromFieldOrPrompt('Update token to install firmware:');
   const msg = document.getElementById('otamsg');
   if (!msg) return;
   if (!file) {
     msg.textContent = 'pick firmware.bin first';
+    return;
+  }
+  if (!token) {
+    msg.textContent = 'an update token is required';
     return;
   }
   msg.textContent = 'checking image…';

@@ -39,6 +39,7 @@ STATE: Json = {
     "batt": {"v": 4.195, "pct": 100, "chg": True, "eta_h": None, "mvh": -6},
     "rssi": -63,
     "drops": 0,
+    "actuator_fault": False,
     "mqtt": True,
     "uptime_s": 1837,
     "ip": "127.0.0.1",
@@ -87,6 +88,11 @@ STATS: Json = {
 
 # Harness knobs.
 SCEN: Json = {
+    "actuator_fault": False,
+    "mqtt": True,
+    "confirmed": True,
+    "inside_fresh": True,
+    "outside_fresh": True,
     "card": True,
     "synced": True,
     # Rows the CARD HOLDS, not rows a response returns: /api/history reads the
@@ -135,6 +141,11 @@ PLUG_BASELINE = [1.4, 2.5, 3.9, 4.9, 7.0, 7.6, 10.3, 12.8, 15.4, 20.3, 23.6, 30.
 ScenSpec = Union[type, Tuple[str, ...], Tuple[type, int, int]]
 
 SCEN_SPEC: dict[str, ScenSpec] = {
+    "actuator_fault": bool,
+    "mqtt": bool,
+    "confirmed": bool,
+    "inside_fresh": bool,
+    "outside_fresh": bool,
     "card": bool,
     "synced": bool,
     "rows": (int, 0, 60 * 288),  # up to a full 60-day card

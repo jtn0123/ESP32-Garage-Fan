@@ -53,7 +53,7 @@ export function formFromInfo(info: DeviceInfo | null): ProvisionForm {
 export function provisionQuery(info: DeviceInfo | null, form: ProvisionForm): string {
   const base = formFromInfo(info);
   const out: string[] = [];
-  const add = (k: keyof ProvisionForm) => out.push(`${k}=${encodeURIComponent(form[k].trim())}`);
+  const add = (k: keyof ProvisionForm) => out.push(`${k}=${encodeURIComponent(k === 'pass' || k === 'mqtt_pass' ? form[k] : form[k].trim())}`);
   for (const k of ['ssid', 'mqtt_host', 'mqtt_port', 'mqtt_user', 'lat', 'lon'] as const) {
     if (form[k].trim() !== base[k].trim()) add(k);
   }

@@ -14,7 +14,7 @@
 //           at 24 h / 7 d / 30 d ranges.
 // Persist:  speed + auto config in NVS (restored before WiFi), commands also
 //           retained on the broker; whichever answers first wins the tie.
-// OTA:      POST /update?token=...; A/B slots with ota_rollback confirm.
+// OTA:      POST /update with X-Fan-Token; A/B slots with ota_rollback confirm.
 //
 // This file is the orchestrator and nothing else: boot order, the loop
 // cadences, and the glue between modules that must not know about each other

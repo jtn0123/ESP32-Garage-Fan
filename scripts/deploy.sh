@@ -9,7 +9,7 @@
 # one could never have worked here: the fan firmware links no ArduinoOTA, so
 # nothing listens on port 3232, and its verify polled espsensor/+/availability
 # and a homeassistant/sensor/..._temperature/config topic that this device never
-# publishes. The fan's OTA is a plain multipart POST to /update?token=...
+# publishes. The fan's OTA is a plain multipart POST to /update with X-Fan-Token
 #
 # The verify step exists because an upload "succeeding" only proves the bytes
 # were written. The firmware writes to the inactive A/B slot and ota_rollback
@@ -21,20 +21,22 @@ HOST="${1:-garage-fan.local}"
 ENV="${DEPLOY_ENV:-feather_esp32s2_fan_controller}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERIFY_TIMEOUT="${DEPLOY_VERIFY_TIMEOUT:-300}"
-# Token preference order: explicit env var, then whatever the build baked in
-# (gen_device_header.py emits FAN_OTA_TOKEN when .env provides one), then the
-# public default -- with a loud warning, because a device provisioned with the
-# committed constant accepts OTA from anyone on the LAN who read the source.
+pio run -d "$ROOT/firmware/arduino" -e "$ENV"
+
+# Read the header AFTER building: generation may have changed it.
 HDR="$ROOT/firmware/arduino/src/generated_config.h"
 HDR_TOKEN=$(sed -n 's/^#define FAN_OTA_TOKEN "\(.*\)"$/\1/p' "$HDR" 2>/dev/null | head -1)
-TOKEN="${FAN_OTA_TOKEN:-${HDR_TOKEN:-iliving-ota}}"
-if [[ "$TOKEN" = "iliving-ota" ]]; then
-  echo "WARNING: using the public default OTA token. Set FAN_OTA_TOKEN in .env"
-  echo "         (and reflash) so token-gated endpoints stop accepting the"
-  echo "         value committed to a public repository."
+TOKEN="${FAN_OTA_TOKEN:-${HDR_TOKEN:-}}"
+if [[ ${#TOKEN} -lt 6 || ${#TOKEN} -ge 39 || "$TOKEN" = "iliving-ota" ||
+      "$TOKEN" = "pick_a_long_random_token" || "$TOKEN" = *$'\r'* || "$TOKEN" = *$'\n'* ]]; then
+  echo "ABORT: set a private FAN_OTA_TOKEN (6-38 characters) before deploying."
+  exit 1
 fi
-
-pio run -d "$ROOT/firmware/arduino" -e "$ENV"
+# Keep the secret out of URLs and curl's process arguments. Delete on exit.
+AUTH_FILE=$(mktemp "${TMPDIR:-/tmp}/fan-auth.XXXXXX")
+chmod 600 "$AUTH_FILE"
+trap 'rm -f "$AUTH_FILE"' EXIT
+printf 'X-Fan-Token: %s\n' "$TOKEN" > "$AUTH_FILE"
 
 BIN="$ROOT/firmware/arduino/.pio/build/$ENV/firmware.bin"
 [[ -f "$BIN" ]] || { echo "ABORT: no firmware.bin at $BIN"; exit 1; }
@@ -71,7 +73,7 @@ fi
 
 echo "Uploading $(basename "$BIN") ($(wc -c <"$BIN" | tr -d ' ') bytes) to $HOST..."
 code=$(curl -s -o /tmp/fan-ota-resp.txt -w '%{http_code}' -m 180 \
-  -F "firmware=@$BIN" "http://$HOST/update?token=$TOKEN")  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
+  -H "@$AUTH_FILE" -F "firmware=@$BIN" "http://$HOST/update")  # NOSONAR: plain-HTTP LAN device, see smoke-block comment
 if [[ "$code" != "200" ]]; then
   echo "ABORT: /update returned HTTP $code"
   echo "  $(head -c 300 /tmp/fan-ota-resp.txt)"

@@ -169,7 +169,7 @@ the rule throughout is **more data per line, never more lines**.
 
 Two things deliberately do **not** go on the tape:
 
-- **Raw meter samples** — `GET /api/plugtrace?token=…` streams the last 15
+- **Raw meter samples** — `GET /api/plugtrace` with `X-Fan-Token: …` streams the last 15
   minutes of 15 s polls as `{poll_s, w[], spd[], cls[]}`. A fan can cycle
   faster than one line per five minutes, so the *shape* of an episode cannot
   live in lines; it costs nothing until asked for.
@@ -261,6 +261,6 @@ and the profile cannot see it. That case still shows as a plain DISAGREE.
 | PWM engine | ESP32 LEDC: `ledcAttach(18, 100, 12)` + `ledcWrite` — hardware-looped, keeps transmitting through flash writes. Replaced RMT 2026-08-13: `rmtWriteLooping` reported success while `/api/pinprobe` showed the pad stuck LOW; the waveform never left the chip |
 | Web UI / API | `http://garage-fan.local/` (port 80), SSE live-push on port 8081 |
 | MQTT | broker `10.27.27.27:1883` (Home Assistant box) — `garage/fan/set·state·availability`, `garage/climate` |
-| OTA | `POST /update?token=…` → inactive A/B slot (2×1408 K + TinyUF2 factory); image confirms on first broker connect, 3 broker-less boots auto-roll back |
+| OTA | `POST /update` with `X-Fan-Token: …` → inactive A/B slot (2×1408 K + TinyUF2 factory); image confirms on first broker connect, 3 broker-less boots auto-roll back |
 | Serial gotcha | ESP32-S2 USB-CDC drops output with no DTR listener — a "silent" board is usually fine; check `garage-fan.local`/ARP instead |
 | Credentials | WiFi/MQTT come from a gitignored `.env` at repo root → `generated_config.h` (a fresh clone builds with empty creds — fill `.env` first) |

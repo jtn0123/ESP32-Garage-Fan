@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../firmware/arduino"
 
-envs=$(grep -oE '^\[env:native[a-z_]*\]' platformio.ini | sed 's/\[env:\(.*\)\]/\1/')
+envs=$(grep -oE '^\[env:native[a-z0-9_]*\]' platformio.ini | sed 's/\[env:\(.*\)\]/\1/')
 fail=0
 for e in $envs; do
   echo "=== pio test -e $e ==="

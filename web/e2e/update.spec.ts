@@ -70,18 +70,21 @@ test('one click installs the published release and waits for confirmation', asyn
   await routeChannel(page);
   await scen(page, { ota_fw: '9.9.9' });
   await openSettings(page);
-  const uploads = recordRequests(page, /\/update\?/);
+  const uploads = recordRequests(page, /\/update(?:\?|$)/);
   await expect(page.locator('#upd_go')).toBeVisible();
+  page.on('dialog', (d) => void d.accept('example-update-token'));
   await page.locator('#upd_go').click();
   await expect(page.locator('#updmsg')).toHaveText(/updated to v9.9.9 and confirmed/, { timeout: 20_000 });
   expect(uploads).toHaveLength(1);
-  expect(new URL(uploads[0]!.url()).searchParams.get('token')).toBe('iliving-ota');
+  expect(new URL(uploads[0]!.url()).search).toBe('');
+  expect(uploads[0]!.headers()['x-fan-token']).toBe('example-update-token');
 });
 
 test('a checksum mismatch aborts before anything reaches the controller', async ({ page }) => {
   await routeChannel(page, { checksumOk: false });
   await openSettings(page);
-  const uploads = recordRequests(page, /\/update\?/);
+  const uploads = recordRequests(page, /\/update(?:\?|$)/);
+  page.on('dialog', (d) => void d.accept('example-update-token'));
   await page.locator('#upd_go').click();
   await expect(page.locator('#updmsg')).toHaveText(/ABORTED.*checksum/, { timeout: 15_000 });
   expect(uploads).toHaveLength(0);
@@ -90,6 +93,7 @@ test('a checksum mismatch aborts before anything reaches the controller', async 
 test('a board that comes back on the old version is called a rollback', async ({ page }) => {
   await routeChannel(page); // ota_fw stays none: the mock "reboots" onto the same fw
   await openSettings(page);
+  page.on('dialog', (d) => void d.accept('example-update-token'));
   await page.locator('#upd_go').click();
   await expect(page.locator('#updmsg')).toHaveText(/rolled back/, { timeout: 20_000 });
 });
