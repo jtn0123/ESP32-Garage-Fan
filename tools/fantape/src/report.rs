@@ -198,16 +198,24 @@ pub fn build(records: &[Record], trace: Option<&Trace>) -> Report {
         Record::Auto(a) => Some(a),
         _ => None,
     }) {
+        // A winter tape reads "delta +34F -> target 0" as a broken thermostat
+        // unless the line also says which limit overrode the differential.
+        let held = match a.limit.as_deref() {
+            Some("floor") => ", held at rest by the low limit",
+            Some("start") => ", held at rest under the start point",
+            _ => "",
+        };
         report.lines.push(format!(
             "last decision inside {:.1}F, outside {:.1}F, delta {:+.1}F -> target {} \
-             (latch {}, dwell {}/{})",
+             (latch {}, dwell {}/{}{})",
             a.inside_f,
             a.outside_f,
             a.delta_f,
             a.target,
             if a.latched { "on" } else { "off" },
             a.dwell,
-            a.dwell_of
+            a.dwell_of,
+            held
         ));
     }
 
@@ -261,6 +269,20 @@ mod tests {
         let r = build(&records(body), None);
         assert!(r.findings.is_empty(), "{:?}", r.findings);
         assert_eq!(r.lines.len(), 2);
+    }
+
+    #[test]
+    fn a_winter_rest_names_the_limit_rather_than_looking_broken() {
+        let body =
+            "3 4 auto in=63.8 out=30.0 d=+33.8 latch=off dwell=0/30 tgt=0 gas=off lim=floor\n";
+        let r = build(&records(body), None);
+        assert!(
+            r.lines
+                .iter()
+                .any(|l| l.contains("held at rest by the low limit")),
+            "{:?}",
+            r.lines
+        );
     }
 
     #[test]

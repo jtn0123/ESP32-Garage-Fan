@@ -52,6 +52,7 @@ def firmware_handlers(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "credential-migration",
         "numeric-speed",
         "numeric-config",
+        "limit-config",
         "numeric-raw",
         "actuator-write",
         "actuator-attach",

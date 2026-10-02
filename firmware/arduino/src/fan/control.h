@@ -72,6 +72,18 @@ int gas_voc_on();
 /** True while the VOC latch is holding the floor (for the console pill). */
 bool gas_active();
 
+/**
+ * Absolute limits on auto mode, deg F, each with its own switch so a winter
+ * setup is never locked in. Low limit: at or below it, auto rests whatever the
+ * differential says. Start gate: auto engages only once the garage reaches it.
+ */
+bool floor_on();
+float floor_f();
+bool start_on();
+float start_f();
+/** Which limit is overriding the differential right now: "floor", "start", or nullptr. */
+const char* limit();
+
 void set_auto(bool on);
 void set_gas_boost(bool on);
 void set_gas_speed(int v);
@@ -80,6 +92,10 @@ void set_auto_max(int v);
 void set_auto_min(int v);
 void set_engage_f(float v);
 void set_release_f(float v);
+void set_floor_on(bool on);
+void set_floor_f(float v);
+void set_start_on(bool on);
+void set_start_f(float v);
 /** Force release strictly below engage (persists if it had to move). */
 void enforce_hysteresis_gap();
 

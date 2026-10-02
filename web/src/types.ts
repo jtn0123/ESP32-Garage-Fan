@@ -16,6 +16,9 @@
 // tests/test_web_contract.py::test_history_branches_agree keeps both firmware
 // branches emitting the identical set.
 
+/** fan/auto_logic.h::fan_limit_name -- the low limit or the start gate. */
+export type AutoLimit = 'floor' | 'start';
+
 /** GET /api/state -- also the payload pushed over SSE on port 8081. */
 export interface DeviceState {
   actuator_fault?: boolean; // driver rejected a PWM command; no RPM feedback
@@ -25,6 +28,21 @@ export interface DeviceState {
   auto_min: number; // speed auto rests at once equalised (0 = off)
   on_f: number; // engage differential, degrees F
   off_f: number; // release differential, degrees F
+  /**
+   * The absolute limits on auto mode, each behind its own switch; the values
+   * persist while switched off. Low limit: at or below floor_f the fan rests
+   * whatever the differential says. Start gate: auto engages only once the
+   * garage reaches start_f. Degrees F.
+   */
+  floor_on: boolean;
+  floor_f: number;
+  start_on: boolean;
+  start_f: number;
+  /**
+   * Which limit is overriding the differential right now (the latest 30 s
+   * auto tick), or null when the differential is deciding -- or auto is off.
+   */
+  limit: AutoLimit | null;
   outside_f: number | null; // null when the weather poll is missing or stale
   fw: string; // FW_VERSION -- the update check compares exactly this
   slot: string; // "app0" | "app1"

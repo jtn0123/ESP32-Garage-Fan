@@ -317,3 +317,20 @@ def test_mock_provisions_exactly_the_args_the_firmware_does() -> None:
     assert (
         firmware_args == mock_args
     ), f"firmware accepts {sorted(firmware_args)}, mock accepts {sorted(mock_args)}"
+
+
+def test_console_states_the_firmwares_low_limit_margin() -> None:
+    """The console tells the user when a resting fan may start again ("above
+    65.5°"). That number is the firmware's kFloorResumeC, restated in °F in
+    reason.ts; if one side moves alone the sentence lies about when the fan
+    will run, which is the one thing it exists to say."""
+    logic = (SRC / "fan" / "auto_logic.h").read_text()
+    m = re.search(r"kFloorResumeC\s*=\s*([\d.]+)f\s*\*\s*5\s*/\s*9;", logic)
+    assert m, "kFloorResumeC is no longer spelled as <degrees F>f * 5 / 9 in auto_logic.h"
+    reason = (ROOT / "web" / "src" / "reason.ts").read_text()
+    t = re.search(r"export const FLOOR_RESUME_F = ([\d.]+);", reason)
+    assert t, "FLOOR_RESUME_F not found in web/src/reason.ts"
+    firmware_f, console_f = float(m.group(1)), float(t.group(1))
+    assert (
+        firmware_f == console_f
+    ), f"firmware resumes {firmware_f} F above the low limit, the console says {console_f} F"

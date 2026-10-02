@@ -100,6 +100,39 @@ int main(int argc, char** argv) {
     http.args["auto"] = "2";
     http.request("/api/config");
     assert(http.status == 400 && fan::auto_max() == 9);
+  } else if (test == "limit-config") {
+    // The winter limits: both switches and both temperatures land, persist,
+    // and a bad value in any one of them changes nothing at all.
+    assert(!fan::floor_on() && !fan::start_on());
+    http.args["flooron"] = "1";
+    http.args["floorf"] = "62.5";
+    http.args["starton"] = "1";
+    http.args["startf"] = "75";
+    http.request("/api/config");
+    assert(http.status == 200);
+    assert(fan::floor_on() && fan::floor_f() == 62.5f);
+    assert(fan::start_on() && fan::start_f() == 75.0f);
+    fan::restore(&prefs);  // what a reboot would read back
+    assert(fan::floor_on() && fan::floor_f() == 62.5f && fan::start_on());
+    for (const char* bad : {"2", "on", ""}) {
+      http.args.clear();
+      http.headers["X-Fan-Token"] = token;
+      http.args["floorf"] = "70";
+      http.args["flooron"] = bad;
+      http.request("/api/config");
+      assert(http.status == 400 && fan::floor_on() && fan::floor_f() == 62.5f);
+    }
+    for (const char* bad : {"31", "121", "nan"}) {
+      http.args.clear();
+      http.headers["X-Fan-Token"] = token;
+      http.args["flooron"] = "0";
+      http.args["startf"] = bad;
+      http.request("/api/config");
+      assert(http.status == 400 && fan::floor_on() && fan::start_f() == 75.0f);
+    }
+    // Manual mode has no thermostat, so it claims no limit.
+    fan::set_auto(false);
+    assert(fan::limit() == nullptr);
   } else if (test == "numeric-raw") {
     for (const char* value : {"garbage", "10junk", "1.5", "101", ""}) {
       http.args["high_pct"] = value;

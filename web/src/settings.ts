@@ -16,6 +16,7 @@ import { installUpdate } from './updater.js';
 import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
+import { autoGroups, clamp, step } from './settings_auto.js';
 
 export type Row =
   | { kind: 'step'; label: string; hint: string; value: string; dec: () => void; inc: () => void }
@@ -52,93 +53,16 @@ export interface SettingsDeps {
   recheckUpdate: () => void;
 }
 
-const clamp = (v: number, lo: number, hi: number): number =>
-  Math.min(hi, Math.max(lo, Number(v.toFixed(2))));
-
 export function buildGroups(d: SettingsDeps): Group[] {
   const s = d.state;
   const info = d.info;
   const set = d.setConfig;
-  const eng = s.on_f;
-  const rel = s.off_f;
-
-  const step = (
-    label: string,
-    hint: string,
-    value: string,
-    dec: () => void,
-    inc: () => void,
-  ): Row => ({ kind: 'step', label, hint, value, dec, inc });
 
   const text = (label: string, hint: string, value: string): Row =>
     ({ kind: 'text', label, hint, value });
 
   return [
-    {
-      title: 'AUTO MODE',
-      blurb:
-        'The differential band that decides when the fan runs on its own. A wider band means fewer start/stop cycles. Engaging is instant; once running, auto commits for at least 15 minutes before it may drop back.',
-      rows: [
-        step(
-          'Engage above',
-          'Garage must be this many degrees hotter than the yard before auto drives the fan to its hold speed.',
-          `+${eng.toFixed(1)} °F`,
-          // Release must stay strictly below engage or the hysteresis latch
-          // flaps; the firmware enforces this too, this just avoids the round trip.
-          () => set(`onf=${clamp(eng - 0.5, rel + 0.5, 20)}`),
-          () => set(`onf=${clamp(eng + 0.5, 0.5, 20)}`),
-        ),
-        step(
-          'Release below',
-          'Fan drops back to the rest speed once the gap falls under this. Keep it well under the engage point or the fan chatters.',
-          `+${rel.toFixed(1)} °F`,
-          () => set(`offf=${clamp(rel - 0.5, 0, 20)}`),
-          () => set(`offf=${clamp(rel + 0.5, 0, eng - 0.5)}`),
-        ),
-        step(
-          'Hold speed',
-          'Speed auto holds while the differential is above the engage point — partial venting wastes the gap.',
-          `${s.auto_max} / 12`,
-          () => set(`max=${Math.max(1, s.auto_max - 1)}`),
-          () => set(`max=${Math.min(12, s.auto_max + 1)}`),
-        ),
-        step(
-          'Rest speed',
-          'Speed auto falls back to once inside and outside have equalized. Zero means the fan stops.',
-          s.auto_min === 0 ? 'off' : `${s.auto_min} / 12`,
-          () => set(`min=${Math.max(0, s.auto_min - 1)}`),
-          () => set(`min=${Math.min(12, s.auto_min + 1)}`),
-        ),
-        {
-          kind: 'toggle',
-          label: 'Auto mode',
-          hint: 'When off, the fan holds whatever speed you set by hand until you turn auto back on.',
-          on: s.auto,
-          toggle: d.toggleAuto,
-        },
-        {
-          kind: 'toggle',
-          label: 'Gas boost',
-          hint: 'Bad air overrides a resting thermostat: while the VOC index is above the trigger, auto mode holds at least the boost speed. Releases 50 index points below the trigger, and never before 15 minutes of boosting. Needs the SGP41 warmed up — the boost simply stays off without it.',
-          on: s.gas_on,
-          toggle: () => d.setConfig(`gason=${s.gas_on ? 0 : 1}`),
-        },
-        step(
-          'Gas boost · trigger',
-          'VOC index that engages the boost. 100 is this sensor’s own 24 h average, so 250 means "clearly worse than normal for this garage".',
-          `${s.gas_voc}`,
-          () => set(`gasvoc=${Math.max(100, s.gas_voc - 25)}`),
-          () => set(`gasvoc=${Math.min(500, s.gas_voc + 25)}`),
-        ),
-        step(
-          'Gas boost · speed',
-          'The minimum speed auto holds while the boost is engaged. The thermostat can still run faster; it cannot run slower.',
-          `${s.gas_spd} / 12`,
-          () => set(`gasspd=${Math.max(1, s.gas_spd - 1)}`),
-          () => set(`gasspd=${Math.min(12, s.gas_spd + 1)}`),
-        ),
-      ],
-    },
+    ...autoGroups(d),
     {
       title: 'SENSORS',
       blurb: 'What is measuring the garage, and how often it is logged.',

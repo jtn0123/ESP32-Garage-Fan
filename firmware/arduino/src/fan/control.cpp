@@ -32,6 +32,13 @@ bool g_gas_on = kFanGasDefaults.enabled;      // gas boost: VOC index forces a f
 int g_gas_spd = kFanGasDefaults.boost_speed;
 int g_gas_voc = kFanGasDefaults.on_index;
 bool g_gas_high = false;  // hysteresis latch for fan_gas_floor
+// Absolute limits (auto_logic.h): stored values survive the switch being off,
+// so flipping winter on and off does not lose the temperatures.
+bool g_floor_on = false;
+float g_floor_f = 64.0f;
+bool g_start_on = false;
+float g_start_f = 74.0f;
+FanLimit g_limit = FanLimit::kNone;  // what the last tick reported, for the console
 
 // Minimum-run dwell (auto_logic.h owns the why and the 15-min sizing): once
 // a latch engages it may not release for this many 30 s ticks. Engage stays
@@ -111,6 +118,10 @@ void restore(Preferences* prefs) {
     g_gas_on = prefs->getBool("gason", kFanGasDefaults.enabled);
     g_gas_spd = prefs->getInt("gasspd", kFanGasDefaults.boost_speed);
     g_gas_voc = prefs->getInt("gasvoc", kFanGasDefaults.on_index);
+    g_floor_on = prefs->getBool("flooron", false);
+    g_floor_f = prefs->getFloat("floorf", 64.0f);
+    g_start_on = prefs->getBool("starton", false);
+    g_start_f = prefs->getFloat("startf", 74.0f);
     const int saved = prefs->getInt("speed", 0);
     if (saved > 0 && saved <= 12) {
       g_speed = saved;
@@ -166,9 +177,21 @@ void tick_auto() {
   cfg.max_speed = g_auto_max;
   cfg.on_delta_c = g_auto_onf * 5 / 9;  // user thinks in F; logic runs in C
   cfg.off_delta_c = g_auto_offf * 5 / 9;
+  cfg.floor_c = g_floor_on ? (g_floor_f - 32) * 5 / 9 : kLimitOff;
+  cfg.start_c = g_start_on ? (g_start_f - 32) * 5 / 9 : kLimitOff;
   const int prev = g_speed < 0 ? 0 : g_speed;
-  int next = fan_auto_decide(climate::inside_c(), climate::outside_c_fresh(), prev, &g_auto_high,
-                             cfg, &g_auto_run_ticks, kMinRunTicks);
+  const float inside = climate::inside_c();
+  const float outside = climate::outside_c_fresh();
+  const bool was_running = g_auto_high;
+  int next =
+      fan_auto_decide(inside, outside, prev, &g_auto_high, cfg, &g_auto_run_ticks, kMinRunTicks);
+  g_limit = fan_auto_limit(inside, outside, g_auto_high, cfg);
+  // The one release that skips the dwell gets its own line: "why did the fan
+  // quit after four minutes" should not need the thresholds reconstructed.
+  // Not tagged "auto" -- fantape reads every auto line as the periodic one.
+  if (was_running && !g_auto_high && g_limit == FanLimit::kFloor)
+    eventlog::log("limit", "low limit %.1fF reached at %.1fF: resting",
+                  static_cast<double>(g_floor_f), static_cast<double>(inside * 9 / 5 + 32));
   // The gas floor layers under the thermostat: bad air forces a minimum
   // speed, it never lowers what the thermostat wanted. The release edge of
   // the latch goes to the flight recorder so "why did the fan spin up at
@@ -193,9 +216,9 @@ void tick_auto() {
   if (++g_auto_log_ticks >= kAutoLogTicks) {
     g_auto_log_ticks = 0;
     char msg[80];
-    fan_auto_log_line(msg, sizeof(msg), climate::inside_c(), climate::outside_c_fresh(),
-                      g_auto_high, g_auto_run_ticks, kMinRunTicks,
-                      g_auto_high ? cfg.max_speed : cfg.min_speed, g_gas_high);
+    fan_auto_log_line(msg, sizeof(msg), inside, outside, g_auto_high, g_auto_run_ticks,
+                      kMinRunTicks, g_auto_high ? cfg.max_speed : cfg.min_speed, g_gas_high,
+                      g_limit);
     eventlog::log("auto", "%s", msg);
   }
   if (next != g_speed || g_output_fault)
@@ -253,6 +276,12 @@ bool gas_boost_on() { return g_gas_on; }
 int gas_speed() { return g_gas_spd; }
 int gas_voc_on() { return g_gas_voc; }
 bool gas_active() { return g_gas_high; }
+bool floor_on() { return g_floor_on; }
+float floor_f() { return g_floor_f; }
+bool start_on() { return g_start_on; }
+float start_f() { return g_start_f; }
+// Manual mode has no thermostat, so nothing is being overridden.
+const char* limit() { return g_auto_on ? fan_limit_name(g_limit) : nullptr; }
 int auto_max() { return g_auto_max; }
 int auto_min() { return g_auto_min; }
 float engage_f() { return g_auto_onf; }
@@ -309,6 +338,37 @@ void set_release_f(float v) {
   g_auto_offf = v;
   if (g_prefs)
     g_prefs->putFloat("offf", v);
+}
+
+// Switching a limit changes what the last tick's verdict meant, so it is
+// cleared rather than left to claim a limit that no longer exists; the next
+// tick (30 s) reports afresh.
+void set_floor_on(bool on) {
+  g_floor_on = on;
+  g_limit = FanLimit::kNone;
+  if (g_prefs)
+    g_prefs->putBool("flooron", on);
+}
+
+void set_floor_f(float v) {
+  g_floor_f = v;
+  g_limit = FanLimit::kNone;
+  if (g_prefs)
+    g_prefs->putFloat("floorf", v);
+}
+
+void set_start_on(bool on) {
+  g_start_on = on;
+  g_limit = FanLimit::kNone;
+  if (g_prefs)
+    g_prefs->putBool("starton", on);
+}
+
+void set_start_f(float v) {
+  g_start_f = v;
+  g_limit = FanLimit::kNone;
+  if (g_prefs)
+    g_prefs->putFloat("startf", v);
 }
 
 void enforce_hysteresis_gap() {

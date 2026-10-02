@@ -8,12 +8,18 @@
 // to the user's low speed (0 = off). Two thresholds (engage / release) keep
 // it from flip-flopping right at the boundary.
 //
+// Two optional absolute limits bound that to a comfort band. The differential
+// alone vents the garage toward the outdoor temperature, which in winter means
+// toward freezing: the low limit stops it there, and the start gate leaves the
+// garage alone until it is actually warm.
+//
 // Pure header (no Arduino includes) so the native test env compiles this
 // exact logic -- see boot_health.h for the precedent.
 
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 
 #include "system/fixed_fmt.h"
 
@@ -40,43 +46,117 @@ inline bool latch_min_run(bool was, bool want, uint16_t* run_ticks, uint16_t min
   return want;
 }
 
+inline constexpr float kLimitOff = std::numeric_limits<float>::quiet_NaN();
+
 struct FanAutoCfg {
   int min_speed;      // rest speed once equalized (0 = off), user-set
   int max_speed;      // user's ceiling, held while venting pays off
   float on_delta_c;   // engage max when inside-outside >= this
   float off_delta_c;  // release to min when inside-outside <= this
+  float floor_c;      // low limit: inside at/below this forces rest (kLimitOff = none)
+  float start_c;      // start gate: engaging also needs inside >= this (kLimitOff = none)
 };
 
-// 2.5 F engage / 1.5 F release, expressed in C.
-inline constexpr FanAutoCfg kFanAutoDefaults{0, 9, 2.5f * 5 / 9, 1.5f * 5 / 9};
+// 2.5 F engage / 1.5 F release, expressed in C. Both limits off: the
+// differential-only thermostat the summer tuning above was done against.
+inline constexpr FanAutoCfg kFanAutoDefaults{0,         9,        2.5f * 5 / 9, 1.5f * 5 / 9,
+                                             kLimitOff, kLimitOff};
+
+// How far above the low limit the garage must climb before auto may engage
+// again. Without it the floor is a bang-bang edge of its own -- release at
+// 64.0, re-engage at 64.1 -- and the fan chatters right at the limit.
+inline constexpr float kFloorResumeC = 1.5f * 5 / 9;
+
+/** Which absolute limit, if any, is overriding the differential. */
+enum class FanLimit : uint8_t { kNone, kFloor, kStart };
+
+/** At or below the low limit: the hard stop. */
+inline bool fan_at_floor(float inside_c, const FanAutoCfg& cfg) {
+  return !std::isnan(cfg.floor_c) && inside_c <= cfg.floor_c;
+}
+
+/**
+ * The limit that forbids ENGAGING at this inside temperature: the start gate,
+ * or the floor's resume margin, whichever sits higher. Neither one releases a
+ * latch that is already high -- a fan started at 74 keeps venting through 70.
+ */
+inline FanLimit fan_engage_blocked(float inside_c, const FanAutoCfg& cfg) {
+  constexpr float kNoBar = -std::numeric_limits<float>::infinity();
+  const float resume = std::isnan(cfg.floor_c) ? kNoBar : cfg.floor_c + kFloorResumeC;
+  const float start = std::isnan(cfg.start_c) ? kNoBar : cfg.start_c;
+  if (inside_c >= resume && inside_c >= start)
+    return FanLimit::kNone;
+  return start >= resume ? FanLimit::kStart : FanLimit::kFloor;
+}
 
 // One tick of the controller. Returns the speed to command this tick.
 // - `high` is the hysteresis latch, owned by the caller across ticks.
 // - Missing/stale data (NaN) holds speed AND latch: never guess. The dwell
 //   counter freezes too -- blind time neither serves nor resets the dwell.
+//   The one exception is the low limit, which needs only the inside reading.
 // - Between the thresholds the latch holds its last state.
 // - Moves at most ONE step toward the target per tick (gentle ramp, no hunt).
 // - `run_ticks`/`min_run_ticks`: minimum-run dwell on the release edge (see
 //   latch_min_run). Callers that pass no counter get the undwelled latch.
+// - The low limit releases at once, dwell or no dwell. The dwell keeps the fan
+//   from quitting a fight it is winning; at the floor the fight is won, and
+//   every extra minute only vents the garage colder than the user asked for.
 inline int fan_auto_decide(float inside_c, float outside_c, int prev_speed, bool* high,
                            const FanAutoCfg& cfg, uint16_t* run_ticks = nullptr,
                            uint16_t min_run_ticks = 0) {
-  if (std::isnan(inside_c) || std::isnan(outside_c))
+  if (std::isnan(inside_c))
     return prev_speed;
-  const float delta = inside_c - outside_c;
   bool want = *high;
-  if (delta >= cfg.on_delta_c) {
-    want = true;
-  } else if (delta <= cfg.off_delta_c) {
+  if (fan_at_floor(inside_c, cfg)) {
     want = false;
+    if (run_ticks)
+      *run_ticks = 0;
+  } else {
+    if (std::isnan(outside_c))
+      return prev_speed;
+    const float delta = inside_c - outside_c;
+    if (delta >= cfg.on_delta_c) {
+      if (fan_engage_blocked(inside_c, cfg) == FanLimit::kNone)
+        want = true;
+    } else if (delta <= cfg.off_delta_c) {
+      want = false;
+    }
+    if (run_ticks)
+      want = latch_min_run(*high, want, run_ticks, min_run_ticks);
   }
-  if (run_ticks)
-    want = latch_min_run(*high, want, run_ticks, min_run_ticks);
   *high = want;
   const int target = *high ? cfg.max_speed : cfg.min_speed;
   if (target == prev_speed)
     return prev_speed;
   return prev_speed + (target > prev_speed ? 1 : -1);
+}
+
+/**
+ * Which limit is holding the fan below what the differential alone would do,
+ * judged against the latch this tick's decision left. kNone whenever the
+ * differential is the one deciding -- including blind ticks, where nothing is.
+ */
+inline FanLimit fan_auto_limit(float inside_c, float outside_c, bool high, const FanAutoCfg& cfg) {
+  if (std::isnan(inside_c))
+    return FanLimit::kNone;
+  if (fan_at_floor(inside_c, cfg))
+    return FanLimit::kFloor;
+  if (high || std::isnan(outside_c) || inside_c - outside_c < cfg.on_delta_c)
+    return FanLimit::kNone;
+  return fan_engage_blocked(inside_c, cfg);
+}
+
+/** The wire/tape spelling: "floor", "start", or nullptr for none. */
+inline const char* fan_limit_name(FanLimit limit) {
+  switch (limit) {
+    case FanLimit::kFloor:
+      return "floor";
+    case FanLimit::kStart:
+      return "start";
+    case FanLimit::kNone:
+      break;
+  }
+  return nullptr;
 }
 
 // Gas boost: the SGP41's VOC index forces a minimum speed while the air is
@@ -155,14 +235,16 @@ inline int fan_gas_floor(int voc_index, bool* gas_high, const FanGasCfg& cfg,
 
 /**
  * The periodic auto-mode line, e.g.
- *   "in=81.0 out=71.6 d=+9.4 latch=on dwell=12/30 tgt=10 gas=off"
+ *   "in=81.0 out=71.6 d=+9.4 latch=on dwell=12/30 tgt=10 gas=off lim=-"
  *
  * Temperatures in F because the thresholds the user sets are in F; `d` is
- * inside-minus-outside, the quantity the hysteresis actually compares.
+ * inside-minus-outside, the quantity the hysteresis actually compares. `lim`
+ * names the absolute limit overriding it (fan_auto_limit), "-" for none.
  * Returns the length written (never past `cap`).
  */
 inline int fan_auto_log_line(char* out, size_t cap, float inside_c, float outside_c, bool high,
-                             uint16_t run_ticks, uint16_t min_ticks, int target, bool gas_high) {
+                             uint16_t run_ticks, uint16_t min_ticks, int target, bool gas_high,
+                             FanLimit limit) {
   if (!out || cap == 0)
     return 0;
   // Every field is rendered from a CLAMPED INTEGER (system/fixed_fmt.h), so
@@ -174,9 +256,11 @@ inline int fan_auto_log_line(char* out, size_t cap, float inside_c, float outsid
   const bool blind = std::isnan(inside_c) || std::isnan(outside_c);
   fixedfmt::write_signed(
       d_f, blind ? fixedfmt::kAbsent : fixedfmt::tenths((inside_c - outside_c) * 9 / 5));
-  return snprintf(out, cap, "in=%s out=%s d=%s latch=%s dwell=%d/%d tgt=%d gas=%s", in_f, out_f,
-                  d_f, high ? "on" : "off", fixedfmt::count999(run_ticks),
-                  fixedfmt::count999(min_ticks), fixedfmt::small(target), gas_high ? "ON" : "off");
+  const char* lim = fan_limit_name(limit);
+  return snprintf(out, cap, "in=%s out=%s d=%s latch=%s dwell=%d/%d tgt=%d gas=%s lim=%s", in_f,
+                  out_f, d_f, high ? "on" : "off", fixedfmt::count999(run_ticks),
+                  fixedfmt::count999(min_ticks), fixedfmt::small(target), gas_high ? "ON" : "off",
+                  lim ? lim : "-");
 }
 
 // Merge the gas floor into the thermostat's decision, preserving the one-step

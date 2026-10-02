@@ -18,6 +18,13 @@ cable into a computer: the fan drives 5 V out on VBUS.
   you can drag across to read any moment. The PWM readout opens a live scope
   of the gate-drive waveform next to the captured duty table, and Settings
   edits the auto thresholds, probe offsets and maintenance actions in place.
+- **Winter limits** — auto vents whenever the garage is warmer than the yard,
+  which in winter would drag it down toward outdoor temperature. Two optional
+  limits under Settings → Temperature limits bound it: a **low limit** that
+  rests the fan the moment the garage cools to it (restarting only 1.5 °F
+  above it), and a **start point** below which auto leaves the garage alone.
+  Each has its own switch; with both on (say 64 / 74 °F) the fan vents a warm
+  garage from 74 down to 64 and then stays off.
 - **Update check** — the console asks GitHub Releases whether a newer tag
   exists and links the `.bin`; the controller itself never talks to the
   internet, so there is no TLS stack on the device
