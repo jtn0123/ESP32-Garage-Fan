@@ -1,2 +1,2 @@
-platformio>=6.1.19
+platformio>=6.2.0
 pyyaml>=6.0
