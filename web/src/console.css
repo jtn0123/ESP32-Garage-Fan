@@ -383,10 +383,19 @@ body{padding:0 16px 32px}
 #hbits{display:none}
 #hmq{order:2}
 #hnav{order:3}
+/* While an update waits, the UPDATE pill is the way into Settings: both words
+   do not fit beside the broker status at 320 px, and a second header line
+   would cost the speed rail its place on the first screen. */
+#hnav:has(#updot:not(.hide)) #nav{display:none}
 }
 
 /* ---- update check (Settings > UPDATE) ---- */
-#updot{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac);align-self:center}
+/* A labelled pill rather than a bare dot: the dot meant "update available" to
+   nobody who had not hovered it. Same ::after trick as #nav for the 44 px hit
+   area; mostly vertical, so it does not swallow the SETTINGS target beside it. */
+#updot{cursor:pointer;font:600 10px var(--mono);letter-spacing:.08em;color:var(--ac);background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.45);border-radius:999px;padding:2px 8px;align-self:center;position:relative}
+#updot::after{content:'';position:absolute;inset:-14px -2px}
+#updot:hover{background:rgba(59,130,246,.22)}
 .upd{text-align:right}
 .updline{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font:500 12px var(--mono)}
 .updnew{color:var(--ac)}

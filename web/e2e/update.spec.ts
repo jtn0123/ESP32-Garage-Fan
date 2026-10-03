@@ -8,7 +8,7 @@
  */
 import { createHash } from 'node:crypto';
 
-import { expect, openConsole, recordRequests, resetScen, scen, test } from './harness';
+import { expect, hitBox, openConsole, recordRequests, resetScen, scen, test } from './harness';
 
 // These specs flip knobs (ota_fw) and an accepted /update moves the mock's
 // reported fw, boots and slot. Put the worker's mock back after each one, or
@@ -65,6 +65,28 @@ async function openSettings(page: import('@playwright/test').Page): Promise<void
   await page.locator('#nav').click();
   await expect(page.locator('#settings')).not.toHaveClass(/hide/);
 }
+
+test('the header UPDATE flag says so in words and opens the update group', async ({ page }) => {
+  await routeChannel(page);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openConsole(page);
+  const flag = page.locator('#updot');
+  await expect(flag).toHaveText('UPDATE');
+  const hit = await hitBox(page, '#updot');
+  expect(hit.h, `#updot hit area is ${hit.h} px tall`).toBeGreaterThanOrEqual(44);
+  expect(hit.w, `#updot hit area is ${hit.w} px wide`).toBeGreaterThanOrEqual(44);
+  // On a 320 px phone it stands in for SETTINGS rather than wrap the header
+  // onto a second line, which would push the speed rail below the fold.
+  await expect(page.locator('#nav')).toBeHidden();
+  const stack = await page.locator('#stack').boundingBox();
+  expect(stack!.y + stack!.height, 'the speed rail is below the fold').toBeLessThanOrEqual(568);
+  await flag.click();
+  await expect(page.locator('#settings')).not.toHaveClass(/hide/);
+  await expect(page.locator('#groups .gt', { hasText: /^UPDATE$/ })).toBeInViewport();
+  // Settings already says it; the way back is the nav again.
+  await expect(flag).toBeHidden();
+  await expect(page.locator('#nav')).toHaveText('← CONSOLE');
+});
 
 test('one click installs the published release and waits for confirmation', async ({ page }) => {
   await routeChannel(page);
