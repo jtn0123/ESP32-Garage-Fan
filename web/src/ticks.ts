@@ -25,11 +25,22 @@ export function decimals(step: number): number {
   return Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
 }
 
+/**
+ * True for a real number above zero. A range or step that is NaN fails it as
+ * surely as one that is negative -- `x <= 0` alone would let NaN through.
+ */
+const positive = (v: number): boolean => v > 0;
+
+/** Within a decade, the mantissa after 1 and after 2; 5 rolls over to 10. */
+const NEXT_MANTISSA = new Map([
+  [1, 2],
+  [2, 5],
+]);
+
 /** The next 1-2-5 step up: 0.2 -> 0.5 -> 1 -> 2 -> 5 -> 10. */
 function coarser(step: number): number {
   const p = 10 ** Math.floor(Math.log10(step) + 1e-9);
-  const m = Math.round(step / p);
-  return clean((m === 1 ? 2 : m === 2 ? 5 : 10) * p);
+  return clean((NEXT_MANTISSA.get(Math.round(step / p)) ?? 10) * p);
 }
 
 /**
@@ -92,43 +103,73 @@ export function niceScale(
   /** Snapping outward never crosses this: watts and gas indices stop at 0. */
   lowest = -Infinity,
 ): Scale {
-  if (!(hi > lo)) return { min: lo, max: lo + minStep, ticks: [lo], dp: decimals(minStep) };
-  const span = hi - lo;
-  const maxTicks = plotPx >= 120 ? 5 : 4;
+  if (!positive(hi - lo)) return { min: lo, max: lo + minStep, ticks: [lo], dp: decimals(minStep) };
+  const fit: Fit = { lo, hi, plotPx, maxTicks: plotPx >= 120 ? 5 : 4, lowest };
   const steps: number[] = [];
-  for (let s = minStep; steps.length === 0 || s <= span; s = coarser(s)) steps.push(s);
+  for (let s = minStep; steps.length === 0 || s <= hi - lo; s = coarser(s)) steps.push(s);
+  const found = search(fit, steps);
+  if (found) return found;
+  const last = steps.at(-1) ?? minStep;
+  return make(fit, lo, hi, last) ?? { min: lo, max: hi, ticks: [], dp: decimals(last) };
+}
 
-  // null rather than a 3000-element grid: VOC raw ticks span ~30000 at step 1.
-  const make = (min: number, max: number, step: number): Scale | null =>
-    count(min, max, step) > maxTicks
-      ? null
-      : { min, max, ticks: grid(min, max, step), dp: decimals(step) };
-  // The nearest multiple at or beyond each end. Cleaned, then clamped so the
-  // float noise cleaning removes can never shave the data's own extreme off.
-  const below = (step: number): number =>
-    Math.max(Math.min(clean(Math.floor(lo / step + 1e-6) * step), lo), lowest);
-  const above = (step: number): number =>
-    Math.max(clean(Math.ceil(hi / step - 1e-6) * step), hi);
-  const fits = (sc: Scale | null, step: number, minPx: number): sc is Scale =>
-    sc !== null && sc.ticks.length >= 3 && (step / (sc.max - sc.min)) * plotPx >= minPx;
+/** What niceScale searches over: the data's range, the room, and the floor. */
+interface Fit {
+  lo: number;
+  hi: number;
+  plotPx: number;
+  maxTicks: number;
+  lowest: number;
+}
 
+/** The comfortable pass, then the tight one, then both ends snapped outward. */
+function search(fit: Fit, steps: readonly number[]): Scale | null {
   for (const minPx of [COMFY_PX, TIGHT_PX]) {
     for (const step of steps) {
-      const inside = make(lo, hi, step);
-      if (fits(inside, step, minPx)) return inside;
-      const b = below(step);
-      const a = above(step);
-      const reach = EDGE_SNAP * span;
-      const near = make(lo - b <= reach ? b : lo, a - hi <= reach ? a : hi, step);
-      if (fits(near, step, minPx)) return near;
+      const sc = insideOrNear(fit, step, minPx);
+      if (sc) return sc;
     }
   }
   for (const step of steps) {
-    const out = make(below(step), above(step), step);
-    if (fits(out, step, TIGHT_PX)) return out;
+    const out = make(fit, below(fit, step), above(fit, step), step);
+    if (fits(fit, out, step, TIGHT_PX)) return out;
   }
-  const last = steps[steps.length - 1] ?? minStep;
-  return make(lo, hi, last) ?? { min: lo, max: hi, ticks: [], dp: decimals(last) };
+  return null;
+}
+
+/** The bounds as given, or with an end stretched to a round value within EDGE_SNAP. */
+function insideOrNear(fit: Fit, step: number, minPx: number): Scale | null {
+  const inside = make(fit, fit.lo, fit.hi, step);
+  if (fits(fit, inside, step, minPx)) return inside;
+  const reach = EDGE_SNAP * (fit.hi - fit.lo);
+  const b = below(fit, step);
+  const a = above(fit, step);
+  const near = make(fit, fit.lo - b <= reach ? b : fit.lo, a - fit.hi <= reach ? a : fit.hi, step);
+  return fits(fit, near, step, minPx) ? near : null;
+}
+
+/**
+ * A scale over [min, max] at `step`, or null when it would carry too many
+ * gridlines -- null rather than a 3000-element grid: VOC raw ticks span
+ * ~30000 at step 1.
+ */
+function make(fit: Fit, min: number, max: number, step: number): Scale | null {
+  if (count(min, max, step) > fit.maxTicks) return null;
+  return { min, max, ticks: grid(min, max, step), dp: decimals(step) };
+}
+
+// The nearest multiple at or beyond each end. Cleaned, then clamped so the
+// float noise cleaning removes can never shave the data's own extreme off.
+function below(fit: Fit, step: number): number {
+  return Math.max(Math.min(clean(Math.floor(fit.lo / step + 1e-6) * step), fit.lo), fit.lowest);
+}
+function above(fit: Fit, step: number): number {
+  return Math.max(clean(Math.ceil(fit.hi / step - 1e-6) * step), fit.hi);
+}
+
+/** At least three gridlines, and `minPx` or more between them. */
+function fits(fit: Fit, sc: Scale | null, step: number, minPx: number): sc is Scale {
+  return sc !== null && sc.ticks.length >= 3 && (step / (sc.max - sc.min)) * fit.plotPx >= minPx;
 }
 
 // ---------------------------------------------------------------- time axis
@@ -207,7 +248,7 @@ const MONDAY = 4;
  */
 export function timeTicks(t0: number, tn: number, step: number): number[] {
   const out: number[] = [];
-  if (!(tn > t0) || !(step > 0)) return out;
+  if (!positive(tn - t0) || !positive(step)) return out;
   const day = new Date(t0 * 1000);
   day.setHours(0, 0, 0, 0);
   const push = (d: Date): boolean => {
@@ -215,7 +256,7 @@ export function timeTicks(t0: number, tn: number, step: number): number[] {
     if (t > tn) return false;
     // The spring-forward 02:00 does not exist and resolves to 03:00, which
     // the next slot then names again: one tick, not two on the same pixel.
-    if (t >= t0 && t !== out[out.length - 1]) out.push(t);
+    if (t >= t0 && t !== out.at(-1)) out.push(t);
     return true;
   };
   if (step < DAY) {
