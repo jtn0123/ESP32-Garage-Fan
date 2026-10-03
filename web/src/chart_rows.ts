@@ -12,6 +12,7 @@ import {
   limits,
   line,
   placeholder,
+  plotH,
   scale,
   surface,
   xAt,
@@ -32,7 +33,7 @@ export function drawFanSpeed(canvas: HTMLCanvasElement, s: Series, index: number
     return;
   }
   const sc = scale(0, 12);
-  frame(surf, s, sc, (v) => v.toFixed(0), false);
+  frame(surf, s, sc, '', false);
 
   // Step plot, not a line: the speed holds between samples rather than
   // ramping. One polygon per contiguous run, so an outage leaves a hole
@@ -70,15 +71,14 @@ export function drawFanSpeed(canvas: HTMLCanvasElement, s: Series, index: number
 }
 
 export interface RowScale {
-  /** Smallest range to auto-scale to, in this series' own units. */
+  /**
+   * Smallest range to auto-scale to, in this series' own units. Also sets the
+   * finest gridline step, and so the label decimals (ticks.ts resolution).
+   */
   minSpan?: number;
   /** Least value the quantity can take; the axis never pads below it. */
   lowest?: number;
-  /** Axis label for a value; whole numbers unless the row needs finer. */
-  fmt?: (v: number) => string;
 }
-
-const wholeNumber = (v: number): string => v.toFixed(0);
 
 export function drawSimple(
   canvas: HTMLCanvasElement,
@@ -87,7 +87,7 @@ export function drawSimple(
   colour: string,
   emptyMessage: string,
   index: number,
-  { minSpan = MIN_SPAN, lowest = -Infinity, fmt = wholeNumber }: RowScale = {},
+  { minSpan = MIN_SPAN, lowest = -Infinity }: RowScale = {},
 ): void {
   const surf = surface(canvas);
   if (!surf) return;
@@ -95,12 +95,12 @@ export function drawSimple(
     placeholder(surf, emptyMessage);
     return;
   }
-  const sc = limits(values, minSpan, lowest);
+  const sc = limits(values, minSpan, lowest, plotH(surf.H));
   if (!sc) {
     placeholder(surf, emptyMessage);
     return;
   }
-  frame(surf, s, sc, fmt, false);
+  frame(surf, s, sc, '', false);
   line(surf, s, sc, values, colour, false, 2);
   crosshair(surf, s, index);
 }
@@ -124,12 +124,12 @@ export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): 
   }
   // Scale to the BAND, not just the snapshot line: a bucket whose meter
   // swung 4->45 W has to fit on the axis or the range it describes is a lie.
-  const sc = limits([...s.w, ...s.wmin, ...s.wmax], MIN_SPAN, 0);
+  const sc = limits([...s.w, ...s.wmin, ...s.wmax], MIN_SPAN, 0, plotH(surf.H));
   if (!sc) {
     placeholder(surf, 'no plug data yet');
     return;
   }
-  frame(surf, s, sc, (v) => v.toFixed(1), false);
+  frame(surf, s, sc, '', false);
   fillMeterBand(surf, s, sc);
   tintCycling(surf, s);
   line(surf, s, sc, s.w, SERIES_COLOURS.power, false, 2);
@@ -196,7 +196,7 @@ export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number)
   // 0.1 V, not the 2-unit default: a LiPo's ENTIRE working range is about
   // 0.7 V, so the temperature/humidity floor would flatten every real
   // discharge curve into a straight line.
-  const sc = limits(s.bv, 0.1);
+  const sc = limits(s.bv, 0.1, -Infinity, plotH(H));
   if (!sc) {
     placeholder(surf, 'no battery data');
     return;
@@ -220,7 +220,7 @@ export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number)
       i++;
     }
   }
-  frame(surf, s, sc, (v) => v.toFixed(2), false);
+  frame(surf, s, sc, '', false);
   line(surf, s, sc, s.bv, PU, false, 2);
   crosshair(surf, s, index);
 }

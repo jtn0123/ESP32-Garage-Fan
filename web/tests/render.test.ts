@@ -9,7 +9,7 @@ import { limits, unsignedZero } from '../src/charts.js';
 import { isNewer } from '../src/console.js';
 import { battReadout, powerReadout, speedReadout } from '../src/history_view.js';
 import { plugBit, plugColour } from '../src/status_bits.js';
-import { axisLabel, cardTight, storage } from '../src/format.js';
+import { cardTight, storage, tickLabel } from '../src/format.js';
 import type { DeviceState } from '../src/types.js';
 
 describe('limits: minimum y-span', () => {
@@ -142,26 +142,32 @@ describe('storage: a nearly-full card has to look nearly full', () => {
   });
 });
 
-describe('axisLabel: one format per range', () => {
-  // 2026-08-16 15:27 local, whatever zone the test box is in.
-  const t = Math.floor(new Date(2026, 7, 16, 15, 27).getTime() / 1000);
+describe('tickLabel: one format per tick spacing', () => {
+  // Local wall times, whatever zone the test box is in. 2026-08-16 is a Sunday.
+  const at = (h: number, m = 0, day = 16): number =>
+    Math.floor(new Date(2026, 7, day, h, m).getTime() / 1000);
+  const HOUR = 3600;
+  const DAY = 86400;
 
-  it('gives 24 h the clock', () => {
-    expect(axisLabel(t, 1)).toBe('15:27');
+  it('gives sub-day ticks the clock', () => {
+    expect(tickLabel(at(15), 3 * HOUR)).toBe('15:00');
+    expect(tickLabel(at(15, 30), 30 * 60)).toBe('15:30');
   });
 
-  it('gives a week the date AND the hour', () => {
-    // Without the hour two neighbouring ticks both read "8/16" and the axis
-    // looks broken.
-    expect(axisLabel(t, 7)).toBe('8/16 15h');
+  it('names the day at midnight instead of printing 00:00', () => {
+    // The one label on a 24 h axis that says which day the hours belong to.
+    expect(tickLabel(at(0), 3 * HOUR)).toBe('Sun 16');
   });
 
-  it('drops the hour past a week', () => {
-    // 30 and 60 day rows are 2.6 and 5.1 hours apart, so an hour on the label
-    // claims a precision the sample does not have -- and it is what made the
-    // long axis unreadable at phone width.
-    expect(axisLabel(t, 30)).toBe('8/16');
-    expect(axisLabel(t, 60)).toBe('8/16');
+  it('gives daily and two-day ticks the weekday and date', () => {
+    expect(tickLabel(at(0), DAY)).toBe('Sun 16');
+    expect(tickLabel(at(0, 0, 18), 2 * DAY)).toBe('Tue 18');
+  });
+
+  it('gives weekly ticks the date alone', () => {
+    // They always fall on a Monday, so the weekday would repeat on every one.
+    expect(tickLabel(at(0, 0, 17), 7 * DAY)).toBe('8/17');
+    expect(tickLabel(at(0, 0, 17), 14 * DAY)).toBe('8/17');
   });
 });
 
