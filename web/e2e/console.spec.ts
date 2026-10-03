@@ -134,6 +134,24 @@ test('the PWM cell opens the waveform scope and closes again', async ({ page }) 
   await expect(scope).toHaveClass(/hide/);
 });
 
+/**
+ * The scope is a diagnostic; the rail is why the page is open. On a phone the
+ * scope used to open ABOVE the rail and push it ~760 px down, off the screen.
+ * It now files below the rail there (on a desk the rail has its own column),
+ * so opening it must not move the rail at all -- and must still land the
+ * scope's way out on screen, scrolling it into view if it opened below the fold.
+ */
+test('opening the scope leaves the speed rail where it was', async ({ page }) => {
+  await openConsole(page);
+  const railTop = () =>
+    page.evaluate(() => document.querySelector('#rail')!.getBoundingClientRect().top + scrollY);
+  const before = await railTop();
+  await page.locator('#pwmcell').click();
+  await expect(page.locator('#scope')).not.toHaveClass(/hide/);
+  expect(await railTop(), 'the scope pushed the speed rail down').toBe(before);
+  await expect(page.locator('#scclose')).toBeInViewport({ ratio: 1 });
+});
+
 test('the capture table offers all thirteen steps and transmits one', async ({ page }) => {
   await openConsole(page);
   await page.locator('#pwmcell').click();
@@ -332,12 +350,14 @@ test('every touch control on the console screen is at least 44 px', async ({ pag
     expect(hit.w, `${sel} hit area is ${hit.w} px wide`).toBeGreaterThanOrEqual(44);
   }
 
-  // The scope's only dismissal, which needs the scope open to exist. Measured
-  // centred on the screen: at 320x568 it opens with its centre ~20 px above
-  // the fold, a point past the fold hits nothing, and the probe then read the
-  // fold (42 px on CI's fonts, 46 locally) instead of the 50 px target.
+  // The scope's only dismissal, which needs the scope open to exist. At this
+  // size the scope opens below the fold (it files under the speed rail on a
+  // phone) and scrolls itself into view: the probe waits for it to land, then
+  // centres it. A point past the fold hits nothing, so a button resting at the
+  // screen's edge made the probe read the fold instead of the 50 px target.
   await page.locator('#pwmcell').click();
   await expect(page.locator('#scope')).not.toHaveClass(/hide/);
+  await expect(page.locator('#scclose')).toBeInViewport({ ratio: 1 });
   await page.locator('#scclose').evaluate((el) => el.scrollIntoView({ block: 'center' }));
   const close = await hitBox(page, '#scclose');
   expect(close.h, `#scclose hit area is ${close.h} px tall`).toBeGreaterThanOrEqual(44);

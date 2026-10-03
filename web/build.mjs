@@ -31,12 +31,16 @@ const js = await build({
 });
 const script = js.outputFiles[0].text.trim();
 
-const css = readFileSync(resolve(SRC, 'console.css'), 'utf8');
+// One stylesheet per concern, each under the 500-line ceiling, concatenated in
+// this order: a later sheet wins a tie, so a phone rule overriding a base rule
+// lives in the same sheet as the rule it overrides.
+const STYLES = ['console.css', 'scope.css', 'settings.css'];
+const css = STYLES.map((f) => readFileSync(resolve(SRC, f), 'utf8')).join('\n');
 const body = readFileSync(resolve(SRC, 'body.html'), 'utf8').trim();
 
 // Cheap, safe CSS minification: strip comments and collapse the whitespace the
 // authored file uses for readability. Deliberately not a full CSS parser --
-// this only has to handle the one stylesheet in this repo.
+// this only has to handle the stylesheets in this repo.
 // No regex for the whitespace pass. Both /\s*\n\s*/ and the [ \t]*\n[ \t]*
 // that first replaced it are quadratic: a leading unbounded quantifier with a
 // literal after it re-tries at every position in a run of spaces that has no

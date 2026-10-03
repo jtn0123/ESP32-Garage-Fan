@@ -17,6 +17,7 @@ import type { DeviceInfo, DeviceState } from './types.js';
 import { ageText, paintFrame } from './panel.js';
 import type { UpdateStatus } from './update.js';
 import { autoGroups, clamp, step } from './settings_auto.js';
+import { sectionId } from './settings_nav.js';
 
 export type Row =
   | { kind: 'step'; label: string; hint: string; value: string; dec: () => void; inc: () => void }
@@ -223,7 +224,7 @@ export function render(host: HTMLElement, groups: Group[]): void {
 }
 
 function renderGroup(g: Group): HTMLElement {
-  const wrap = el('div', { className: 'grp' });
+  const wrap = el('div', { className: 'grp', id: sectionId(g.title) });
   const head = el('div');
   head.append(
     el('div', { className: 'gt', textContent: g.title }),
@@ -237,6 +238,7 @@ function renderGroup(g: Group): HTMLElement {
 
 function renderRow(r: Row): HTMLElement {
   const row = el('div', { className: 'grow' });
+  row.dataset['kind'] = r.kind;
   const left = el('div', { className: 'rl' });
   left.append(
     el('div', { className: 'rlab', textContent: r.label }),
@@ -421,7 +423,6 @@ function otaControl(): HTMLElement {
   otaRow = box;
   return box;
 }
-
 
 // --------------------------------------------------------------- the mirror
 

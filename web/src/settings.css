@@ -1,0 +1,135 @@
+/* ---- settings ---- */
+/* A reading column, not the console's 1136 px. At full width a stepper sat
+   ~300 px right of the label it belongs to, across empty space the eye had to
+   cross for every row; capped, each control sits beside its own label. */
+#settings{max-width:760px;margin:0 auto}
+#sethead{display:flex;align-items:baseline;gap:14px;padding-bottom:12px;flex-wrap:wrap}
+#sethead h2{font:600 30px/1 var(--sans);letter-spacing:-.03em;margin:0;font-weight:600}
+#sethead p{font-size:13.5px;color:var(--dim);margin:0}
+/* The jump bar (settings_nav.ts): one tab per group, pinned while the groups
+   scroll under it. Drawn like the chart's row chips -- mono label, underline
+   when lit -- so the page has one tab language, not two. The hairline and the
+   lit underline are inset shadows rather than borders: the strip is its own
+   sideways scroller, and anything hanging below its box would scroll it. */
+#setjump{position:sticky;top:0;z-index:4;display:flex;gap:22px;overflow-x:auto;scrollbar-width:none;
+  background:var(--bg);box-shadow:inset 0 -1px var(--ln)}
+#setjump::-webkit-scrollbar{display:none}
+#setjump button{flex:none;height:44px;padding:0;background:none;border:0;cursor:pointer;white-space:nowrap;
+  font:500 10.5px var(--mono);letter-spacing:.1em;color:var(--fai)}
+#setjump button:hover{color:var(--mut)}
+#setjump button[aria-current]{color:var(--tx);box-shadow:inset 0 -2px var(--tx)}
+.grp{display:grid;grid-template-columns:150px 1fr;gap:32px;padding:24px 0;border-top:1px solid var(--ln)}
+/* The bar's hairline is the first group's top rule. */
+.grp:first-child{border-top:0}
+.grp .gt{font:600 11px var(--mono);letter-spacing:.12em;color:var(--mut)}
+.grp .gb{font-size:12.5px;color:var(--fai);margin-top:7px;line-height:1.5;text-wrap:pretty}
+.grows{display:flex;flex-direction:column}
+.grow{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:10px 0;min-height:34px}
+.grow .rl{max-width:430px}
+.grow .rlab{font-size:14.5px;color:var(--tx)}
+.grow .rh{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.45;text-wrap:pretty}
+.stp{display:flex;align-items:center}
+.stp button{width:44px;height:44px;border:1px solid var(--bd);background:#12161d;color:var(--mut);cursor:pointer;font:500 15px var(--mono)}
+.stp button:first-child{border-radius:5px 0 0 5px;border-right:0}
+.stp button:last-child{border-radius:0 5px 5px 0;border-left:0}
+/* The line-height rides INSIDE the font shorthand (12.5px/44px). Declared
+   separately it was silently dropped: `font:` resets line-height to normal, and
+   the shorthand came after it, so the value sat top-aligned in its 44 px box
+   instead of centred in it -- introduced by the same change that grew the
+   stepper to 44 px for a thumb. */
+.stp span{min-width:90px;height:44px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px/44px var(--mono);color:var(--tx)}
+/* The pill stays 42x24 -- it reads correctly at that size -- and the ::after
+   grows the HIT area to 44 px without painting anything, the same trick the
+   rail uses. A switch you have to aim at is a switch you toggle by accident. */
+.tgl{width:42px;height:24px;border-radius:999px;border:1px solid var(--bd);cursor:pointer;position:relative;padding:0;transition:background .15s;background:#12161d}
+.tgl::after{content:'';position:absolute;inset:-10px;border-radius:999px}
+.tgl i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;transition:left .15s;background:var(--fai)}
+.tgl.on{background:rgba(34,160,107,.30);border-color:var(--ok)}
+.tgl.on i{left:22px;background:var(--ok)}
+.rtx{font:500 12.5px var(--mono);color:var(--mut);text-align:right}
+.acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.acts button,.acts a{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;white-space:nowrap;line-height:1.15;background:transparent;color:var(--tx);text-decoration:none;display:inline-block}
+.acts .danger{border-color:#3a2626;color:#e0a9a9}
+.fld{font-size:12.5px;padding:11px 10px;min-height:44px;border-radius:5px;background:#0e1218;color:var(--tx);border:1px solid var(--bd);font-family:var(--mono);max-width:190px}
+/* The native file input needs room for its own "No file chosen" text, which
+   190px clips mid-word. Let it size to content, bounded by the row. */
+.fld[type=file]{max-width:100%;width:auto}
+.fld::file-selector-button{font:500 11px var(--mono);letter-spacing:.06em;padding:4px 9px;margin-right:9px;border-radius:4px;border:1px solid var(--pbd);background:#12161d;color:var(--mut);cursor:pointer}
+#otarow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+#otarow button{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
+#otamsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;margin-top:6px}
+
+/* Desk layout inside the 760 px column. A form, the panel mirror, the update
+   line and the maintenance buttons are wider than what is left of a row beside
+   its label -- squeezed there, the four maintenance buttons stacked one per
+   line down the right edge -- so those take the line under their label and
+   read left to right from it. A readout keeps to one line and the label beside
+   it wraps instead: "1.14.23 · ota_0 ·" over a lone "confirmed" read as two
+   values. Desk-only: the phone layout already stacks every row its own way. */
+@media(min-width:901px){
+.grow[data-kind=provision],.grow[data-kind=ota],.grow[data-kind=panel],.grow[data-kind=update],
+.grow[data-kind=actions]{flex-direction:column;align-items:stretch;gap:12px}
+.rtx{white-space:nowrap}
+.grow .provgrid{max-width:none}
+.grow .upd,#otamsg{text-align:left}
+.grow .updline,#otarow{justify-content:flex-start}
+/* Safe pair over the destructive pair, in equal columns. */
+.grow[data-kind=actions] .acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-width:440px}
+.grow[data-kind=actions] .acts>*{text-align:center}
+}
+
+@media(max-width:900px){
+.grp{grid-template-columns:1fr;gap:14px}
+/* Seven tabs want ~600 px against a ~380 px column: the strip scrolls sideways
+   with the same bleed and edge fade as the chart chips (see #chips), and the
+   lit tab is scrolled into the strip as the page moves. No snap, unlike the
+   chips: a snap point pulled that scroll back short, leaving DEVICE lit under
+   the fade. */
+#setjump{margin:0 -16px;padding:0 16px;gap:20px}
+#setjump.more{mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 34px),transparent 100%)}
+.grow{flex-direction:column;align-items:flex-start;gap:10px}
+.grow .rl{max-width:none}
+/* A 146 px stepper in a 320 px column left two thirds of the row empty while
+   its own buttons were 28 px. Spanning the row costs nothing and buys the
+   target size (M6/H3 are one edit). */
+.stp{width:100%}
+.stp span{flex:1;min-width:0}
+.acts{width:100%}
+.acts button,.acts a{flex:1;text-align:center}
+.rtx,.acts{text-align:left;justify-content:flex-start}
+}
+
+/* ---- update check (Settings > UPDATE) ---- */
+.upd{text-align:right}
+.updline{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font:500 12px var(--mono)}
+.updnew{color:var(--ac)}
+.updok{color:var(--ok)}
+.updmuted{color:var(--dim)}
+.updlink{color:var(--out);text-decoration:none;border-bottom:1px dotted var(--pbd)}
+.updlink:hover{color:var(--tx)}
+.updbtn{padding:12px 14px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-family:var(--sans);font-size:12.5px;background:transparent;color:var(--tx)}
+@media(max-width:900px){.upd,.updline{text-align:left;justify-content:flex-start}}
+
+/* The e-ink mirror in the settings drawer. The canvas is nearest-neighbour
+   scaled (see panel.ts) so it reads as a panel with hard pixels, not a photo
+   of one; the border and paper tone are there to make it look like glass on a
+   wall rather than another card in the page. */
+.pnl { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+#pnlcv {
+  width: 100%;
+  max-width: 500px;
+  height: auto;
+  image-rendering: pixelated;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #e8e4dc;
+}
+.pnlmsg { font-size: 11px; color: var(--dim); }
+.prov{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.provgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;max-width:420px}
+.provgrid .fld{max-width:100%;width:100%;box-sizing:border-box}
+#prov_go{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
+#provmsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;min-height:1em}
+.updinstall{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
+#updmsg{font:500 11.5px var(--mono);color:var(--dim)}
+#upd_go:disabled{opacity:.5;cursor:progress}
