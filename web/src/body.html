@@ -34,6 +34,11 @@
 <div id="acts">
 <button class="pill" id="bauto">auto</button>
 <button class="pill" id="boff">Fan off</button>
+<div id="pastbar">
+<span id="pastlab">VIEWING</span><span id="pastwhen"></span>
+<span id="pasthint"><span class="hov">click the chart to hold this moment</span><span class="tch">tap the chart to hold this moment</span></span>
+<button id="bnow" aria-label="Back to now" title="Return to live readings (Esc)"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3.2 9.2A5 5 0 1 0 4.6 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.9 1.6v3.1H1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Back to now</button>
+</div>
 </div>
 
 <div id="plugwarn" class="hide"></div>
@@ -51,7 +56,7 @@
 <div id="pwmnote">Click to open the live signal we replicate.</div>
 </div>
 </div>
-<div><div class="k9">RUN TODAY</div><div class="mv" id="mRun">&ndash;</div></div>
+<div id="runcell"><div class="k9">RUN TODAY</div><div class="mv" id="mRun">&ndash;</div></div>
 </div>
 
 <div id="scope" class="hide">
@@ -76,14 +81,14 @@
 <svg id="fhico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11.2"/><g><path id="fhb" d="M12 12C7.8 11 6.4 5.2 9.6 2.6c2.6-1.4 6.6.2 6 3.6-.4 2.8-3 3.4-3.6 5.8Z"/><use href="#fhb" transform="rotate(120 12 12)"/><use href="#fhb" transform="rotate(240 12 12)"/><circle cx="12" cy="12" r="1.9"/></g></svg>
 <div id="fhtxt"><b id="fhw">&ndash;</b><i id="fhdet"></i></div>
 </div>
-<div class="k9" id="fhlab">SPEED / 12</div><div id="railnum">&ndash;</div>
+<div class="k9" id="raillab">SPEED / 12</div><div id="railnum">&ndash;</div>
 </div>
 <div id="stack"></div>
 </div>
 </div>
 
 <div id="charts">
-<div id="chead"><span class="ct" id="chtitle">LAST 24 HOURS</span></div>
+<div id="chead"><span class="ct" id="chtitle">LAST 24 HOURS</span><button id="chnow" aria-label="Back to now" title="Return to live readings (Esc)"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.2 9.2A5 5 0 1 0 4.6 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.9 1.6v3.1H1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>NOW</button></div>
 <div id="chctl">
 <span class="cl">ADD ROW</span>
 <span id="chips"></span>

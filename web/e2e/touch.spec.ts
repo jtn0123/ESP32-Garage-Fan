@@ -54,6 +54,28 @@ test('a horizontal drag scrubs without moving the page', async ({ page }) => {
   await expect(page.locator('#stamp')).toHaveText('NOW');
 });
 
+/**
+ * A tap is the touch half of "hold this moment" (pin.spec.ts has the click):
+ * lifting a finger after a DRAG still returns to now, as the test above pins,
+ * but a tap that never moved keeps the moment -- and the sticky chart header
+ * carries a way back, because the hero's own button is off screen by then.
+ */
+test('tapping the chart holds the moment, and the sticky NOW releases it', async ({ page }) => {
+  await openConsole(page);
+  await page.locator('#cv_t').scrollIntoViewIfNeeded();
+  const box = await page.locator('#cv_t').boundingBox();
+  if (!box) return;
+  await page.touchscreen.tap(box.x + box.width * 0.4, box.y + box.height * 0.5);
+  await expect(page.locator('#stamp')).toHaveText(/\d{1,2}:\d{2}/);
+  const back = page.locator('#chnow');
+  await expect(back).toBeVisible();
+  const hit = await back.boundingBox();
+  if (!hit) return;
+  await page.touchscreen.tap(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  await expect(page.locator('#stamp')).toHaveText('NOW');
+  await expect(back).toBeHidden();
+});
+
 // ------------------------------------------------------------ touch tooltips
 
 /**

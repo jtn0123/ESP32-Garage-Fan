@@ -34,7 +34,7 @@ const script = js.outputFiles[0].text.trim();
 // One stylesheet per concern, each under the 500-line ceiling, concatenated in
 // this order: a later sheet wins a tie, so a phone rule overriding a base rule
 // lives in the same sheet as the rule it overrides.
-const STYLES = ['console.css', 'scope.css', 'settings.css'];
+const STYLES = ['console.css', 'past.css', 'scope.css', 'settings.css'];
 const css = STYLES.map((f) => readFileSync(resolve(SRC, f), 'utf8')).join('\n');
 const body = readFileSync(resolve(SRC, 'body.html'), 'utf8').trim();
 

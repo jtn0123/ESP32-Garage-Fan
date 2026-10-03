@@ -264,9 +264,21 @@ export function line(
   c.setLineDash([]);
 }
 
+/**
+ * Crosshair ink: a pale hairline while a pointer previews a moment, the
+ * history tone (PAST, at 85%) while the moment is HELD by a click or tap --
+ * the one cue on the plot itself that the line will stay when the pointer
+ * goes. Module state rather than a parameter because every row draws the same
+ * line and only drawAll knows which it is (history_view.ts).
+ */
+let hairInk = 'rgba(230,233,237,.5)';
+export function holdCrosshair(held: boolean): void {
+  hairInk = held ? 'rgba(217,179,108,.85)' : 'rgba(230,233,237,.5)';
+}
+
 export function crosshair({ c, W, H }: Surface, s: Series, index: number): void {
   if (index < 0) return;
-  c.strokeStyle = 'rgba(230,233,237,.5)';
+  c.strokeStyle = hairInk;
   c.lineWidth = 1;
   const x = xAt(s, index, W) + 0.5;
   c.beginPath();

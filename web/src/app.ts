@@ -21,7 +21,7 @@ import { $, clear, el, markOverflow, revealBy, show } from './dom.js';
 import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
 import { buildRail } from './rail.js';
 import { paintTip } from './status_bits.js';
-import { attachScrub, endScrub } from './scrub.js';
+import { attachScrub, backToNow, endScrub, settleScrub } from './scrub.js';
 import { drawPreview, drawScope } from './pwm.js';
 import { build, tail } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
@@ -87,6 +87,9 @@ function paintSettings(): void {
 /* ------------------------------------------------------------------ commands */
 
 async function command(run: () => Promise<DeviceState>): Promise<void> {
+  // A command is about now. Changing the speed while the hero shows 03:00
+  // would land the answer under a history view that hides it.
+  backToNow();
   try {
     paint(await run());
   } catch {
@@ -267,6 +270,7 @@ async function loadHistory(): Promise<void> {
     const from = shown.ts?.[0] ?? 0;
     view.boots = (boots.boots ?? []).filter((b) => from <= 0 || b.ts >= from);
     view.series = build(shown);
+    settleScrub();
     drawAll();
     paintHero();
   } catch (err) {
@@ -284,6 +288,7 @@ async function loadHistory(): Promise<void> {
     view.history = null;
     view.boots = [];
     view.series = null;
+    settleScrub();
     drawAll();
     paintHero();
   }

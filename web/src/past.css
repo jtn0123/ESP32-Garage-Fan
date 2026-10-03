@@ -1,0 +1,70 @@
+/* History mode (past.ts): the console while it describes a logged moment.
+   After console.css, whose rules these restyle. `#chead` is left alone: on a
+   phone console.css makes it sticky, which already anchors #chnow -- and
+   #chnow only shows on a phone. */
+
+/* ---- history mode ----
+   `past` is on #console while the hero describes a logged moment, `held` once
+   that moment is pinned by a click or tap. NOTHING here may change a box size:
+   the scrub e2e pins the hero, the sentence and the plot to the pixel while a
+   finger reads the chart, so every addition is absolutely placed or is paint
+   only (opacity, colour, visibility, a pseudo-element).
+
+   The whole hero becomes a history panel. The pills -- live controls with
+   nothing to say about 03:00 -- give their row to the bar and its button; the
+   rail and the strip show the moment's own values (past.ts) in the same tone. */
+#acts{position:relative}
+#pastbar{display:none;position:absolute;top:0;bottom:0;left:0;max-width:100%;align-items:center;gap:12px;white-space:nowrap;min-width:0}
+#console.past #pastbar{display:flex}
+#pastlab{font:500 10px var(--mono);letter-spacing:.12em;color:var(--dim)}
+#pastwhen{font:600 11.5px var(--mono);letter-spacing:.08em;color:var(--past)}
+#pasthint{font-size:12.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;min-width:0}
+#pasthint .tch{display:none}
+@media(hover:none){#pasthint .hov{display:none}#pasthint .tch{display:inline}}
+#bnow{display:none;order:-1;align-items:center;gap:8px;font-size:13.5px;font-weight:500;padding:0 18px 0 15px;min-height:44px;border-radius:999px;cursor:pointer;border:1px solid var(--past);background:var(--past);color:#1b1408}
+#bnow:hover{background:#e6c487}
+#bnow:focus-visible,#chnow:focus-visible{outline:2px solid var(--past);outline-offset:2px}
+#console.held #bnow{display:inline-flex}
+#console.held #pasthint{display:none}
+/* The chart header's own way back, for a phone scrolled down to the plots
+   where the hero's button is off screen. Desktop shows both at once, so one. */
+#chnow{display:none;position:absolute;right:0;top:50%;transform:translateY(-58%);align-items:center;gap:5px;font:600 10px var(--mono);letter-spacing:.1em;padding:4px 9px;border-radius:999px;cursor:pointer;border:1px solid rgba(217,179,108,.5);background:var(--bg);color:var(--past)}
+#chnow::after{content:'';position:absolute;inset:-12px -8px}
+#console :is(#acts .pill,#metrics,#rail,#hero){transition:opacity .18s,filter .18s}
+/* Keeps the marker's own glide: a bare `transition` here would replace it. */
+#console #gmark{transition:left .12s,background-color .18s,box-shadow .18s}
+#conmain{position:relative;isolation:isolate}
+/* Positioning #conmain for the panel paints it after the header, on top of
+   the 17 px of SETTINGS hit area that overhangs the hero (#nav::after) -- the
+   44 px e2e caught it at 42. The header stacks above instead; nothing in it
+   overlaps the hero visually, only that transparent target does. */
+#top{position:relative;z-index:1}
+#conmain::before{content:'';position:absolute;inset:-12px 16px -18px -22px;border:1px solid transparent;border-radius:14px;z-index:-1;pointer-events:none;transition:background-color .18s,border-color .18s}
+#console.past #conmain::before{border-color:rgba(217,179,108,.34);background-color:rgba(217,179,108,.045)}
+#console.past #acts .pill{visibility:hidden}
+#console.past #hero{filter:sepia(.45) saturate(.7)}
+#console.past #gmark{background:var(--past);box-shadow:0 0 8px rgba(217,179,108,.6)}
+#console.past :is(#metrics .mv,#pwmval){color:var(--past)}
+#console.past #runcell{opacity:.32}
+/* The headline names what the fan is doing NOW, and the log keeps a speed and
+   watts -- not auto, a limit or the gas boost -- so there is no word for 03:00
+   to put beside the logged speed. The word stands down and the icon holds
+   still in the history tone, both paint only, so the rail does not move. */
+#console.past #fhtxt{visibility:hidden}
+#console.past #fhico{color:var(--past)}
+#console.past #fhico g{animation:none}
+@media(prefers-reduced-motion:reduce){
+#console :is(#acts .pill,#metrics,#rail,#hero),#conmain::before{transition:none}
+#console #gmark{transition:left .12s}
+}
+
+/* History mode on a phone: no room for words beside the button, and the sticky
+   chart header already names the moment -- so the VIEWING label goes. */
+@media(max-width:900px){
+#console.held #chnow{display:inline-flex}
+#pastlab{display:none}
+/* The panel cannot close at the bottom here: the charts start 8 px below the
+   rail and their sticky header paints over anything in that gap. So its edges
+   fade out into the charts instead of drawing a line the header cuts through. */
+#conmain::before{inset:-9px -10px -8px;-webkit-mask-image:linear-gradient(180deg,#000 72%,transparent);mask-image:linear-gradient(180deg,#000 72%,transparent)}
+}

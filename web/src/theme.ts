@@ -11,6 +11,10 @@ export const RH = '#6ea8fe'; // humidity
 export const DIM = '#7d8795'; // axis labels (5.32:1 on --bg; see console.css)
 export const TX = '#e6e9ed'; // foreground
 export const FAI = '#757f8c'; // inactive control labels (4.77:1)
+// A logged moment rather than now (past.ts). Sand, not the garage orange the
+// scrub stamp used to borrow: next to a 92 px orange reading, an orange stamp
+// read as part of the temperature, not as "this is the past".
+export const PAST = '#d9b36c';
 
 /**
  * One colour per chart row, and the underline on that row's chip. No row may

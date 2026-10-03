@@ -8,12 +8,12 @@
 // write only to the DOM.
 
 import { drawBattery, drawFanSpeed, drawPower, drawSimple } from './chart_rows.js';
-import { drawTemperature, shadesNights } from './charts.js';
+import { drawTemperature, holdCrosshair, shadesNights } from './charts.js';
 import { $, at, el } from './dom.js';
 import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
 import { chartLimits, limitOverlay } from './limit_lines.js';
 import type { Series } from './series.js';
-import { sampleIndex, view } from './state.js';
+import { pinnedRow, sampleIndex, view } from './state.js';
 import { drawAxis } from './time_axis.js';
 import { OR, OUT, SERIES_COLOURS } from './theme.js';
 
@@ -220,8 +220,16 @@ export function drawAll(): void {
     return;
   }
   paintLegends(s);
+  holdCrosshair(view.scrub >= 0 && view.scrub === pinnedRow(s, view.pinTs));
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots,
     limitOverlay(s, chartLimits(view.state)));
+  drawRows(s);
+  drawAxis($<HTMLCanvasElement>('cv_ax'), s);
+  paintReadouts();
+}
+
+/** The rows under the temperature chart, each only while its chip is on. */
+function drawRows(s: Series): void {
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
@@ -248,6 +256,4 @@ export function drawAll(): void {
     drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
       'no NOx sensor data', view.scrub, { lowest: 0 });
   }
-  drawAxis($<HTMLCanvasElement>('cv_ax'), s);
-  paintReadouts();
 }

@@ -15,6 +15,7 @@ import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
 import { paintGauge } from './gauge.js';
 import { fanHeadline, headlineLabel } from './headline.js';
 import { drawAll, paintChartTitle } from './history_view.js';
+import { paintPast } from './past.js';
 import { paintRail } from './rail.js';
 import { liveReason } from './reason.js';
 import { paintBits } from './status_bits.js';
@@ -168,6 +169,9 @@ export function paintHero(): void {
   paintChartTitle();
 
   $('reason').textContent = reason(garage, delta, scrubbing, i);
+  // Last, so a history look that rewrites the rail and metric strip wins over
+  // the live values paint() wrote into them a moment ago.
+  paintPast(scrubbing ? i : -1);
 }
 
 /**
@@ -251,6 +255,9 @@ export function paintStats(): void {
       return cell;
     }),
   );
+  // DRAW and RUN TODAY were just written as live values; in history mode the
+  // strip describes the scrubbed moment, so put that back over them.
+  if (view.scrub >= 0) paintHero();
 }
 
 export function paintChips(): void {
