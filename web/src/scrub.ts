@@ -1,5 +1,5 @@
-// Reading a past moment off the charts: the crosshair, and the gestures that
-// drive it.
+// Reading a past moment off the charts: the crosshair, the gestures that drive
+// it, and the pin that lets a moment outlive the gesture.
 //
 // A module of its own for the same reason rail.ts is: this is a CONTROL with a
 // gesture, not page wiring, and app.ts is at the 500-line ceiling. It knows
@@ -9,8 +9,8 @@
 
 import { $ } from './dom.js';
 import { drawAll } from './history_view.js';
-import { paintHero } from './console.js';
-import { view } from './state.js';
+import { paint, paintHero, paintStats } from './console.js';
+import { pinnedRow, view } from './state.js';
 import { PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 
 
@@ -48,9 +48,10 @@ function freezeReason(hold: boolean): void {
   reason.style.overflow = 'hidden';
 }
 
-function scrubAt(clientX: number): void {
+/** The sample nearest a pointer's x, or -1 when it is off either end of the plot. */
+function indexAt(clientX: number): number {
   const s = view.series;
-  if (!s || s.n < 2) return;
+  if (!s || s.n < 2) return -1;
   const rect = $<HTMLCanvasElement>('cv_t').getBoundingClientRect();
   const fraction = (clientX - rect.left - L) / (rect.width - L - R);
   // Nearest sample by its time position, not index arithmetic: around a gap
@@ -64,20 +65,100 @@ function scrubAt(clientX: number): void {
       i = k;
     }
   }
-  const next = fraction < -0.02 || fraction > 1.02 ? -1 : i;
-  if (next === view.scrub) return;
+  return fraction < -0.02 || fraction > 1.02 ? -1 : i;
+}
+
+/** Where the console rests when no pointer is reading the chart: the pin, or now. */
+function restIndex(): number {
+  return view.series ? pinnedRow(view.series, view.pinTs) : -1;
+}
+
+/**
+ * Leaving history mode is a full repaint, not a hero repaint: past.ts writes
+ * the moment's own values into the rail and the metric strip, and only paint()
+ * and paintStats() know how to derive the live ones again.
+ */
+function repaintLive(): void {
+  paint();
+  paintStats();
+}
+
+/** Move the crosshair and the hero to row `next` (-1 = now), redrawing both. */
+function goTo(next: number): void {
+  const was = view.scrub;
   freezeReason(next >= 0);
   view.scrub = next;
   drawAll();
-  paintHero();
+  if (next < 0 && was >= 0) repaintLive();
+  else paintHero();
 }
 
+function scrubAt(clientX: number): void {
+  const next = indexAt(clientX);
+  // Off the end of the plot is "no reading", which is the resting moment --
+  // the pin if there is one -- not necessarily now.
+  const target = next < 0 ? restIndex() : next;
+  if (target === view.scrub) return;
+  goTo(target);
+}
+
+/** The gesture is over: back to the pinned moment if there is one, else to now. */
 export function endScrub(): void {
-  freezeReason(false);
-  if (view.scrub === -1) return;
-  view.scrub = -1;
-  drawAll();
-  paintHero();
+  const rest = restIndex();
+  if (view.scrub === rest) {
+    freezeReason(rest >= 0);
+    return;
+  }
+  goTo(rest);
+}
+
+/**
+ * Hold the moment under a click or a tap until something releases it.
+ *
+ * Hover and drag only PREVIEW: the moment you are reading vanishes the instant
+ * the pointer leaves the plot or the finger lifts, so the hero's history mode
+ * could never be looked at -- on a desk the mouse has to cross the hero's own
+ * controls to get there, on a phone the hero is above the thumb. A click is
+ * the gesture that already means "this one". No clock, no pin: a moment is
+ * pinned by its timestamp, and before SNTP there is none to hold it by.
+ */
+function pinAt(clientX: number): void {
+  const s = view.series;
+  const i = indexAt(clientX);
+  const t = s && i >= 0 ? s.ts(i) : null;
+  if (t === null) return;
+  view.pinTs = t;
+  // Through goTo even on the row the hover already shows: holding changes the
+  // crosshair's ink as well as the hero, and only drawAll repaints that.
+  goTo(i);
+}
+
+/** "Back to now": drop the pin and the preview together. */
+export function backToNow(): void {
+  view.pinTs = null;
+  endScrub();
+}
+
+/**
+ * Re-find the pinned moment after the series has been rebuilt.
+ *
+ * Called by app.ts::loadHistory before it redraws. A pin that has scrolled out
+ * of the window (the 24 h ring moved on, or a shorter range was chosen) is let
+ * go, and the console goes back to now with it.
+ */
+export function settleScrub(): void {
+  if (view.pinTs === null) return;
+  const k = restIndex();
+  if (k < 0) {
+    view.pinTs = null;
+    if (view.scrub >= 0) {
+      freezeReason(false);
+      view.scrub = -1;
+      repaintLive();
+    }
+    return;
+  }
+  view.scrub = k;
 }
 
 /**
@@ -157,4 +238,18 @@ export function attachScrub(plots: HTMLElement): void {
   plots.addEventListener('touchmove', (e) => onTouchMove(e as TouchEvent), { passive: false });
   plots.addEventListener('touchend', onTouchRelease);
   plots.addEventListener('touchcancel', onTouchRelease);
+  // A click is a mouse click AND a touch tap: a tap that never moved produces
+  // one, at the tap position, after touchend has already ended the preview. A
+  // drag does not -- so dragging still previews and lifting still returns.
+  plots.addEventListener('click', (e) => pinAt((e as MouseEvent).clientX));
+
+  // Every way back. The hero's button, a compact one in the chart header for a
+  // phone scrolled down to the plots, and Escape from anywhere on the console.
+  $('bnow').addEventListener('click', backToNow);
+  $('chnow').addEventListener('click', backToNow);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || view.screen !== 'console') return;
+    if (view.pinTs === null && view.scrub < 0) return;
+    backToNow();
+  });
 }

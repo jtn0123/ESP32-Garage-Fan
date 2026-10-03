@@ -8,12 +8,12 @@
 // write only to the DOM.
 
 import { drawBattery, drawFanSpeed, drawPower, drawSimple } from './chart_rows.js';
-import { drawTemperature, shadesNights } from './charts.js';
+import { drawTemperature, holdCrosshair, shadesNights } from './charts.js';
 import { $, at, el } from './dom.js';
 import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
 import { chartLimits, limitOverlay } from './limit_lines.js';
 import type { Series } from './series.js';
-import { sampleIndex, view } from './state.js';
+import { pinnedRow, sampleIndex, view } from './state.js';
 import { drawAxis } from './time_axis.js';
 import { OR, OUT, SERIES_COLOURS } from './theme.js';
 
@@ -220,6 +220,7 @@ export function drawAll(): void {
     return;
   }
   paintLegends(s);
+  holdCrosshair(view.scrub >= 0 && view.scrub === pinnedRow(s, view.pinTs));
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots,
     limitOverlay(s, chartLimits(view.state)));
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);

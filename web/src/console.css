@@ -3,7 +3,7 @@
    in a garage, on a phone. Lifted to 5.32:1 and 4.77:1 -- past the 4.5:1 floor
    with the inactive state of a control still legible. The bright values
    (--tx 15.9:1) deliberately did not move. */
-:root{--lo:#80dcff;--st:#9fd36b;--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#7d8795;--fai:#757f8c;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
+:root{--lo:#80dcff;--st:#9fd36b;--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#7d8795;--fai:#757f8c;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--past:#d9b36c;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg)}
 body{font-family:var(--sans);color:var(--tx);min-height:100vh;padding:0 40px 40px;-webkit-text-size-adjust:100%}
@@ -75,7 +75,9 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
    temperature directly below it, which is what makes the column's width depend
    on the reading rather than on the badge. */
 #stamp{font:500 11px var(--mono);letter-spacing:.08em;padding:2px 4px;border-radius:3px;background:var(--pop);color:var(--dim);min-width:9ch;text-align:center;white-space:nowrap}
-#stamp.scrub{background:rgba(232,131,74,.16);color:var(--or)}
+/* History mode's tone (past.ts), not the garage orange: an orange stamp beside
+   a 92 px orange reading read as part of the temperature. */
+#stamp.scrub{background:rgba(217,179,108,.15);color:var(--past)}
 /* Not current, and not yet declared unreachable: the badge carries the age of
    the last answer instead of the word NOW. Amber rather than red -- one missed
    poll is not a verdict. */
@@ -153,6 +155,8 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em;grid-area:num}
 /* The value under a live thumb, before the command goes out (rail.ts). */
 #railnum.pick{color:var(--ac)}
+/* A logged speed, in history mode (past.ts). */
+#railnum.past{color:var(--past)}
 #stack{display:flex;flex-direction:column-reverse;gap:3px;width:100%;margin-top:4px}
 #stack button{height:19px;border-radius:4px;border:1px solid var(--ln);background:#12161d;cursor:pointer;transition:background .15s;padding:0}
 
@@ -189,7 +193,7 @@ body.offline #fhico g{animation:none}
 #fhdet{font:500 9.5px var(--mono);letter-spacing:.08em;font-style:normal;color:var(--hc);opacity:.78}
 #fhdet:empty{display:none}
 #railtop{display:grid;grid-template-areas:"lab lab" "ico num" "txt txt";align-items:center;justify-items:center;column-gap:10px;row-gap:6px}
-#fhlab{grid-area:lab}
+#raillab{grid-area:lab}
 /* The qualifier's line is reserved even when empty, so a limit engaging does
    not shove the twelve blocks down under a hovering pointer. */
 #fhtxt{grid-area:txt;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;min-height:40px}
@@ -205,7 +209,7 @@ body.offline #fhico g{animation:none}
 /* Colour changes, size does not: at 11 px idle and 12 px scrubbing this line
    grew by a pixel the instant a finger touched the chart, and everything below
    it -- including the plot being read -- moved with it. */
-#chead .ct.scrub{color:var(--or)}
+#chead .ct.scrub{color:var(--past)}
 #chctl .cl{font:500 10px var(--mono);letter-spacing:.1em;color:var(--fai);padding-bottom:6px}
 #chips{display:flex;gap:12px}
 #chips button{background:none;padding:4px 0 6px;cursor:pointer;font:500 10px var(--mono);letter-spacing:.1em;border:0;border-bottom:2px solid transparent;color:var(--fai)}

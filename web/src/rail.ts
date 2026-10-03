@@ -18,7 +18,7 @@
 
 import { $, el } from './dom.js';
 import { view } from './state.js';
-import { AC } from './theme.js';
+import { AC, PAST } from './theme.js';
 
 /** Movement that turns a press into a sweep. Below it, the tap wins. */
 const DRAG_SLOP_PX = 8;
@@ -54,8 +54,9 @@ function stepAt(clientX: number, clientY: number): number | null {
  * own speed for as long as the gesture lasts, otherwise a poll landing
  * mid-sweep would snap the rail back to what the fan is still doing.
  */
-/** "off" / "raw" / "7" -- the big number over the rail. */
-function railLabel(speed: number): string {
+/** "off" / "raw" / "7" -- the big number over the rail; '–' for a moment with no speed logged. */
+function railLabel(speed: number | null): string {
+  if (speed === null) return '–';
   if (speed === 0) return 'off';
   // Negative means the fan is on a raw duty this table cannot name: the
   // controller accepts one over MQTT, and printing a step number for it would
@@ -64,23 +65,41 @@ function railLabel(speed: number): string {
   return String(speed);
 }
 
+/** Lit blocks in the live blue, or in the history tone for a logged moment. */
+// The sand is brighter than the blue at the same alpha, so its ramp starts and
+// climbs lower: a logged speed should not out-shout the live one it stands in for.
+const TONE = {
+  live: { rgb: '59,130,246', edge: AC, base: 0.2, step: 0.055 },
+  past: { rgb: '217,179,108', edge: PAST, base: 0.1, step: 0.04 },
+};
+
 /** Border of block `n`: the selected step, a lit one below it, or unlit. */
-function blockBorder(n: number, shown: number): string {
-  if (n === shown) return AC;
-  return n <= shown && shown > 0 ? 'rgba(59,130,246,.4)' : '#1a2029';
+function blockBorder(n: number, shown: number, tone: (typeof TONE)['live']): string {
+  if (n === shown) return tone.edge;
+  return n <= shown && shown > 0 ? `rgba(${tone.rgb},.4)` : '#1a2029';
 }
 
-export function paintRail(speed: number): void {
+/**
+ * `past` paints a LOGGED speed (past.ts, history mode): the blocks
+ * take the history tone and the label says THEN, so a rail showing what the fan
+ * did at 03:00 cannot be read as what it is doing now. A live finger still
+ * outranks it -- touching the rail is a command, and commands are about now.
+ */
+export function paintRail(speed: number | null, past = false): void {
+  const picking = view.railPick !== null;
   const shown = view.railPick ?? speed;
+  const tone = past && !picking ? TONE.past : TONE.live;
   const num = $('railnum');
   num.textContent = railLabel(shown);
-  num.className = view.railPick === null ? '' : 'pick';
+  num.className = picking ? 'pick' : past ? 'past' : '';
+  $('raillab').textContent = past && !picking ? 'SPEED THEN' : 'SPEED / 12';
+  const level = shown ?? 0;
   Array.from($('stack').children).forEach((child, k) => {
     const b = child as HTMLElement;
     const n = k + 1;
-    const lit = n <= shown && shown > 0;
-    b.style.background = lit ? `rgba(59,130,246,${0.2 + 0.055 * n})` : '#12161d';
-    b.style.borderColor = blockBorder(n, shown);
+    const lit = n <= level && level > 0;
+    b.style.background = lit ? `rgba(${tone.rgb},${tone.base + tone.step * n})` : '#12161d';
+    b.style.borderColor = blockBorder(n, level, tone);
   });
 }
 

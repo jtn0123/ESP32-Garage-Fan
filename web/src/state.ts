@@ -61,6 +61,13 @@ export interface View {
   startedAt: number;
   /** Speed under a live rail drag, or null. Outranks the device's own speed. */
   railPick: number | null;
+  /**
+   * Epoch seconds of a moment pinned by clicking (or tapping) the charts, or
+   * null. A TIME, not an index: the history reloads every minute and slides
+   * its window, so an index would quietly walk forward one row per refresh.
+   * While set, the console rests on this moment instead of now (scrub.ts).
+   */
+  pinTs: number | null;
 }
 
 export const view: View = {
@@ -87,6 +94,7 @@ export const view: View = {
   pollFail: 0,
   startedAt: Date.now(),
   railPick: null,
+  pinTs: null,
 };
 
 export const ROW_IDS: Record<RowKey, { sub: string; canvas: string; readout: string }> = {
@@ -131,4 +139,28 @@ export function sampleIndex(): number {
   const s = view.series;
   if (!s || !s.n) return -1;
   return view.scrub >= 0 ? view.scrub : s.n - 1;
+}
+
+/**
+ * The row a pinned moment lands on in `s`, or -1 once it has left the window.
+ *
+ * Nearest by timestamp, within a step and a half: the minute refresh and a
+ * range switch both rebuild the series, and the pin has to find ITS moment in
+ * the new rows -- or let go, rather than settle on whatever row now sits at the
+ * old index.
+ */
+export function pinnedRow(s: Pick<Series, 'n' | 'ts' | 'step'>, pinTs: number | null): number {
+  if (pinTs === null) return -1;
+  let found = -1;
+  let best = Infinity;
+  for (let k = 0; k < s.n; k++) {
+    const t = s.ts(k);
+    if (t === null) continue;
+    const d = Math.abs(t - pinTs);
+    if (d < best) {
+      best = d;
+      found = k;
+    }
+  }
+  return best <= s.step * 1.5 ? found : -1;
 }
