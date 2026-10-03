@@ -11,6 +11,7 @@
  * A console that throws on any of them is a console you cannot use at the exact
  * moment you need it.
  */
+import type { Page } from '@playwright/test';
 import { expect, inkedColumns, openConsole, resetScen, scen, test } from './harness';
 
 // Serial within the file: these tests hand the knobs back and forth, and one
@@ -27,6 +28,21 @@ test.afterEach(async ({ page }) => {
   await page.request.post('/api/set?speed=9');
 });
 
+/**
+ * The gauge's held callout: says which limit is in charge, and stays inside
+ * the gauge -- on a 320-px-class phone there is nothing past either end.
+ */
+async function expectHeldTag(page: Page, text: string): Promise<void> {
+  const tag = page.locator('#gheld');
+  await expect(tag).toBeVisible();
+  await expect(tag).toContainText(text);
+  const box = await tag.boundingBox();
+  const gauge = await page.locator('#gauge').boundingBox();
+  if (!box || !gauge) throw new Error('held tag or gauge not laid out');
+  expect(box.x).toBeGreaterThanOrEqual(gauge.x - 0.5);
+  expect(box.x + box.width).toBeLessThanOrEqual(gauge.x + gauge.width + 0.5);
+}
+
 // The winter states. The mock's garage reads ~75 °F, so the limits are set
 // around that reading rather than at their 64/74 defaults, and put back after.
 // Each also switches auto on: a limit only speaks in auto, and specs elsewhere
@@ -39,6 +55,12 @@ test('the low limit, not the gap, explains a resting fan', async ({ page }) => {
     await openConsole(page);
     await expect(page.locator('#reason')).toContainText('down to your 100° low limit');
     await expect(page.locator('#reason')).toContainText('rather than vent it any colder');
+    // The word and the gauge say the same thing the sentence does.
+    await expect(page.locator('#fhw')).toHaveText('HELD');
+    await expect(page.locator('#fhdet')).toHaveText('LOW LIMIT');
+    await expect(page.locator('#gauge')).toHaveClass('held floor');
+    await expectHeldTag(page, 'HELD BY LOW LIMIT 100°');
+    await expect(page.locator('#tleg')).toContainText('LOW LIMIT');
   } finally {
     await page.request.post('/api/config?flooron=0&floorf=64');
   }
@@ -50,6 +72,11 @@ test('the start gate explains a warm garage being left alone', async ({ page }) 
     await scen(page, { limit: 'start' });
     await openConsole(page);
     await expect(page.locator('#reason')).toContainText('under your 100° start point');
+    await expect(page.locator('#fhw')).toHaveText('WAITING');
+    await expect(page.locator('#fhdet')).toHaveText('START POINT');
+    await expect(page.locator('#gauge')).toHaveClass('held start');
+    await expectHeldTag(page, 'HELD BY START POINT 100°');
+    await expect(page.locator('#tleg')).toContainText('START');
   } finally {
     await page.request.post('/api/config?starton=0&startf=74');
   }

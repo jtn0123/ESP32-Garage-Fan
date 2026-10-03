@@ -11,14 +11,18 @@ import { drawBattery, drawFanSpeed, drawPower, drawSimple } from './chart_rows.j
 import { drawTemperature, shadesNights } from './charts.js';
 import { $, at, el } from './dom.js';
 import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
+import { chartLimits, limitOverlay } from './limit_lines.js';
 import type { Series } from './series.js';
 import { sampleIndex, view } from './state.js';
 import { drawAxis } from './time_axis.js';
 import { OR, OUT, SERIES_COLOURS } from './theme.js';
 
+/** The line sample each legend entry opens with, matching the stroke it names. */
+const STROKE = { solid: '——', dashed: '╌╌', dotted: '┄┄' } as const;
+
 /** One entry of a series legend: a coloured line sample and the sensor name. */
-function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement {
-  const b = el('b', { textContent: `${dashed ? '╌╌' : '——'} ${name}` });
+function legendEntry(name: string, colour: string, stroke: keyof typeof STROKE): HTMLElement {
+  const b = el('b', { textContent: `${STROKE[stroke]} ${name}` });
   b.style.color = colour;
   return b;
 }
@@ -33,12 +37,14 @@ function nightEntry(): HTMLElement {
 /** Which line is which sensor, on the rows that carry more than one. */
 function paintLegends(s: Series): void {
   $('tleg').replaceChildren(
-    legendEntry('GARAGE', OR, false),
-    legendEntry('OUTSIDE', OUT, true),
+    legendEntry('GARAGE', OR, 'solid'),
+    legendEntry('OUTSIDE', OUT, 'dashed'),
     // Only while the stripes are drawn: past an hour per row they are not.
     ...(shadesNights(s) ? [nightEntry()] : []),
+    // Only the limits switched on. The value rides on the chart's own tag.
+    ...chartLimits(view.state).map((l) => legendEntry(l.name, l.colour, 'dotted')),
   );
-  $('hleg').replaceChildren(legendEntry('GARAGE', SERIES_COLOURS.humidity, false));
+  $('hleg').replaceChildren(legendEntry('GARAGE', SERIES_COLOURS.humidity, 'solid'));
 }
 
 /**
@@ -214,7 +220,8 @@ export function drawAll(): void {
     return;
   }
   paintLegends(s);
-  drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots);
+  drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots,
+    limitOverlay(s, chartLimits(view.state)));
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,

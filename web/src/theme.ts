@@ -30,6 +30,19 @@ export const SERIES_COLOURS = {
   nox: '#1fa6b8',
 } as const;
 
+/**
+ * The winter limits, on the temperature chart and on the held gauge (the CSS
+ * carries them as --lo and --st). Neither may read as a temperature trace, so
+ * both were measured against the two they sit among (OKLab ΔE×100, normal /
+ * worst of deutan-protan): ice vs garage 28.1/22.6, vs outside 15.8/14.4;
+ * lime vs garage 21.4/9.1, vs outside 19.5/17.8; ice vs lime 18.7/18.3.
+ * 12.5:1 and 11.1:1 on --bg, so each can carry its own label text.
+ */
+export const LIMIT_COLOURS = {
+  floor: '#80dcff', // low limit: ice
+  start: '#9fd36b', // start point: lime
+} as const;
+
 /** Chart gutters: left leaves room for a 4-digit pressure label at 10px mono. */
 export const PAD_LEFT = 46;
 export const PAD_RIGHT = 8;

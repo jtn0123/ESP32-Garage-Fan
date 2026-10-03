@@ -12,7 +12,9 @@
 
 import { $, at, el, show } from './dom.js';
 import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
-import { paintChartTitle } from './history_view.js';
+import { paintGauge } from './gauge.js';
+import { fanHeadline, headlineLabel } from './headline.js';
+import { drawAll, paintChartTitle } from './history_view.js';
 import { paintRail } from './rail.js';
 import { liveReason } from './reason.js';
 import { paintBits } from './status_bits.js';
@@ -135,22 +137,9 @@ export function paintHero(): void {
   const delta = garage !== null && outside !== null ? garage - outside : null;
   $('tD').textContent = delta === null ? '–' : signed(delta);
 
-  // Gauge geometry: 0 °F sits at 46%, each degree is 6.4% of the track.
-  const pos = (v: number): number => Math.max(2, Math.min(97, 46 + v * 6.4));
-  const band = $('gband');
-  band.style.left = `${pos(s.off_f)}%`;
-  band.style.width = `${Math.max(0, pos(s.on_f) - pos(s.off_f))}%`;
-  $('gtr').style.left = `${pos(s.off_f)}%`;
-  $('gte').style.left = `${pos(s.on_f)}%`;
-  const relLabel = $('glr');
-  relLabel.style.left = `${pos(s.off_f)}%`;
-  relLabel.textContent = `RELEASE +${s.off_f} ◂`;
-  const engLabel = $('gle');
-  engLabel.style.left = `${pos(s.on_f)}%`;
-  engLabel.textContent = `▸ ENGAGE +${s.on_f}`;
-  const marker = $('gmark');
-  marker.style.left = `${delta === null ? 46 : pos(delta)}%`;
-  marker.style.opacity = delta === null ? '0.25' : '1';
+  // Scrubbing shows a past differential; whether a limit held the fan THEN is
+  // not logged, so the held state is a live-only verdict.
+  paintGauge(s, delta, !scrubbing);
 
   const stamp = $('stamp');
   if (scrubbing) {
@@ -213,6 +202,22 @@ function reason(garage: number | null, delta: number | null, scrubbing: boolean,
     return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}.`;
   }
   return liveReason(s, garage);
+}
+
+/**
+ * The fan-state headline: the word, its qualifier, the tone class, the
+ * icon's spin, and the whole phrase (speed included) as its tooltip. Always
+ * the LIVE state -- like the rail, it describes the fan now, not the moment
+ * under a scrub.
+ */
+function paintHeadline(s: DeviceState): void {
+  const h = fanHeadline(s);
+  const head = $('fhead');
+  head.className = h.spin === null ? `${h.tone} still` : h.tone;
+  head.title = headlineLabel(h);
+  if (h.spin !== null) head.style.setProperty('--spin', `${h.spin}s`);
+  $('fhw').textContent = h.word;
+  $('fhdet').textContent = h.detail ?? '';
 }
 
 export function paintStats(): void {
@@ -307,6 +312,9 @@ function brokerChip(stale: boolean, s: DeviceState | null): { text: string; cls:
   return { text: '● BROKER DOWN', cls: '' };
 }
 
+/** The limit settings the temperature chart was last drawn with. */
+let limitsDrawn = '';
+
 export function paint(next?: DeviceState): void {
   if (next) {
     view.lastOk = Date.now();
@@ -356,6 +364,7 @@ export function paint(next?: DeviceState): void {
   $('hfw').textContent = `FW ${s.fw}`;
 
   paintRail(s.speed);
+  paintHeadline(s);
 
   $('bauto').className = `pill${s.auto ? ' on' : ''}`;
   $('bauto').textContent = s.auto ? 'Auto on' : 'Auto off';
@@ -402,6 +411,15 @@ export function paint(next?: DeviceState): void {
   paintPwm();
   paintHero();
   paintBits();
+  // The chart's limit lines come from this frame, not from the history load:
+  // a limit switched on in Settings shows on the way back, not a minute later.
+  const limits = `${s.floor_on}${s.floor_f}${s.start_on}${s.start_f}`;
+  // Only once there is a chart to redraw: drawAll before the first history
+  // load would caption the empty plot "no samples in this range yet".
+  if (limits !== limitsDrawn && view.series) {
+    limitsDrawn = limits;
+    drawAll();
+  }
   if (view.screen === 'settings' && settingsPainter) settingsPainter();
 }
 
