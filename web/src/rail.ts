@@ -87,12 +87,14 @@ function blockBorder(n: number, shown: number, tone: (typeof TONE)['live']): str
  */
 export function paintRail(speed: number | null, past = false): void {
   const picking = view.railPick !== null;
+  const history = past && !picking;
   const shown = view.railPick ?? speed;
-  const tone = past && !picking ? TONE.past : TONE.live;
+  const tone = history ? TONE.past : TONE.live;
   const num = $('railnum');
   num.textContent = railLabel(shown);
-  num.className = picking ? 'pick' : past ? 'past' : '';
-  $('raillab').textContent = past && !picking ? 'SPEED THEN' : 'SPEED / 12';
+  num.classList.toggle('pick', picking);
+  num.classList.toggle('past', history);
+  $('raillab').textContent = history ? 'SPEED THEN' : 'SPEED / 12';
   const level = shown ?? 0;
   Array.from($('stack').children).forEach((child, k) => {
     const b = child as HTMLElement;
