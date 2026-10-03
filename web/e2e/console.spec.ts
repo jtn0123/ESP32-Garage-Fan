@@ -332,9 +332,13 @@ test('every touch control on the console screen is at least 44 px', async ({ pag
     expect(hit.w, `${sel} hit area is ${hit.w} px wide`).toBeGreaterThanOrEqual(44);
   }
 
-  // The scope's only dismissal, which needs the scope open to exist.
+  // The scope's only dismissal, which needs the scope open to exist. Measured
+  // centred on the screen: at 320x568 it opens with its centre ~20 px above
+  // the fold, a point past the fold hits nothing, and the probe then read the
+  // fold (42 px on CI's fonts, 46 locally) instead of the 50 px target.
   await page.locator('#pwmcell').click();
   await expect(page.locator('#scope')).not.toHaveClass(/hide/);
+  await page.locator('#scclose').evaluate((el) => el.scrollIntoView({ block: 'center' }));
   const close = await hitBox(page, '#scclose');
   expect(close.h, `#scclose hit area is ${close.h} px tall`).toBeGreaterThanOrEqual(44);
   expect(close.w, `#scclose hit area is ${close.w} px wide`).toBeGreaterThanOrEqual(44);
