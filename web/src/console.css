@@ -245,7 +245,7 @@ body{padding:0 16px 32px}
 #chips::-webkit-scrollbar{display:none}
 #chips.more{mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 34px),transparent 100%)}
 #chips button{scroll-snap-align:end;padding:12px 6px;min-height:44px}
-#rail{margin-right:0;align-items:stretch}
+#rail{margin-right:0;align-items:stretch;margin-top:14px}
 /* Anchored, not centred: `off` and `7` and `12` are different widths, so a
    centred pair moved the number that matters to a different place in every
    state. Label left, value right, both against the rail's own edges. */
@@ -293,10 +293,10 @@ body{padding:0 16px 32px}
    with it the reading order, is unchanged. A flex column rather than the grid,
    because the grid's gap would now land between every hero row; those rows
    carry their own margin-tops and nothing else, so they stack exactly as they
-   did inside the block. */
+   did inside the block. The rail's own 14 px margin-top (with its other phone
+   rules, above) stands in for the gap it lost. */
 #conmain{display:flex;flex-direction:column;align-items:stretch;gap:0}
 #conleft{display:contents}
-#rail{margin-top:14px}
 #odo{grid-template-columns:repeat(2,1fr)}
 #odo>div:last-child{grid-column:1/-1}
 }

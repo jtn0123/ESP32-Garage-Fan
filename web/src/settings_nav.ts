@@ -13,7 +13,9 @@ import type { Group } from './settings.js';
 
 /** DOM id for a group's section, derived from its title. */
 export function sectionId(title: string): string {
-  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  // The first pass leaves at most one '-' at each end, so the trim needs no
+  // quantifier -- and so no backtracking on a long run of separators.
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return `set-${slug}`;
 }
 
