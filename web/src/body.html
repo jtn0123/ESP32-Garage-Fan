@@ -22,10 +22,12 @@
 <div id="gauge">
 <div id="gtrack"></div>
 <div id="gband"></div>
-<div id="gmark"></div>
+<div id="gscale"></div>
 <div class="gtick" id="gtr"></div><div class="gtick" id="gte"></div>
+<div id="gmark"></div>
 <div class="glab" id="glr">RELEASE &ndash; &#9666;</div>
 <div class="glab" id="gle">&#9656; ENGAGE &ndash;</div>
+<div id="gheld" class="hide"></div>
 </div>
 <div id="reason">Connecting to the controller&hellip;</div>
 
@@ -69,7 +71,13 @@
 </div>
 
 <div id="rail">
-<div id="railtop"><div class="k9">SPEED / 12</div><div id="railnum">&ndash;</div></div>
+<div id="railtop">
+<div id="fhead" class="rest">
+<svg id="fhico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11.2"/><g><path id="fhb" d="M12 12C7.8 11 6.4 5.2 9.6 2.6c2.6-1.4 6.6.2 6 3.6-.4 2.8-3 3.4-3.6 5.8Z"/><use href="#fhb" transform="rotate(120 12 12)"/><use href="#fhb" transform="rotate(240 12 12)"/><circle cx="12" cy="12" r="1.9"/></g></svg>
+<div id="fhtxt"><b id="fhw">&ndash;</b><i id="fhdet"></i></div>
+</div>
+<div class="k9" id="fhlab">SPEED / 12</div><div id="railnum">&ndash;</div>
+</div>
 <div id="stack"></div>
 </div>
 </div>

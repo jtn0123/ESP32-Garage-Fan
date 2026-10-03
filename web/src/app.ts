@@ -399,6 +399,7 @@ export async function boot(): Promise<void> {
   });
   window.addEventListener('resize', () => {
     drawAll();
+    paintHero(); // the gauge's number spacing depends on its width
     if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());
     if (view.scopeOpen) drawScope($<HTMLCanvasElement>('cv_pw'), waveform(), view.phase, performance.now());
   });

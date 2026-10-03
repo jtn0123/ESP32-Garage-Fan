@@ -12,7 +12,8 @@ import type { DeviceState } from './types.js';
  */
 export const FLOOR_RESUME_F = 1.5;
 
-const deg = (f: number): string => `${Number(f.toFixed(1))}°`;
+/** "64°" / "64.5°": a limit as the sentences (and the gauge's held tag) name it. */
+export const deg = (f: number): string => `${Number(f.toFixed(1))}°`;
 
 /** "speed 6" / "off" -- a fan speed as the sentences name it. */
 const speedWord = (n: number): string => (n > 0 ? `speed ${n}` : 'off');

@@ -3,7 +3,7 @@
    in a garage, on a phone. Lifted to 5.32:1 and 4.77:1 -- past the 4.5:1 floor
    with the inactive state of a control still legible. The bright values
    (--tx 15.9:1) deliberately did not move. */
-:root{--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#7d8795;--fai:#757f8c;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
+:root{--lo:#80dcff;--st:#9fd36b;--bg:#0b0e13;--tx:#e6e9ed;--mut:#8b94a1;--dim:#7d8795;--fai:#757f8c;--ln:#1a2029;--bd:#232b36;--pop:#151b23;--pbd:#2b333e;--ac:#3b82f6;--ok:#22a06b;--or:#e8834a;--pu:#b98add;--out:#8fa3b8;--rh:#6ea8fe;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'Instrument Sans',system-ui,-apple-system,sans-serif}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg)}
 body{font-family:var(--sans);color:var(--tx);min-height:100vh;padding:0 40px 40px;-webkit-text-size-adjust:100%}
@@ -88,14 +88,39 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #dunit{font-size:20px;color:var(--dim);margin-left:4px}
 
 /* ---- threshold gauge ---- */
-#gauge{position:relative;height:40px;margin-top:26px}
-#gtrack{height:8px;border-radius:4px;background:linear-gradient(90deg,#3b82f6 0%,#33404f 34%,#2b333e 50%,#8a5334 78%,#e8834a 100%)}
+/* Three rows under the track: the scale's ticks and numbers (gauge.ts builds
+   them), then the release/engage labels, whose own ticks run down through the
+   number row -- gaugeTicks drops any number that would sit under one. */
+#gauge{position:relative;height:46px;margin-top:26px}
+#gtrack{height:8px;border-radius:4px;background:linear-gradient(90deg,#3b82f6 0%,#33404f 34%,#2b333e 50%,#8a5334 78%,#e8834a 100%);transition:filter .2s}
 #gband{position:absolute;top:0;height:8px;background:rgba(230,233,237,.10);border-left:1px solid #4c5665;border-right:1px solid #4c5665}
-#gmark{position:absolute;top:-5px;width:3px;height:18px;border-radius:2px;background:var(--tx);transition:left .12s}
-.gtick{position:absolute;top:11px;height:6px;width:1px;background:#3d4653}
-.glab{position:absolute;top:21px;font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
+#gmark{position:absolute;top:-5px;width:3px;height:18px;margin-left:-1px;border-radius:2px;background:var(--tx);transition:left .12s}
+/* Pinned to an end cap: the needle's value is off the scale, so a chevron
+   points the way. The hero number above carries the actual reading. */
+#gmark.pinhi::after,#gmark.pinlo::after{position:absolute;top:2px;font:600 10px/1 var(--mono);color:var(--tx)}
+#gmark.pinhi::after{content:'\25B8';left:calc(100% + 3px)}
+#gmark.pinlo::after{content:'\25C2';right:calc(100% + 3px)}
+#gscale i{position:absolute;top:11px;width:1px;height:3px;background:#2b333e}
+#gscale i.maj{height:5px;background:#3d4653}
+/* --fai, not a darker grey: these are numbers someone reads a value off. */
+#gscale b{position:absolute;top:18px;transform:translateX(-50%);font:500 9.5px var(--mono);color:var(--fai);white-space:nowrap}
+.gtick{position:absolute;top:10px;height:21px;width:1px;background:#4c5665}
+.glab{position:absolute;top:32px;font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
 #glr{transform:translateX(-100%);padding-right:6px}
 #gle{padding-left:6px}
+/* Held by a limit (gauge.ts::heldTag): the differential is still measured but
+   is not in charge. The track keeps its meaning and loses its weight; the
+   needle becomes a ring in the limit's own chart colour, and a callout from it
+   says what IS in charge. The band and its labels stand down. */
+#gauge.held #gtrack{opacity:.38}
+#gauge.held #gband,#gauge.held .gtick{opacity:.28}
+#gauge.held .glab{visibility:hidden}
+#gauge.held #gmark{width:7px;margin-left:-3px;background:var(--bg);border:1.5px solid;border-radius:3px}
+#gauge.floor #gmark{border-color:var(--lo)}
+#gauge.start #gmark{border-color:var(--st)}
+#gheld{position:absolute;top:31px;left:0;font:600 10px/12px var(--mono);letter-spacing:.08em;padding:2px 7px;border-radius:3px;white-space:nowrap;border:1px solid}
+#gauge.floor #gheld{color:var(--lo);border-color:rgba(128,220,255,.45);background:#0d1a20}
+#gauge.start #gheld{color:var(--st);border-color:rgba(159,211,107,.45);background:#121a0f}
 #reason{font-size:15px;color:var(--mut);margin-top:20px;max-width:660px;text-wrap:pretty;min-height:44px}
 
 /* ---- action pills ---- */
@@ -125,11 +150,49 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 
 /* ---- speed rail ---- */
 #rail{display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:40px}
-#railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em}
+#railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em;grid-area:num}
 /* The value under a live thumb, before the command goes out (rail.ts). */
 #railnum.pick{color:var(--ac)}
 #stack{display:flex;flex-direction:column-reverse;gap:3px;width:100%;margin-top:4px}
 #stack button{height:19px;border-radius:4px;border:1px solid var(--ln);background:#12161d;cursor:pointer;transition:background .15s;padding:0}
+
+/* ---- fan-state headline (headline.ts) ---- */
+/* One colour per state family, carried by --hc so the word and the icon can
+   never disagree. A winter limit wears its own colour, the one its gauge
+   callout and chart line wear, so the screen names one state one way. gas
+   wears the VOC row's colour (theme.ts), fault the NO CONTACT red, and hold
+   -- auto keeping its last speed for want of a yard reading -- the garage
+   orange.
+   The headline IS the rail's header. #fhead is display:contents so its parts
+   sit in #railtop's grid beside the number they describe. The speed phrase is
+   left to the tooltip: the big number already says it. */
+#fhead{--hc:var(--mut);display:contents}
+#fhead.run{--hc:var(--ac)}
+#fhead.floor{--hc:var(--lo)}
+#fhead.start{--hc:var(--st)}
+#fhead.hold{--hc:var(--or)}
+#fhead.hand{--hc:var(--pu)}
+#fhead.gas{--hc:#d55181}
+#fhead.fault{--hc:#e5534b}
+#fhico{color:var(--hc);flex:none;overflow:visible;grid-area:ico;width:34px;height:34px}
+#fhico>circle{fill:none;stroke:currentColor;stroke-opacity:.35;stroke-width:1}
+#fhico g{fill:currentColor;transform-origin:12px 12px;animation:fanspin var(--spin,1s) linear infinite}
+#fhico g circle{fill:var(--bg);stroke:currentColor;stroke-width:1.2}
+#fhead.still #fhico g{animation:none}
+@keyframes fanspin{to{transform:rotate(360deg)}}
+/* No spin for anyone who asked for less motion -- the word and the number
+   still carry the state -- and none on a page that has lost the controller:
+   a turning fan over last-known values claims a liveness nobody has seen. */
+@media(prefers-reduced-motion:reduce){#fhico g{animation:none}}
+body.offline #fhico g{animation:none}
+#fhw{font:600 11.5px var(--mono);letter-spacing:.14em;color:var(--hc);white-space:nowrap;padding:3px 7px 3px 8px;border-radius:3px;background:color-mix(in srgb,var(--hc) 15%,transparent)}
+#fhdet{font:500 9.5px var(--mono);letter-spacing:.08em;font-style:normal;color:var(--hc);opacity:.78}
+#fhdet:empty{display:none}
+#railtop{display:grid;grid-template-areas:"lab lab" "ico num" "txt txt";align-items:center;justify-items:center;column-gap:10px;row-gap:6px}
+#fhlab{grid-area:lab}
+/* The qualifier's line is reserved even when empty, so a limit engaging does
+   not shove the twelve blocks down under a hovering pointer. */
+#fhtxt{grid-area:txt;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;min-height:40px}
 
 /* ---- charts ---- */
 #charts{margin-top:36px}
@@ -160,8 +223,10 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 .crow .cd{font-size:11.5px;color:var(--dim)}
 /* Series legend: which line is which sensor. Stays visible on mobile, unlike
    the prose caption -- knowing which trace is the SHT41 is not optional. */
-.leg{font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
-.leg b{font-weight:700;margin-right:10px}
+/* Entries wrap as whole units: with both limits on, the legend is wider than a
+   320 px phone, and one nowrap line panned the page sideways. */
+.leg{display:inline-flex;flex-wrap:wrap;row-gap:4px;font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim)}
+.leg b{font-weight:700;margin-right:10px;white-space:nowrap}
 /* The overnight stripes' key. Text in the label ink, the tint in a swatch: the
    stripe colour is too faint to carry a word. */
 .leg b.night{color:var(--dim);font-weight:500}
@@ -203,8 +268,15 @@ body{padding:0 16px 32px}
    Measured: ~70 px recovered above the plots. */
 #top{gap:8px;padding:14px 0 12px}
 #hbits{gap:9px}
-#gauge{margin-top:16px}
-#reason{margin-top:12px;min-height:0}
+/* The scale row cost the gauge 6 px, and this screen's fold budget (the 320x568
+   rail spec) had little more than that to spare: two back from the gap above,
+   two from the gap below (#reason), two from tighter rows under the track.
+   Net zero against the scale-less gauge. */
+#gauge{margin-top:14px;height:44px}
+#gauge .glab{top:29px}
+#gauge .gtick{height:18px}
+#gheld{top:30px}
+#reason{margin-top:10px;min-height:0}
 #acts{margin-top:14px}
 .crow{flex-wrap:wrap;margin:4px 0 2px}
 /* The prose hint is desktop-only, but an EXPLANATION is not decoration: a
@@ -248,8 +320,12 @@ body{padding:0 16px 32px}
 #rail{margin-right:0;align-items:stretch;margin-top:14px}
 /* Anchored, not centred: `off` and `7` and `12` are different widths, so a
    centred pair moved the number that matters to a different place in every
-   state. Label left, value right, both against the rail's own edges. */
-#railtop{display:flex;align-items:baseline;gap:10px;justify-content:space-between}
+   state. Icon and state left, value right, both against the rail's own edges
+   -- inside the row the label alone used to take, so the fold budget below
+   (B3) does not move. */
+#railtop{grid-template-columns:auto 1fr auto;grid-template-areas:"ico txt num" "ico lab num";justify-items:start;column-gap:12px;row-gap:4px}
+#railnum{justify-self:end}
+#fhtxt{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap;text-align:left;min-height:0}
 /* The primary control. Twelve 20x34 px blocks with 4 px gutters is under half
    a fingertip on the one thing you reach for in a garage, where a mis-tap
    changes the fan speed. The row is 44 px tall and the whole rail is a DRAG

@@ -416,12 +416,24 @@ function drawBootMarks({ c, W, H }: Surface, s: Series, boots: readonly BootMark
   }
 }
 
+/**
+ * Reference marks drawn to the temperature chart's own scale (the winter
+ * limits, limit_lines.ts): values the y-range must take in, a pass beneath the
+ * traces and one above them.
+ */
+export interface TempOverlay {
+  include: readonly number[];
+  under(surf: Surface, sc: Scale): void;
+  over(surf: Surface, sc: Scale): void;
+}
+
 export function drawTemperature(
   canvas: HTMLCanvasElement,
   s: Series,
   index: number,
   /** Restart marks inside this window; drawn last so nothing hides them. */
   boots: readonly BootMark[] = [],
+  overlay: TempOverlay | null = null,
 ): void {
   const surf = surface(canvas);
   if (!surf) return;
@@ -430,7 +442,7 @@ export function drawTemperature(
     placeholder(surf, 'waiting for data — one sample every 5 minutes');
     return;
   }
-  const sc = limits([...s.tf, ...s.of], MIN_SPAN, -Infinity, plotH(H));
+  const sc = limits([...s.tf, ...s.of, ...(overlay?.include ?? [])], MIN_SPAN, -Infinity, plotH(H));
   if (!sc) {
     placeholder(surf, 'no data');
     return;
@@ -438,10 +450,12 @@ export function drawTemperature(
   frame(surf, s, sc, '°', shadesNights(s));
 
   fillDifferential(surf, s, sc);
+  overlay?.under(surf, sc);
 
   line(surf, s, sc, s.of, OUT, true, 2);
   line(surf, s, sc, s.tf, OR, false, 2.2);
 
+  overlay?.over(surf, sc);
   drawBootMarks(surf, s, boots);
 
   if (index >= 0) {
