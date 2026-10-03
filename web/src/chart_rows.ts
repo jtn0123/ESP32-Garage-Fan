@@ -17,6 +17,7 @@ import {
   xAt,
   yAt,
 } from './charts.js';
+import type { Scale, Surface } from './charts.js';
 import { at } from './dom.js';
 import type { Series } from './series.js';
 import { hasData } from './series.js';
@@ -73,17 +74,20 @@ export interface RowScale {
   minSpan?: number;
   /** Least value the quantity can take; the axis never pads below it. */
   lowest?: number;
+  /** Axis label for a value; whole numbers unless the row needs finer. */
+  fmt?: (v: number) => string;
 }
+
+const wholeNumber = (v: number): string => v.toFixed(0);
 
 export function drawSimple(
   canvas: HTMLCanvasElement,
   s: Series,
   values: readonly (number | null)[],
   colour: string,
-  fmt: (v: number) => string,
   emptyMessage: string,
   index: number,
-  { minSpan = MIN_SPAN, lowest = -Infinity }: RowScale = {},
+  { minSpan = MIN_SPAN, lowest = -Infinity, fmt = wholeNumber }: RowScale = {},
 ): void {
   const surf = surface(canvas);
   if (!surf) return;
@@ -114,7 +118,6 @@ export function drawSimple(
 export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): void {
   const surf = surface(canvas);
   if (!surf) return;
-  const { c, W, H } = surf;
   if (!hasData(s.w)) {
     placeholder(surf, 'no plug data yet');
     return;
@@ -127,10 +130,19 @@ export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): 
     return;
   }
   frame(surf, s, sc, (v) => v.toFixed(1), false);
-  // The min-max range the meter saw inside each 5-minute bucket. This is the
-  // half the snapshot line cannot carry: on 2026-08-20 the fan alternated
-  // between stopped and flat out inside every bucket, and one sample per
-  // bucket drew that as a jittery line at whatever instant it landed on.
+  fillMeterBand(surf, s, sc);
+  tintCycling(surf, s);
+  line(surf, s, sc, s.w, SERIES_COLOURS.power, false, 2);
+  crosshair(surf, s, index);
+}
+
+/**
+ * The min-max range the meter saw inside each 5-minute bucket. This is the
+ * half the snapshot line cannot carry: on 2026-08-20 the fan alternated
+ * between stopped and flat out inside every bucket, and one sample per
+ * bucket drew that as a jittery line at whatever instant it landed on.
+ */
+function fillMeterBand({ c, W, H }: Surface, s: Series, sc: Scale): void {
   c.fillStyle = 'rgba(216,194,40,.18)'; // SERIES_COLOURS.power, translucent
   let from = 0;
   while (from < s.n) {
@@ -151,6 +163,10 @@ export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): 
     c.fill();
     from = to + 1;
   }
+}
+
+/** The outage-red tint under every run of buckets the meter saw cycling. */
+function tintCycling({ c, W, H }: Surface, s: Series): void {
   c.fillStyle = 'rgba(224,169,169,.22)';
   let i = 0;
   while (i < s.n) {
@@ -167,8 +183,6 @@ export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): 
       i++;
     }
   }
-  line(surf, s, sc, s.w, SERIES_COLOURS.power, false, 2);
-  crosshair(surf, s, index);
 }
 
 export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number): void {

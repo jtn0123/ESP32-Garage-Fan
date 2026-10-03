@@ -217,13 +217,13 @@ export function drawAll(): void {
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub, { lowest: 0 });
+      'no humidity data', view.scrub, { lowest: 0 });
   }
   if (view.rows.pressure) {
     // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
     // legible in the labels and does not need flattening.
     drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      (v) => v.toFixed(1), 'no pressure data', view.scrub, { minSpan: 0.5 });
+      'no pressure data', view.scrub, { minSpan: 0.5, fmt: (v) => v.toFixed(1) });
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
   if (view.rows.power) drawPower($<HTMLCanvasElement>('cv_w'), s, view.scrub);
@@ -233,12 +233,12 @@ export function drawAll(): void {
   if (view.rows.voc) {
     const warming = !s.voc.some((v) => v !== null && v > 0);
     drawSimple($<HTMLCanvasElement>('cv_v'), s, warming ? s.vocr : s.voc, SERIES_COLOURS.voc,
-      (v) => v.toFixed(0), 'no VOC sensor data', view.scrub, { lowest: 0 });
+      'no VOC sensor data', view.scrub, { lowest: 0 });
   }
   if (view.rows.nox) {
     const warming = !s.nox.some((v) => v !== null && v > 0);
     drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
-      (v) => v.toFixed(0), 'no NOx sensor data', view.scrub, { lowest: 0 });
+      'no NOx sensor data', view.scrub, { lowest: 0 });
   }
   drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
   paintReadouts();
