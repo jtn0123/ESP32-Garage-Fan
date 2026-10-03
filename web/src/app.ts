@@ -17,7 +17,7 @@ import {
   stopScope,
   waveform,
 } from './console.js';
-import { $, clear, el, show } from './dom.js';
+import { $, clear, el, markOverflow, revealBy, show } from './dom.js';
 import { drawAll, paintCaption, paintChartTitle } from './history_view.js';
 import { buildRail } from './rail.js';
 import { paintTip } from './status_bits.js';
@@ -25,6 +25,7 @@ import { attachScrub, endScrub } from './scrub.js';
 import { drawPreview, drawScope } from './pwm.js';
 import { build, tail } from './series.js';
 import { buildGroups, render as renderSettings } from './settings.js';
+import { initJump, jumpToSection, paintJump } from './settings_nav.js';
 import { ROW_IDS, view, type RowKey } from './state.js';
 import type { DeviceState } from './types.js';
 import { maintenance, uploadFirmware } from './ota.js';
@@ -66,20 +67,19 @@ function paintSettings(): void {
       active.isContentEditable);
   if (editing) return;
 
-  renderSettings(
-    $('groups'),
-    buildGroups({
-      state: view.state,
-      info: view.info,
-      update: view.update,
-      setConfig: (q) => void command(() => api.setConfig(q)),
-      toggleAuto: () => void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`)),
-      restart: () => void maintenance('restart'),
-      formatCard: () => void maintenance('format'),
-      purgeCard: () => void maintenance('purge'),
-      recheckUpdate: () => void runUpdateCheck(true),
-    }),
-  );
+  const groups = buildGroups({
+    state: view.state,
+    info: view.info,
+    update: view.update,
+    setConfig: (q) => void command(() => api.setConfig(q)),
+    toggleAuto: () => void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`)),
+    restart: () => void maintenance('restart'),
+    formatCard: () => void maintenance('format'),
+    purgeCard: () => void maintenance('purge'),
+    recheckUpdate: () => void runUpdateCheck(true),
+  });
+  renderSettings(host, groups);
+  paintJump(groups);
   const go = document.getElementById('ota_go');
   if (go) go.onclick = () => void uploadFirmware();
 }
@@ -153,8 +153,27 @@ function toggleScope(ev?: Event): void {
   show($('pwmcard'), false);
   show($('scope'), view.scopeOpen);
   paintPwm();
-  if (view.scopeOpen) startScope();
-  else stopScope();
+  if (view.scopeOpen) {
+    startScope();
+    revealScope();
+  } else stopScope();
+}
+
+/**
+ * Bring the scope's bar and trace on screen, and no further.
+ *
+ * On a phone the scope opens below the speed rail, and on a 568 px screen that
+ * is below the fold: a tap that seemed to do nothing. The least scroll that
+ * shows the trace leaves the rail on screen above it; a panel that is already
+ * in view (a Pixel, any desk) does not move at all.
+ */
+function revealScope(): void {
+  const top = $('scope').getBoundingClientRect().top;
+  const bottom = $('cv_pw').getBoundingClientRect().bottom;
+  const dy = revealBy(top, bottom, window.innerHeight);
+  if (dy === 0) return;
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  window.scrollBy({ top: dy, behavior: still ? 'auto' : 'smooth' });
 }
 
 function setRange(days: number): void {
@@ -176,23 +195,10 @@ function setRange(days: number): void {
 
 /* --------------------------------------------------------------------- setup */
 
-/**
- * Does the chip strip continue past the right edge?
- *
- * The class drives the edge fade. Kept in sync from the scroll position rather
- * than assumed from the width, because the answer changes as you scroll and a
- * fade that stays put once you have reached NOX is a lie about there being
- * more.
- */
-function markChipOverflow(host: HTMLElement): void {
-  const more = host.scrollLeft + host.clientWidth < host.scrollWidth - 2;
-  host.classList.toggle('more', more);
-}
-
 function buildChips(): void {
   const host = $('chips');
-  host.addEventListener('scroll', () => markChipOverflow(host));
-  window.addEventListener('resize', () => markChipOverflow(host));
+  host.addEventListener('scroll', () => markOverflow(host));
+  window.addEventListener('resize', () => markOverflow(host));
   host.replaceChildren(
     ...(Object.keys(ROW_IDS) as RowKey[]).map((key) => {
       const b = el('button', { textContent: key.toUpperCase() });
@@ -206,7 +212,7 @@ function buildChips(): void {
     }),
   );
   paintChips();
-  markChipOverflow(host);
+  markOverflow(host);
 }
 
 
@@ -359,13 +365,13 @@ export async function boot(): Promise<void> {
   setSettingsPainter(paintSettings);
   buildRail(setSpeed);
   buildChips();
+  initJump();
 
   $('nav').onclick = () => setScreen();
   // The UPDATE flag goes straight to the group that can act on it.
   $('updot').onclick = () => {
     setScreen('settings');
-    const titles = [...document.querySelectorAll<HTMLElement>('#groups .gt')];
-    titles.find((t) => t.textContent === 'UPDATE')?.scrollIntoView({ block: 'start' });
+    jumpToSection('UPDATE');
   };
   $('bauto').onclick = () =>
     void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`));

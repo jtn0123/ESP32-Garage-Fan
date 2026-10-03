@@ -31,6 +31,19 @@ export function clear(target: HTMLElement): void {
 }
 
 /**
+ * Does a sideways-scrolling strip continue past its right edge?
+ *
+ * The `more` class drives the edge fade. Kept in sync from the scroll position
+ * rather than assumed from the width, because the answer changes as you scroll
+ * and a fade that stays put once you have reached the last chip is a lie about
+ * there being more. Shared by the chart's row chips and the settings jump bar.
+ */
+export function markOverflow(host: HTMLElement): void {
+  const more = host.scrollLeft + host.clientWidth < host.scrollWidth - 2;
+  host.classList.toggle('more', more);
+}
+
+/**
  * Array access that says what it means.
  *
  * tsconfig sets noUncheckedIndexedAccess, so `series[i]` is `T | undefined`.
@@ -41,4 +54,20 @@ export function at(series: readonly (number | null)[] | undefined, i: number): n
   if (!series || i < 0 || i >= series.length) return null;
   const v = series[i];
   return v === undefined || v === null || Number.isNaN(v) ? null : v;
+}
+
+/**
+ * How far to scroll so the span [top, bottom] (viewport px) is on screen.
+ *
+ * The least movement that does it, like `scrollIntoView({ block: 'nearest' })`
+ * but as a number the caller can test and decide on: 0 when the span is
+ * already in view, positive to scroll down to its foot, negative to scroll up
+ * to its head. A span taller than the screen leads with its head -- the top of
+ * a panel is where its title and its way out are.
+ */
+export function revealBy(top: number, bottom: number, viewH: number, pad = 12): number {
+  if (bottom - top + 2 * pad > viewH) return top - pad;
+  if (bottom > viewH - pad) return bottom - (viewH - pad);
+  if (top < pad) return top - pad;
+  return 0;
 }

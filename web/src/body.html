@@ -9,7 +9,7 @@
 
 <div id="console">
 <div id="conmain">
-<div>
+<div id="conleft">
 <div id="hero">
 <div>
 <div style="display:flex;align-items:center;gap:8px"><span class="k">GARAGE</span><span id="stamp">NOW</span></div>
@@ -56,7 +56,7 @@
 <div id="scbar">
 <span id="scdot"></span><span id="sctitle">GATE DRIVE</span><span id="scstate">IDLE</span>
 <span id="scknobs"><span id="scdiv">&ndash; ms/div</span><span>1.25 V/div</span><span>TRIG &uarr; CH1</span></span>
-<button id="scclose">CLOSE &#10005;</button>
+<button id="scclose" aria-label="Close the waveform viewer"><span class="w">CLOSE </span>&#10005;</button>
 </div>
 <canvas id="cv_pw"></canvas>
 <div id="scstats"></div>
@@ -100,6 +100,7 @@
 
 <div id="settings" class="hide">
 <div id="sethead"><h2>Settings</h2><p>Changes apply to the controller immediately &mdash; there is no save step.</p></div>
+<nav id="setjump" aria-label="Settings sections"></nav>
 <div id="groups"></div>
 </div>
 

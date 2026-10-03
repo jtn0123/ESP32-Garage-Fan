@@ -1,0 +1,69 @@
+/* The waveform viewer (pwm.ts): opened from PWM DUTY in the metric strip. */
+
+/* ---- scope ---- */
+#scope{margin-top:16px;border:1px solid #1c2b3d;border-radius:10px;background:linear-gradient(180deg,#0b131d 0%,#080d14 100%);padding:0 0 15px;box-shadow:0 0 0 1px rgba(59,130,246,.06),0 18px 44px rgba(0,0,0,.5)}
+#scbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid #16212e;flex-wrap:wrap}
+/* The scope's readouts were #4a5a6e on near-black: 2.5:1, against the 4.5:1
+   that 9 px text needs. --dim is 4.9:1 on the darkest end of the panel's
+   gradient and is the token the rest of the console already de-emphasises
+   with. #scdot below stays as it is: it carries no text and no meaning --
+   the state it decorates is spelled out in #scstate beside it. */
+#scdot{width:7px;height:7px;border-radius:50%;background:#3d4653}
+#sctitle{font:700 10px var(--mono);letter-spacing:.16em;color:#cfe0f2}
+#scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:var(--dim)}
+#scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:var(--dim)}
+#scknobs span{padding:3px 7px;border:1px solid #1c2b3d;border-radius:3px}
+/* The scope's only way out, at 50x13 before this. Hit area only, again: the
+   scope bar is a fixed-height strip and padding would reflow it. */
+#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim);position:relative}
+#scclose::after{content:'';position:absolute;inset:-17px -12px}
+#cv_pw{display:block;width:100%;height:154px}
+#scstats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#16212e;border-top:1px solid #16212e}
+#scstats div{background:#080d14;padding:10px 2px 9px;text-align:center;border-top:2px solid var(--out)}
+#scstats .sk{font:500 9.5px var(--mono);letter-spacing:.1em;color:#4a5a6e}
+#scstats .sv{font:500 15px var(--mono);margin-top:5px}
+#captop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#captop b{font:600 9.5px var(--mono);letter-spacing:.14em;color:#4a5a6e;font-weight:600}
+#captop i{font-size:11.5px;color:var(--fai);font-style:normal}
+#capgrid{display:grid;grid-template-columns:repeat(13,1fr);gap:2px;margin-top:8px}
+#capgrid button{padding:6px 0 5px;border:1px solid #16212e;border-radius:4px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s;background:#080d14}
+#capgrid button:hover{border-color:var(--ac)}
+#capgrid button.on{background:rgba(59,130,246,.16);border-color:var(--ac)}
+#capgrid .ck{font:500 10px var(--mono);letter-spacing:.06em;color:var(--fai)}
+#capgrid .cu{font:500 10.5px var(--mono);margin-top:3px;color:var(--dim)}
+#capgrid button.on .ck{color:#cfe0f2}
+#capgrid button.on .cu{color:#d6e8ff}
+#scnote{font-size:12.5px;color:var(--fai);margin:14px 16px 0;line-height:1.5;max-width:660px;text-wrap:pretty}
+
+@media(max-width:900px){
+/* Filed after the speed rail on a phone; #conleft in console.css says why. */
+#scope{order:1;margin-top:18px;margin-bottom:10px}
+/* Two rows, not three: what this is and the way out on the first line, the
+   knobs on the second. CLOSE used to wrap onto a line of its own UNDER the
+   knobs, dim, where it read as a caption rather than a button. It is boxed
+   here so it reads as one, and the bar is sticky so the way out stays in reach
+   anywhere in a panel that is still most of a screen tall. */
+#scbar{position:sticky;top:0;z-index:3;background:#0b131d;border-radius:10px 10px 0 0;row-gap:9px}
+#scknobs{order:1;flex-basis:100%;margin-left:0;flex-wrap:wrap}
+#scknobs span{white-space:nowrap}
+#scclose{color:var(--tx);border:1px solid var(--pbd);border-radius:4px;padding:4px 8px}
+#scstats{grid-template-columns:repeat(3,1fr)}
+/* `#scstats div` also matches each cell's label and value rows -- the bug
+   #odo had -- so every stat drew three rules and stood ~80 px tall. Undone for
+   the phone, where two rows of that were 80 px of budget; the desk renders as
+   it always has. */
+#scstats div div{padding:0;border-top:0}
+#capgrid{grid-template-columns:repeat(7,1fr)}
+}
+
+@media(max-width:480px){
+/* The scope bar's first line is the title, the TRANSMITTING badge and the way
+   out, and at 320 px the word CLOSE is what does not fit. A boxed ✕ in the
+   corner is the close every phone already knows; the label stays for screen
+   readers (aria-label) and for the desk. */
+#scclose .w{display:none}
+#scclose{font-size:12px;padding:3px 8px}
+/* Three knobs on one line at 320 px: 5 px of padding each is the 12 px that
+   kept TRIG from wrapping onto a third row of its own. */
+#scknobs span{padding:3px 5px}
+}

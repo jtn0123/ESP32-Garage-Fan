@@ -49,6 +49,21 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #nav{cursor:pointer;color:var(--mut);background:none;border:0;font:inherit;padding:0;position:relative}
 #nav::after{content:'';position:absolute;inset:-17px -12px}
 #nav.on{color:var(--tx)}
+/* A labelled pill rather than a bare dot: the dot meant "update available" to
+   nobody who had not hovered it. Same ::after trick as #nav for the 44 px hit
+   area; mostly vertical, so it does not swallow the SETTINGS target beside it. */
+#updot{cursor:pointer;font:600 10px var(--mono);letter-spacing:.08em;color:var(--ac);background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.45);border-radius:999px;padding:2px 8px;align-self:center;position:relative}
+#updot::after{content:'';position:absolute;inset:-14px -2px}
+#updot:hover{background:rgba(59,130,246,.22)}
+/* Under 360 px the word does not fit beside BROKER UP and SETTINGS, and a
+   second header line would cost the speed rail its place on the first screen.
+   The pill keeps its colour and its accessible name and shows an arrow; the
+   hit area widens to make up for the narrower box. */
+@media(max-width:359px){
+#updot{font-size:0;padding:2px 6px}
+#updot::before{content:'↑';font-size:11px}
+#updot::after{inset:-14px -14px}
+}
 
 /* ---- console hero ---- */
 #conmain{display:grid;grid-template-columns:1fr 164px;gap:28px;align-items:start}
@@ -107,41 +122,6 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #cv_pm{display:block;width:100%;height:40px;margin-top:8px}
 #pwmfoot{display:flex;justify-content:space-between;font:500 10px var(--mono);color:var(--dim);margin-top:7px}
 #pwmnote{font-size:11.5px;color:var(--fai);margin-top:8px;line-height:1.45;text-wrap:pretty}
-
-/* ---- scope ---- */
-#scope{margin-top:16px;border:1px solid #1c2b3d;border-radius:10px;background:linear-gradient(180deg,#0b131d 0%,#080d14 100%);padding:0 0 15px;box-shadow:0 0 0 1px rgba(59,130,246,.06),0 18px 44px rgba(0,0,0,.5)}
-#scbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid #16212e;flex-wrap:wrap}
-/* The scope's readouts were #4a5a6e on near-black: 2.5:1, against the 4.5:1
-   that 9 px text needs. --dim is 4.9:1 on the darkest end of the panel's
-   gradient and is the token the rest of the console already de-emphasises
-   with. #scdot below stays as it is: it carries no text and no meaning --
-   the state it decorates is spelled out in #scstate beside it. */
-#scdot{width:7px;height:7px;border-radius:50%;background:#3d4653}
-#sctitle{font:700 10px var(--mono);letter-spacing:.16em;color:#cfe0f2}
-#scstate{font:600 9px var(--mono);letter-spacing:.14em;padding:3px 7px;border-radius:3px;background:#111823;color:var(--dim)}
-#scknobs{display:flex;gap:7px;margin-left:14px;font:500 9.5px var(--mono);letter-spacing:.08em;color:var(--dim)}
-#scknobs span{padding:3px 7px;border:1px solid #1c2b3d;border-radius:3px}
-/* The scope's only way out, at 50x13 before this. Hit area only, again: the
-   scope bar is a fixed-height strip and padding would reflow it. */
-#scclose{margin-left:auto;cursor:pointer;background:none;border:0;font:500 10px var(--mono);letter-spacing:.1em;color:var(--dim);position:relative}
-#scclose::after{content:'';position:absolute;inset:-17px -12px}
-#cv_pw{display:block;width:100%;height:154px}
-#scstats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#16212e;border-top:1px solid #16212e}
-#scstats div{background:#080d14;padding:10px 2px 9px;text-align:center;border-top:2px solid var(--out)}
-#scstats .sk{font:500 9.5px var(--mono);letter-spacing:.1em;color:#4a5a6e}
-#scstats .sv{font:500 15px var(--mono);margin-top:5px}
-#captop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-#captop b{font:600 9.5px var(--mono);letter-spacing:.14em;color:#4a5a6e;font-weight:600}
-#captop i{font-size:11.5px;color:var(--fai);font-style:normal}
-#capgrid{display:grid;grid-template-columns:repeat(13,1fr);gap:2px;margin-top:8px}
-#capgrid button{padding:6px 0 5px;border:1px solid #16212e;border-radius:4px;cursor:pointer;text-align:center;transition:border-color .12s,background .12s;background:#080d14}
-#capgrid button:hover{border-color:var(--ac)}
-#capgrid button.on{background:rgba(59,130,246,.16);border-color:var(--ac)}
-#capgrid .ck{font:500 10px var(--mono);letter-spacing:.06em;color:var(--fai)}
-#capgrid .cu{font:500 10.5px var(--mono);margin-top:3px;color:var(--dim)}
-#capgrid button.on .ck{color:#cfe0f2}
-#capgrid button.on .cu{color:#d6e8ff}
-#scnote{font-size:12.5px;color:var(--fai);margin:14px 16px 0;line-height:1.5;max-width:660px;text-wrap:pretty}
 
 /* ---- speed rail ---- */
 #rail{display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:40px}
@@ -213,49 +193,6 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #tipt{font:600 10px var(--mono);letter-spacing:.12em}
 #tipb{font-size:13px;color:#b9c1cc;margin-top:5px;line-height:1.5;text-wrap:pretty}
 
-/* ---- settings ---- */
-#sethead{display:flex;align-items:baseline;gap:14px;padding-bottom:20px;flex-wrap:wrap}
-#sethead h2{font:600 30px/1 var(--sans);letter-spacing:-.03em;margin:0;font-weight:600}
-#sethead p{font-size:13.5px;color:var(--dim);margin:0}
-.grp{display:grid;grid-template-columns:190px 1fr;gap:36px;padding:24px 0;border-top:1px solid var(--ln)}
-.grp .gt{font:600 11px var(--mono);letter-spacing:.12em;color:var(--mut)}
-.grp .gb{font-size:12.5px;color:var(--fai);margin-top:7px;line-height:1.5;text-wrap:pretty}
-.grows{display:flex;flex-direction:column}
-.grow{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:10px 0;min-height:34px}
-.grow .rl{max-width:430px}
-.grow .rlab{font-size:14.5px;color:var(--tx)}
-.grow .rh{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.45;text-wrap:pretty}
-.stp{display:flex;align-items:center}
-.stp button{width:44px;height:44px;border:1px solid var(--bd);background:#12161d;color:var(--mut);cursor:pointer;font:500 15px var(--mono)}
-.stp button:first-child{border-radius:5px 0 0 5px;border-right:0}
-.stp button:last-child{border-radius:0 5px 5px 0;border-left:0}
-/* The line-height rides INSIDE the font shorthand (12.5px/44px). Declared
-   separately it was silently dropped: `font:` resets line-height to normal, and
-   the shorthand came after it, so the value sat top-aligned in its 44 px box
-   instead of centred in it -- introduced by the same change that grew the
-   stepper to 44 px for a thumb. */
-.stp span{min-width:90px;height:44px;text-align:center;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:#0e1218;font:500 12.5px/44px var(--mono);color:var(--tx)}
-/* The pill stays 42x24 -- it reads correctly at that size -- and the ::after
-   grows the HIT area to 44 px without painting anything, the same trick the
-   rail uses. A switch you have to aim at is a switch you toggle by accident. */
-.tgl{width:42px;height:24px;border-radius:999px;border:1px solid var(--bd);cursor:pointer;position:relative;padding:0;transition:background .15s;background:#12161d}
-.tgl::after{content:'';position:absolute;inset:-10px;border-radius:999px}
-.tgl i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;transition:left .15s;background:var(--fai)}
-.tgl.on{background:rgba(34,160,107,.30);border-color:var(--ok)}
-.tgl.on i{left:22px;background:var(--ok)}
-.rtx{font:500 12.5px var(--mono);color:var(--mut);text-align:right}
-.acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.acts button,.acts a{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;white-space:nowrap;line-height:1.15;background:transparent;color:var(--tx);text-decoration:none;display:inline-block}
-.acts .danger{border-color:#3a2626;color:#e0a9a9}
-.fld{font-size:12.5px;padding:11px 10px;min-height:44px;border-radius:5px;background:#0e1218;color:var(--tx);border:1px solid var(--bd);font-family:var(--mono);max-width:190px}
-/* The native file input needs room for its own "No file chosen" text, which
-   190px clips mid-word. Let it size to content, bounded by the row. */
-.fld[type=file]{max-width:100%;width:auto}
-.fld::file-selector-button{font:500 11px var(--mono);letter-spacing:.06em;padding:4px 9px;margin-right:9px;border-radius:4px;border:1px solid var(--pbd);background:#12161d;color:var(--mut);cursor:pointer}
-#otarow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-#otarow button{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
-#otamsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;margin-top:6px}
-
 @media(max-width:900px){
 body{padding:0 16px 32px}
 /* Vertical budget on a phone. Every number below was a gap that existed only
@@ -275,7 +212,6 @@ body{padding:0 16px 32px}
    say so on the screen where it is most likely to be seen. */
 .crow .cd{display:none}
 .crow .cd.note{display:block;color:var(--or);flex-basis:100%}
-#conmain{grid-template-columns:1fr;gap:14px}
 #hero{gap:18px}
 .t1{font-size:62px}.t2{font-size:40px}
 .hcol{padding-top:6px}
@@ -349,21 +285,20 @@ body{padding:0 16px 32px}
    diurnal shape and the differential band, and the 30 px it gives back are
    what lift the plots into the first screenful instead of below it. */
 #cv_t{height:220px}
-#scstats{grid-template-columns:repeat(3,1fr)}
-#capgrid{grid-template-columns:repeat(7,1fr)}
+/* The scope opens BELOW the speed rail on a phone. Inline above it, one tap on
+   PWM DUTY pushed the rail -- the control this page is opened for -- 761 px
+   down a Pixel 7, off the screen, behind a diagnostic. On a desk the two never
+   competed: the rail has its own column. #conleft dissolves so the scope and
+   the rail become siblings and `order` can file the scope last; the DOM, and
+   with it the reading order, is unchanged. A flex column rather than the grid,
+   because the grid's gap would now land between every hero row; those rows
+   carry their own margin-tops and nothing else, so they stack exactly as they
+   did inside the block. */
+#conmain{display:flex;flex-direction:column;align-items:stretch;gap:0}
+#conleft{display:contents}
+#rail{margin-top:14px}
 #odo{grid-template-columns:repeat(2,1fr)}
 #odo>div:last-child{grid-column:1/-1}
-.grp{grid-template-columns:1fr;gap:14px}
-.grow{flex-direction:column;align-items:flex-start;gap:10px}
-.grow .rl{max-width:none}
-/* A 146 px stepper in a 320 px column left two thirds of the row empty while
-   its own buttons were 28 px. Spanning the row costs nothing and buys the
-   target size (M6/H3 are one edit). */
-.stp{width:100%}
-.stp span{flex:1;min-width:0}
-.acts{width:100%}
-.acts button,.acts a{flex:1;text-align:center}
-.rtx,.acts{text-align:left;justify-content:flex-start}
 }
 
 /* Narrow phones: the header goes to two lines rather than one overflowing one.
@@ -384,53 +319,3 @@ body{padding:0 16px 32px}
 #hmq{order:2}
 #hnav{order:3}
 }
-
-/* ---- update check (Settings > UPDATE) ---- */
-/* A labelled pill rather than a bare dot: the dot meant "update available" to
-   nobody who had not hovered it. Same ::after trick as #nav for the 44 px hit
-   area; mostly vertical, so it does not swallow the SETTINGS target beside it. */
-#updot{cursor:pointer;font:600 10px var(--mono);letter-spacing:.08em;color:var(--ac);background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.45);border-radius:999px;padding:2px 8px;align-self:center;position:relative}
-#updot::after{content:'';position:absolute;inset:-14px -2px}
-#updot:hover{background:rgba(59,130,246,.22)}
-/* Under 360 px the word does not fit beside BROKER UP and SETTINGS, and a
-   second header line would cost the speed rail its place on the first screen.
-   The pill keeps its colour and its accessible name and shows an arrow; the
-   hit area widens to make up for the narrower box. */
-@media(max-width:359px){
-#updot{font-size:0;padding:2px 6px}
-#updot::before{content:'↑';font-size:11px}
-#updot::after{inset:-14px -14px}
-}
-.upd{text-align:right}
-.updline{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font:500 12px var(--mono)}
-.updnew{color:var(--ac)}
-.updok{color:var(--ok)}
-.updmuted{color:var(--dim)}
-.updlink{color:var(--out);text-decoration:none;border-bottom:1px dotted var(--pbd)}
-.updlink:hover{color:var(--tx)}
-.updbtn{padding:12px 14px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-family:var(--sans);font-size:12.5px;background:transparent;color:var(--tx)}
-@media(max-width:900px){.upd,.updline{text-align:left;justify-content:flex-start}}
-
-/* The e-ink mirror in the settings drawer. The canvas is nearest-neighbour
-   scaled (see panel.ts) so it reads as a panel with hard pixels, not a photo
-   of one; the border and paper tone are there to make it look like glass on a
-   wall rather than another card in the page. */
-.pnl { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-#pnlcv {
-  width: 100%;
-  max-width: 500px;
-  height: auto;
-  image-rendering: pixelated;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: #e8e4dc;
-}
-.pnlmsg { font-size: 11px; color: var(--dim); }
-.prov{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
-.provgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;max-width:420px}
-.provgrid .fld{max-width:100%;width:100%;box-sizing:border-box}
-#prov_go{padding:12px 16px;min-height:44px;border-radius:6px;border:1px solid var(--pbd);cursor:pointer;font-size:13px;line-height:1.15;background:transparent;color:var(--tx)}
-#provmsg{font:500 11.5px var(--mono);color:var(--dim);text-align:right;min-height:1em}
-.updinstall{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
-#updmsg{font:500 11.5px var(--mono);color:var(--dim)}
-#upd_go:disabled{opacity:.5;cursor:progress}

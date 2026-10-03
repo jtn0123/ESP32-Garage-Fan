@@ -271,6 +271,61 @@ test('a purge is POSTed, never GETed', async ({ page }) => {
   expect(posts.map((r) => r.method())).not.toContain('GET');
 });
 
+// ------------------------------------------------------------------ jump bar
+
+/** Has the group's top come to rest on the pinned bar's lower edge? */
+const landed = (page: import('@playwright/test').Page, id: string): Promise<boolean> =>
+  page.evaluate((sid) => {
+    const bar = document.getElementById('setjump')!.getBoundingClientRect();
+    const sec = document.getElementById(sid)!.getBoundingClientRect();
+    return bar.top === 0 && Math.abs(sec.top - bar.bottom) <= 2;
+  }, id);
+
+/**
+ * Settings is ~6,000 px of scrolling on a phone, and the jump bar is the only
+ * way to the bottom groups that does not flick past everything above them. A
+ * tap has to land the group under the pinned bar and light its tab; scrolling
+ * by hand has to move the light with the page, or the bar lies about where
+ * you are.
+ */
+test('the jump bar takes you to a group and follows the scroll', async ({ page }) => {
+  await openSettings(page);
+  const titles = await page.locator('#groups .gt').allTextContents();
+  await expect(page.locator('#setjump button')).toHaveText(titles);
+
+  await page.locator('#setjump button', { hasText: 'DEVICE' }).click();
+  await expect(page.locator('#setjump [aria-current]')).toHaveText('DEVICE');
+  await expect.poll(() => landed(page, 'set-device')).toBe(true);
+
+  // A wheel is a hand on the page: the tapped tab lets go and the scroll
+  // position decides again.
+  await page.mouse.wheel(0, -100_000);
+  await expect(page.locator('#setjump [aria-current]')).toHaveText(titles[0]!);
+  await page.mouse.wheel(0, 100_000);
+  await expect(page.locator('#setjump [aria-current]')).toHaveText(titles.at(-1)!);
+});
+
+test('the jump bar scrolls sideways at 320 px, never the page', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openSettings(page);
+  const last = page.locator('#setjump button').last();
+  await last.click();
+  await expect(last).toHaveAttribute('aria-current', 'location');
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, 'the jump bar widened the page').toBeLessThanOrEqual(1);
+  // The lit tab is on screen, not parked past the strip's edge.
+  await expect
+    .poll(() =>
+      last.evaluate((t) => {
+        const r = t.getBoundingClientRect();
+        return r.left >= 0 && r.right <= document.documentElement.clientWidth;
+      }),
+    )
+    .toBe(true);
+});
+
 // -------------------------------------------------------------- update / OTA
 
 test('the update section offers a re-check', async ({ page }) => {
