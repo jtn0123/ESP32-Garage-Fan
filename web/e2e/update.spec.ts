@@ -71,13 +71,16 @@ test('the header UPDATE flag says so in words and opens the update group', async
   await page.setViewportSize({ width: 320, height: 568 });
   await openConsole(page);
   const flag = page.locator('#updot');
-  await expect(flag).toHaveText('UPDATE');
+  await expect(flag).toHaveText('UPDATE'); // the accessible name, even where it shows an arrow
   const hit = await hitBox(page, '#updot');
   expect(hit.h, `#updot hit area is ${hit.h} px tall`).toBeGreaterThanOrEqual(44);
   expect(hit.w, `#updot hit area is ${hit.w} px wide`).toBeGreaterThanOrEqual(44);
-  // On a 320 px phone it stands in for SETTINGS rather than wrap the header
-  // onto a second line, which would push the speed rail below the fold.
-  await expect(page.locator('#nav')).toBeHidden();
+  // Beside SETTINGS, not instead of it, and without wrapping the header onto
+  // a second line -- which would push the speed rail below the fold.
+  await expect(page.locator('#nav')).toBeVisible();
+  const nav = await page.locator('#nav').boundingBox();
+  const pill = await flag.boundingBox();
+  expect(Math.abs(pill!.y + pill!.height / 2 - (nav!.y + nav!.height / 2)), 'the header wrapped').toBeLessThan(4);
   const stack = await page.locator('#stack').boundingBox();
   expect(stack!.y + stack!.height, 'the speed rail is below the fold').toBeLessThanOrEqual(568);
   await flag.click();
