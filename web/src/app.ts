@@ -107,8 +107,12 @@ async function runUpdateCheck(force = false): Promise<void> {
   if (view.update && !force) return; // one check per page load; the button forces
   view.update = await checkForUpdate(repo, running);
   if (view.screen === 'settings') paintSettings();
-  const s = view.update;
-  show($('updot'), s.kind === 'available');
+  paintUpdateFlag();
+}
+
+/** The header's UPDATE pill: console only -- in Settings the UPDATE group says it. */
+function paintUpdateFlag(): void {
+  show($('updot'), view.update?.kind === 'available' && view.screen === 'console');
 }
 
 /* ---------------------------------------------------------------- navigation */
@@ -122,6 +126,7 @@ export function setScreen(next?: 'console' | 'settings'): void {
   nav.className = view.screen === 'settings' ? 'on' : '';
   view.tip = -1;
   paintTip();
+  paintUpdateFlag();
   if (view.screen === 'console') {
     drawAll();
     if (view.previewOpen) drawPreview($<HTMLCanvasElement>('cv_pm'), waveform());
@@ -356,6 +361,12 @@ export async function boot(): Promise<void> {
   buildChips();
 
   $('nav').onclick = () => setScreen();
+  // The UPDATE flag goes straight to the group that can act on it.
+  $('updot').onclick = () => {
+    setScreen('settings');
+    const titles = [...document.querySelectorAll<HTMLElement>('#groups .gt')];
+    titles.find((t) => t.textContent === 'UPDATE')?.scrollIntoView({ block: 'start' });
+  };
   $('bauto').onclick = () =>
     void command(() => api.setConfig(`auto=${view.state?.auto ? 0 : 1}`));
   $('boff').onclick = () => setSpeed(0);

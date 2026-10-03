@@ -10,7 +10,6 @@
 // its settings painter through setSettingsPainter to keep the dependency one
 // way.
 
-import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
 import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
 import { paintChartTitle } from './history_view.js';
@@ -19,7 +18,7 @@ import { liveReason } from './reason.js';
 import { paintBits } from './status_bits.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, sampleIndex, view, type RowKey } from './state.js';
-import { AC, FAI, OK, OR, OUT, PU, TX } from './theme.js';
+import { AC, FAI, OK, OR, OUT, SERIES_COLOURS, TX } from './theme.js';
 import type { DeviceState } from './types.js';
 
 let settingsPainter: (() => void) | null = null;
@@ -222,10 +221,16 @@ export function paintStats(): void {
   // The estimate only fills in when there is no watt meter reading.
   if (!view.state?.plug) $('mW').textContent = `${st.watts_now.toFixed(0)} W`;
   $('mRun').textContent = hoursMinutes(st.run_today_s);
+  // Run time today already sits in the metrics row (RUN TODAY), so the tile
+  // spends its slot on what that running cost instead -- the same sum as
+  // Settings → Fan energy today.
+  const price = view.state?.cost_kwh;
+  const kwhToday = st.wh_today / 1000;
   const tiles: [string, string, string, string][] = [
-    ['FAN TODAY', (st.run_today_s / 3600).toFixed(1), 'h', AC],
+    ['COST TODAY', price === undefined ? '–' : `$${(kwhToday * price).toFixed(2)}`,
+      `${kwhToday.toFixed(2)} kWh`, OK],
     ['LIFETIME', (st.run_total_s / 3600).toFixed(0), 'h', OUT],
-    ['ENERGY EST', (st.energy_wh / 1000).toFixed(2), 'kWh', PU],
+    ['ENERGY EST', (st.energy_wh / 1000).toFixed(2), 'kWh', SERIES_COLOURS.power],
     ['24H RANGE', st.samples ? `${st.t_min_f.toFixed(0)}–${st.t_max_f.toFixed(0)}` : '–', '°F', OR],
     ['24H AVERAGE', st.samples ? st.t_avg_f.toFixed(1) : '–', '°F', OR],
   ];
@@ -353,7 +358,7 @@ export function paint(next?: DeviceState): void {
   paintRail(s.speed);
 
   $('bauto').className = `pill${s.auto ? ' on' : ''}`;
-  $('bauto').textContent = s.auto ? 'auto on' : 'auto off';
+  $('bauto').textContent = s.auto ? 'Auto on' : 'Auto off';
   $('boff').className = `pill${s.speed === 0 ? ' on' : ''}`;
   $('mAir').textContent = airflow(s.speed);
 

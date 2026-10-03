@@ -7,20 +7,13 @@
 // paints the recorded past. Both read the shared view-model in state.ts and
 // write only to the DOM.
 
-import {
-  SERIES_COLOURS,
-  drawAxis,
-  drawBattery,
-  drawFanSpeed,
-  drawPower,
-  drawSimple,
-  drawTemperature,
-} from './charts.js';
+import { drawBattery, drawFanSpeed, drawPower, drawSimple } from './chart_rows.js';
+import { drawAxis, drawTemperature, shadesNights } from './charts.js';
 import { $, at, el } from './dom.js';
 import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
 import type { Series } from './series.js';
 import { sampleIndex, view } from './state.js';
-import { OR, OUT } from './theme.js';
+import { OR, OUT, SERIES_COLOURS } from './theme.js';
 
 /** One entry of a series legend: a coloured line sample and the sensor name. */
 function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement {
@@ -29,11 +22,20 @@ function legendEntry(name: string, colour: string, dashed: boolean): HTMLElement
   return b;
 }
 
+/** The overnight stripes' key: a swatch of the tint, since they are not a line. */
+function nightEntry(): HTMLElement {
+  const b = el('b', { className: 'night' });
+  b.append(el('i'), 'NIGHT');
+  return b;
+}
+
 /** Which line is which sensor, on the rows that carry more than one. */
-function paintLegends(): void {
+function paintLegends(s: Series): void {
   $('tleg').replaceChildren(
     legendEntry('GARAGE', OR, false),
     legendEntry('OUTSIDE', OUT, true),
+    // Only while the stripes are drawn: past an hour per row they are not.
+    ...(shadesNights(s) ? [nightEntry()] : []),
   );
   $('hleg').replaceChildren(legendEntry('GARAGE', SERIES_COLOURS.humidity, false));
 }
@@ -192,7 +194,9 @@ function paintReadouts(): void {
  * prevent, and silently keeping it undid that at the last step.
  */
 function clearPlots(): void {
-  for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_ax']) {
+  // Every plot, the power and gas rows included: missing from this list, they
+  // kept the previous range's picture under the new range's title.
+  for (const id of ['cv_t', 'cv_s', 'cv_h', 'cv_p', 'cv_b', 'cv_w', 'cv_v', 'cv_n', 'cv_ax']) {
     const c = document.getElementById(id) as HTMLCanvasElement | null;
     const ctx = c?.getContext('2d');
     if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
@@ -208,18 +212,18 @@ export function drawAll(): void {
     if (view.historyError) clearPlots();
     return;
   }
-  paintLegends();
+  paintLegends(s);
   drawTemperature($<HTMLCanvasElement>('cv_t'), s, view.scrub, view.boots);
   if (view.rows.fan) drawFanSpeed($<HTMLCanvasElement>('cv_s'), s, view.scrub);
   if (view.rows.humidity) {
     drawSimple($<HTMLCanvasElement>('cv_h'), s, s.rh, SERIES_COLOURS.humidity,
-      (v) => v.toFixed(0), 'no humidity data', view.scrub);
+      'no humidity data', view.scrub, { lowest: 0 });
   }
   if (view.rows.pressure) {
     // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
     // legible in the labels and does not need flattening.
     drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      (v) => v.toFixed(1), 'no pressure data', view.scrub, 0.5);
+      'no pressure data', view.scrub, { minSpan: 0.5, fmt: (v) => v.toFixed(1) });
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
   if (view.rows.power) drawPower($<HTMLCanvasElement>('cv_w'), s, view.scrub);
@@ -229,12 +233,12 @@ export function drawAll(): void {
   if (view.rows.voc) {
     const warming = !s.voc.some((v) => v !== null && v > 0);
     drawSimple($<HTMLCanvasElement>('cv_v'), s, warming ? s.vocr : s.voc, SERIES_COLOURS.voc,
-      (v) => v.toFixed(0), 'no VOC sensor data', view.scrub);
+      'no VOC sensor data', view.scrub, { lowest: 0 });
   }
   if (view.rows.nox) {
     const warming = !s.nox.some((v) => v !== null && v > 0);
     drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
-      (v) => v.toFixed(0), 'no NOx sensor data', view.scrub);
+      'no NOx sensor data', view.scrub, { lowest: 0 });
   }
   drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
   paintReadouts();

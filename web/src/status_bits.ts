@@ -115,31 +115,38 @@ const CAN_HOVER = window.matchMedia?.('(hover: hover)').matches ?? true;
 export function paintBits(): void {
   const values = bitValues();
   if (!values.length) return;
-  const host = $('stats');
-  host.replaceChildren(
-    ...STATUS_BITS.map((bit, n) => {
-      const span = el('span', { className: 'bit' });
-      span.append(el('b', { textContent: bit.key }));
-      const v = el('span', { textContent: values[n]?.value ?? '' });
-      v.style.color = values[n]?.colour ?? DIM;
-      span.append(v);
-      if (CAN_HOVER) {
-        span.onmouseenter = () => {
-          view.tip = n;
-          paintTip();
-        };
-        span.onmouseleave = () => {
-          view.tip = -1;
-          paintTip();
-        };
-      }
-      span.onclick = () => {
-        view.tip = view.tip === n ? -1 : n;
+  const spans = STATUS_BITS.map((bit, n) => {
+    const span = el('span', { className: 'bit' });
+    span.append(el('b', { textContent: bit.key }));
+    const v = el('span', { textContent: values[n]?.value ?? '' });
+    v.style.color = values[n]?.colour ?? DIM;
+    span.append(v);
+    if (CAN_HOVER) {
+      span.onmouseenter = () => {
+        view.tip = n;
         paintTip();
       };
-      return span;
-    }),
-  );
+      span.onmouseleave = () => {
+        view.tip = -1;
+        paintTip();
+      };
+    }
+    span.onclick = () => {
+      view.tip = view.tip === n ? -1 : n;
+      paintTip();
+    };
+    return span;
+  });
+  // Two deliberate lines, the hardware and then the firmware it runs, rather
+  // than one line that wrapped wherever the width ran out and left SLOT alone
+  // and centred under the other seven.
+  const cut = STATUS_BITS.findIndex((bit) => bit.key === 'FW');
+  const line = (part: HTMLElement[]): HTMLElement => {
+    const div = el('div');
+    div.append(...part);
+    return div;
+  };
+  $('stats').replaceChildren(line(spans.slice(0, cut)), line(spans.slice(cut)));
   paintTip();
 }
 
