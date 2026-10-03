@@ -168,6 +168,27 @@ function tag(c: CanvasRenderingContext2D, b: Box, text: string, colour: string):
   c.textBaseline = 'alphabetic';
 }
 
+/** A tag's words: the limit and its value, pointing the way when it is off the plot. */
+function tagText(line: LimitLine, where: Placement): string {
+  const words = `${line.name} ${deg(line.f)}`;
+  if (where === 'line') return words;
+  return `${where === 'above' ? '▴' : '▾'} ${words}`;
+}
+
+/**
+ * The bands a tag may sit in, preferred first. Off the plot, against the edge
+ * the limit lies beyond. On it, just above or below the rule at `y` -- toward
+ * the middle of the plot first, and never off it.
+ */
+function tagRows(where: Placement, y: number, H: number): [number, number][] {
+  if (where === 'above') return [[TOP + 2, TOP + 2 + TAG_H]];
+  if (where === 'below') return [[bottom(H) - 2 - TAG_H, bottom(H) - 2]];
+  const above: [number, number] = [y - 2 - TAG_H, y - 2];
+  const below: [number, number] = [y + 2, y + 2 + TAG_H];
+  const sides = y > (TOP + bottom(H)) / 2 ? [above, below] : [below, above];
+  return sides.filter(([y0, y1]) => y0 >= TOP - 8 && y1 <= bottom(H) + 4);
+}
+
 /**
  * The overlay drawTemperature takes: the in-reach limits widen its y-range,
  * the rules go under the traces, the tags over them.
@@ -197,22 +218,9 @@ export function limitOverlay(s: Series, lines: readonly LimitLine[]): TempOverla
       const cols = occupied(s, sc, W, H);
       const done: Box[] = [];
       for (const { line, where } of placed) {
-        const text =
-          where === 'line' ? `${line.name} ${deg(line.f)}`
-          : `${where === 'above' ? '▴' : '▾'} ${line.name} ${deg(line.f)}`;
+        const text = tagText(line, where);
         const w = c.measureText(text).width + TAG_PAD * 2;
-        let ys: [number, number][];
-        if (where === 'line') {
-          const y = yAt(line.f, H, sc);
-          const above: [number, number] = [y - 2 - TAG_H, y - 2];
-          const below: [number, number] = [y + 2, y + 2 + TAG_H];
-          // Toward the middle of the plot first, and never off it.
-          const sides = y > (TOP + bottom(H)) / 2 ? [above, below] : [below, above];
-          ys = sides.filter(([y0, y1]) => y0 >= TOP - 8 && y1 <= bottom(H) + 4);
-        } else {
-          ys = [where === 'above' ? [TOP + 2, TOP + 2 + TAG_H] : [bottom(H) - 2 - TAG_H, bottom(H) - 2]];
-        }
-        const box = pickBox(boxesAt(W, w, ys), cols, done);
+        const box = pickBox(boxesAt(W, w, tagRows(where, yAt(line.f, H, sc), H)), cols, done);
         if (box === null) continue;
         tag(c, box, text, line.colour);
         done.push(box);

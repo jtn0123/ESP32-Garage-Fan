@@ -150,7 +150,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 
 /* ---- speed rail ---- */
 #rail{display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:40px}
-#railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em}
+#railnum{font:600 40px/1 var(--mono);letter-spacing:-.02em;grid-area:num}
 /* The value under a live thumb, before the command goes out (rail.ts). */
 #railnum.pick{color:var(--ac)}
 #stack{display:flex;flex-direction:column-reverse;gap:3px;width:100%;margin-top:4px}
@@ -162,8 +162,11 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
    callout and chart line wear, so the screen names one state one way. gas
    wears the VOC row's colour (theme.ts), fault the NO CONTACT red, and hold
    -- auto keeping its last speed for want of a yard reading -- the garage
-   orange. */
-#fhead{--hc:var(--mut)}
+   orange.
+   The headline IS the rail's header. #fhead is display:contents so its parts
+   sit in #railtop's grid beside the number they describe. The speed phrase is
+   left to the tooltip: the big number already says it. */
+#fhead{--hc:var(--mut);display:contents}
 #fhead.run{--hc:var(--ac)}
 #fhead.floor{--hc:var(--lo)}
 #fhead.start{--hc:var(--st)}
@@ -171,7 +174,7 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 #fhead.hand{--hc:var(--pu)}
 #fhead.gas{--hc:#d55181}
 #fhead.fault{--hc:#e5534b}
-#fhico{color:var(--hc);flex:none;overflow:visible}
+#fhico{color:var(--hc);flex:none;overflow:visible;grid-area:ico;width:34px;height:34px}
 #fhico>circle{fill:none;stroke:currentColor;stroke-opacity:.35;stroke-width:1}
 #fhico g{fill:currentColor;transform-origin:12px 12px;animation:fanspin var(--spin,1s) linear infinite}
 #fhico g circle{fill:var(--bg);stroke:currentColor;stroke-width:1.2}
@@ -185,14 +188,8 @@ body.offline #fhico g{animation:none}
 #fhw{font:600 11.5px var(--mono);letter-spacing:.14em;color:var(--hc);white-space:nowrap;padding:3px 7px 3px 8px;border-radius:3px;background:color-mix(in srgb,var(--hc) 15%,transparent)}
 #fhdet{font:500 9.5px var(--mono);letter-spacing:.08em;font-style:normal;color:var(--hc);opacity:.78}
 #fhdet:empty{display:none}
-/* The headline IS the rail's header. #fhead is display:contents so its parts
-   sit in #railtop's grid beside the number they describe. The speed phrase is
-   left to the tooltip: the big number already says it. */
-#fhead{display:contents}
 #railtop{display:grid;grid-template-areas:"lab lab" "ico num" "txt txt";align-items:center;justify-items:center;column-gap:10px;row-gap:6px}
 #fhlab{grid-area:lab}
-#fhico{grid-area:ico;width:34px;height:34px}
-#railnum{grid-area:num}
 /* The qualifier's line is reserved even when empty, so a limit engaging does
    not shove the twelve blocks down under a hovering pointer. */
 #fhtxt{grid-area:txt;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;min-height:40px}
@@ -328,7 +325,6 @@ body{padding:0 16px 32px}
    (B3) does not move. */
 #railtop{grid-template-columns:auto 1fr auto;grid-template-areas:"ico txt num" "ico lab num";justify-items:start;column-gap:12px;row-gap:4px}
 #railnum{justify-self:end}
-#fhico{width:34px;height:34px}
 #fhtxt{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap;text-align:left;min-height:0}
 /* The primary control. Twelve 20x34 px blocks with 4 px gutters is under half
    a fingertip on the one thing you reach for in a garage, where a mis-tap

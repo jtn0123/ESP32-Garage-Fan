@@ -102,7 +102,10 @@ export function gaugeStep(g: GaugeGeometry, widthPx: number): number {
 }
 
 /** "+4" / "0" / "−2", with a real minus sign: a hyphen is half as wide as a plus. */
-export const scaleLabel = (v: number): string => (v > 0 ? `+${v}` : v < 0 ? `−${-v}` : '0');
+export function scaleLabel(v: number): string {
+  if (v > 0) return `+${v}`;
+  return v < 0 ? `−${-v}` : '0';
+}
 
 /**
  * Every tick on the track: majors at the labelled step, minors halfway (or at
