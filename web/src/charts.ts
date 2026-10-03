@@ -1,5 +1,7 @@
-// The chart engine: temperature with its differential band, plus the
-// toggleable fan / humidity / pressure / battery rows and a shared time axis.
+// The chart engine: the drawing primitives, temperature with its differential
+// band, restart marks and the shared time axis. The toggleable rows under the
+// temperature chart (fan, humidity, pressure, battery, power, gas) draw with
+// these primitives from chart_rows.ts.
 //
 // Hand-rolled canvas rather than a charting library, for the same reason the
 // page has no framework: the whole thing ships inside the firmware image.
@@ -8,8 +10,7 @@ import { at } from './dom.js';
 import { axisLabel } from './format.js';
 import type { Series } from './series.js';
 import type { BootMark } from './types.js';
-import { hasData } from './series.js';
-import { AC, DIM, OK, OR, OUT, PAD_LEFT as L, PAD_RIGHT as R, PU, RH } from './theme.js';
+import { DIM, OR, OUT, PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
 
 /** Restart stems and their labels -- the same red family as the outage band. */
 const RESTART_C = '#e0a9a9';
@@ -39,7 +40,7 @@ export function surface(canvas: HTMLCanvasElement): Surface | null {
   return { c, W: w, H: h };
 }
 
-interface Scale {
+export interface Scale {
   min: number;
   max: number;
   ticks: number[];
@@ -56,9 +57,18 @@ interface Scale {
  * range that cannot be distinguished in the labels cannot be exaggerated in
  * the plot either.
  */
-const MIN_SPAN = 2;
+export const MIN_SPAN = 2;
 
-export function limits(values: readonly (number | null)[], minSpan = MIN_SPAN): Scale | null {
+/**
+ * `lowest` is the least value the quantity can physically take. Watts and the
+ * gas indices cannot go negative, but the 12 % padding below the data drew
+ * their axes down to -1.3 W, -13 and "-0" anyway.
+ */
+export function limits(
+  values: readonly (number | null)[],
+  minSpan = MIN_SPAN,
+  lowest = -Infinity,
+): Scale | null {
   let mn = Infinity;
   let mx = -Infinity;
   for (const v of values) {
@@ -75,17 +85,17 @@ export function limits(values: readonly (number | null)[], minSpan = MIN_SPAN): 
     mx = mid + minSpan / 2;
   }
   const pad = (mx - mn) * 0.12;
-  return scale(mn - pad, mx + pad);
+  return scale(Math.max(mn - pad, lowest), mx + pad);
 }
 
-function scale(min: number, max: number): Scale {
+export function scale(min: number, max: number): Scale {
   return { min, max, ticks: [min, (min + max) / 2, max] };
 }
 
 // Position by the sample's time fraction, not its index: after a merge with
 // holes in it (reboots, outages), equal index spacing would compress the
 // missing stretch and every slope around it would lie.
-const xAt = (s: Series, i: number, W: number): number => L + (s.frac[i] ?? 0) * (W - L - R);
+export const xAt = (s: Series, i: number, W: number): number => L + (s.frac[i] ?? 0) * (W - L - R);
 
 /**
  * A wall-clock instant's x position. Restarts happen INSIDE an outage, i.e.
@@ -100,7 +110,7 @@ export function xAtTime(s: Series, t: number, W: number): number | null {
   return L + ((t - t0) / (tn - t0)) * (W - L - R);
 }
 
-const yAt = (v: number, H: number, s: Scale): number =>
+export const yAt = (v: number, H: number, s: Scale): number =>
   H - 6 - ((v - s.min) * (H - 16)) / (s.max - s.min);
 
 /**
@@ -114,6 +124,10 @@ const yAt = (v: number, H: number, s: Scale): number =>
  */
 const NIGHT_MAX_STEP = 3600;
 
+/** Does the temperature chart shade nights for this series? The legend asks too. */
+export const shadesNights = (s: Series): boolean =>
+  s.step <= NIGHT_MAX_STEP && s.night.some(Boolean);
+
 /** The dim overnight stripes behind the temperature trace. */
 function shadeNights({ c, W, H }: Surface, s: Series): void {
   c.fillStyle = 'rgba(255,255,255,.035)';
@@ -126,10 +140,20 @@ function shadeNights({ c, W, H }: Surface, s: Series): void {
     let j = i;
     while (j < s.n && s.night[j]) j++;
     const x0 = xAt(s, i, W);
-    c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
+    // Between the top and bottom gridlines (see yAt), not the whole canvas:
+    // full height poked a grey block above the top gridline, where it read as
+    // a stray rectangle rather than as part of the plot.
+    c.fillRect(x0, 10, xAt(s, j - 1, W) - x0 || 1, H - 16);
     i = j;
   }
 }
+
+/**
+ * "-0" -> "0", "-0.0°" -> "0.0°": a tick a hair under zero rounds to a signed
+ * zero, and an axis reading "-0" looks like a bug even when it is arithmetic.
+ */
+export const unsignedZero = (label: string): string =>
+  /^-0(\.0+)?(?![.\d])/.test(label) ? label.slice(1) : label;
 
 /**
  * The span where no samples exist, shaded and ruled at both edges.
@@ -158,7 +182,7 @@ function shadeOutages({ c, W, H }: Surface, s: Series): void {
 }
 
 /** Gridlines, y-axis labels, and the shading behind them. */
-function frame(
+export function frame(
   surf: Surface,
   s: Series,
   sc: Scale,
@@ -179,11 +203,11 @@ function frame(
     c.moveTo(L, y);
     c.lineTo(W - R, y);
     c.stroke();
-    c.fillText(fmt(v), L - 5, y + 3);
+    c.fillText(unsignedZero(fmt(v)), L - 5, y + 3);
   }
 }
 
-function line(
+export function line(
   { c, W, H }: Surface,
   s: Series,
   sc: Scale,
@@ -215,7 +239,7 @@ function line(
   c.setLineDash([]);
 }
 
-function crosshair({ c, W, H }: Surface, s: Series, index: number): void {
+export function crosshair({ c, W, H }: Surface, s: Series, index: number): void {
   if (index < 0) return;
   c.strokeStyle = 'rgba(230,233,237,.5)';
   c.lineWidth = 1;
@@ -226,7 +250,7 @@ function crosshair({ c, W, H }: Surface, s: Series, index: number): void {
   c.stroke();
 }
 
-function placeholder({ c, W, H }: Surface, message: string): void {
+export function placeholder({ c, W, H }: Surface, message: string): void {
   c.fillStyle = DIM;
   c.font = '12px "JetBrains Mono",monospace';
   c.textAlign = 'center';
@@ -234,27 +258,46 @@ function placeholder({ c, W, H }: Surface, message: string): void {
 }
 
 /**
+ * Segment i -> i+1 of the band: true where the garage is the warmer trace,
+ * false where the yard is, null where there is nothing to tint -- a missing
+ * reading, or s.gap[i+1], a pair straddling an outage, where filling would
+ * invent a differential across the hole.
+ */
+function segmentWarm(s: Series, i: number): boolean | null {
+  const a = at(s.tf, i);
+  const b = at(s.tf, i + 1);
+  const oa = at(s.of, i);
+  const ob = at(s.of, i + 1);
+  if (a === null || b === null || oa === null || ob === null || s.gap[i + 1]) return null;
+  return (a + b) / 2 >= (oa + ob) / 2;
+}
+
+/**
  * The band between the two traces, tinted by which one is on top: orange
  * where the garage is hotter than the yard (the fan can help), blue where it
  * is cooler (running the fan would import heat).
+ *
+ * One polygon per run of same-tint segments. One per segment drew a hairline
+ * seam every five minutes, where the anti-aliased edges of neighbouring
+ * translucent quads overlapped -- a texture the data does not have.
  */
 function fillDifferential({ c, W, H }: Surface, s: Series, sc: Scale): void {
-  for (let i = 0; i + 1 < s.n; i++) {
-    const a = at(s.tf, i);
-    const b = at(s.tf, i + 1);
-    const oa = at(s.of, i);
-    const ob = at(s.of, i + 1);
-    // s.gap[i+1]: the pair straddles an outage, so there is nothing between
-    // them to tint -- filling it would invent a differential across the hole.
-    if (a === null || b === null || oa === null || ob === null || s.gap[i + 1]) continue;
+  let i = 0;
+  while (i + 1 < s.n) {
+    const warm = segmentWarm(s, i);
+    if (warm === null) {
+      i++;
+      continue;
+    }
+    let end = i + 1; // the run's last point
+    while (end + 1 < s.n && segmentWarm(s, end) === warm) end++;
     c.beginPath();
-    c.moveTo(xAt(s, i, W), yAt(a, H, sc));
-    c.lineTo(xAt(s, i + 1, W), yAt(b, H, sc));
-    c.lineTo(xAt(s, i + 1, W), yAt(ob, H, sc));
-    c.lineTo(xAt(s, i, W), yAt(oa, H, sc));
+    for (let k = i; k <= end; k++) c.lineTo(xAt(s, k, W), yAt(at(s.tf, k)!, H, sc));
+    for (let k = end; k >= i; k--) c.lineTo(xAt(s, k, W), yAt(at(s.of, k)!, H, sc));
     c.closePath();
-    c.fillStyle = (a + b) / 2 >= (oa + ob) / 2 ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
+    c.fillStyle = warm ? 'rgba(232,131,74,.22)' : 'rgba(59,130,246,.14)';
     c.fill();
+    i = end;
   }
 }
 
@@ -367,7 +410,7 @@ export function drawTemperature(
     placeholder(surf, 'no data');
     return;
   }
-  frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, s.step <= NIGHT_MAX_STEP);
+  frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, shadesNights(s));
 
   fillDifferential(surf, s, sc);
 
@@ -397,189 +440,6 @@ export function drawTemperature(
   }
 }
 
-export function drawFanSpeed(canvas: HTMLCanvasElement, s: Series, index: number): void {
-  const surf = surface(canvas);
-  if (!surf) return;
-  const { c, W, H } = surf;
-  if (!s.spd.length) {
-    placeholder(surf, 'fan history is only kept for the last 24 hours');
-    return;
-  }
-  const sc = scale(0, 12);
-  frame(surf, s, sc, (v) => v.toFixed(0), false);
-
-  // Step plot, not a line: the speed holds between samples rather than
-  // ramping. One polygon per contiguous run, so an outage leaves a hole
-  // instead of fabricating a plateau across the time the device was dark.
-  const speed = (i: number): number => s.spd[i] ?? 0;
-  c.fillStyle = 'rgba(59,130,246,.28)';
-  c.strokeStyle = AC;
-  c.lineWidth = 1.6;
-  let a = 0;
-  for (let i = 1; i <= s.n; i++) {
-    if (i < s.n && !s.gap[i]) continue;
-    const b = i - 1;
-    c.beginPath();
-    c.moveTo(xAt(s, a, W), yAt(0, H, sc));
-    for (let k = a; k <= b; k++) {
-      c.lineTo(xAt(s, k, W), yAt(speed(k), H, sc));
-      if (k < b) c.lineTo(xAt(s, k + 1, W), yAt(speed(k), H, sc));
-    }
-    c.lineTo(xAt(s, b, W), yAt(0, H, sc));
-    c.closePath();
-    c.fill();
-
-    c.beginPath();
-    let prev = speed(a);
-    c.moveTo(xAt(s, a, W), yAt(prev, H, sc));
-    for (let k = a + 1; k <= b; k++) {
-      c.lineTo(xAt(s, k, W), yAt(prev, H, sc));
-      c.lineTo(xAt(s, k, W), yAt(speed(k), H, sc));
-      prev = speed(k);
-    }
-    c.stroke();
-    a = i;
-  }
-  crosshair(surf, s, index);
-}
-
-export function drawSimple(
-  canvas: HTMLCanvasElement,
-  s: Series,
-  values: readonly (number | null)[],
-  colour: string,
-  fmt: (v: number) => string,
-  emptyMessage: string,
-  index: number,
-  /** Smallest range to auto-scale to, in this series' own units. */
-  minSpan = MIN_SPAN,
-): void {
-  const surf = surface(canvas);
-  if (!surf) return;
-  if (!hasData(values)) {
-    placeholder(surf, emptyMessage);
-    return;
-  }
-  const sc = limits(values, minSpan);
-  if (!sc) {
-    placeholder(surf, emptyMessage);
-    return;
-  }
-  frame(surf, s, sc, fmt, false);
-  line(surf, s, sc, values, colour, false, 2);
-  crosshair(surf, s, index);
-}
-
-/**
- * The plug watts, with the buckets the meter saw the fan cycling in tinted.
- *
- * The watts column is one snapshot per five minutes. On 2026-08-20 the fan
- * stopped and restarted every minute or two all night at a held speed 10, and
- * that column drew it as jitter between 4 and 45 W -- technically visible,
- * readable as nothing. `flips` is the firmware's own count of confirmed
- * run/stop edges per bucket; any bucket with one gets the outage-red tint
- * under the line, so a cycling night reads as a red block, not noise.
- */
-export function drawPower(canvas: HTMLCanvasElement, s: Series, index: number): void {
-  const surf = surface(canvas);
-  if (!surf) return;
-  const { c, W, H } = surf;
-  if (!hasData(s.w)) {
-    placeholder(surf, 'no plug data yet');
-    return;
-  }
-  // Scale to the BAND, not just the snapshot line: a bucket whose meter
-  // swung 4->45 W has to fit on the axis or the range it describes is a lie.
-  const sc = limits([...s.w, ...s.wmin, ...s.wmax], MIN_SPAN);
-  if (!sc) {
-    placeholder(surf, 'no plug data yet');
-    return;
-  }
-  frame(surf, s, sc, (v) => v.toFixed(1), false);
-  // The min-max range the meter saw inside each 5-minute bucket. This is the
-  // half the snapshot line cannot carry: on 2026-08-20 the fan alternated
-  // between stopped and flat out inside every bucket, and one sample per
-  // bucket drew that as a jittery line at whatever instant it landed on.
-  c.fillStyle = 'rgba(232,131,74,.20)';
-  let from = 0;
-  while (from < s.n) {
-    const lo = at(s.wmin, from);
-    const hi = at(s.wmax, from);
-    if (lo === null || hi === null) {
-      from++;
-      continue;
-    }
-    let to = from;
-    while (to + 1 < s.n && at(s.wmin, to + 1) !== null && at(s.wmax, to + 1) !== null &&
-           !s.gap[to + 1])
-      to++;
-    c.beginPath();
-    for (let i = from; i <= to; i++) c.lineTo(xAt(s, i, W), yAt(at(s.wmax, i)!, H, sc));
-    for (let i = to; i >= from; i--) c.lineTo(xAt(s, i, W), yAt(at(s.wmin, i)!, H, sc));
-    c.closePath();
-    c.fill();
-    from = to + 1;
-  }
-  c.fillStyle = 'rgba(224,169,169,.22)';
-  let i = 0;
-  while (i < s.n) {
-    const f = at(s.flips, i);
-    if (f !== null && f > 0) {
-      let j = i;
-      // A run ends at an outage gap, the same rule as the battery tint: the
-      // shading must not claim the fan cycled while the device was dark.
-      while (j < s.n && (at(s.flips, j) ?? 0) > 0 && (j === i || !s.gap[j])) j++;
-      const x0 = xAt(s, i, W);
-      c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1.5, H - 2);
-      i = j;
-    } else {
-      i++;
-    }
-  }
-  line(surf, s, sc, s.w, SERIES_COLOURS.power, false, 2);
-  crosshair(surf, s, index);
-}
-
-export function drawBattery(canvas: HTMLCanvasElement, s: Series, index: number): void {
-  const surf = surface(canvas);
-  if (!surf) return;
-  const { c, W, H } = surf;
-  if (!hasData(s.bv)) {
-    placeholder(surf, 'battery history is only kept for the last 24 hours');
-    return;
-  }
-  // 0.1 V, not the 2-unit default: a LiPo's ENTIRE working range is about
-  // 0.7 V, so the temperature/humidity floor would flatten every real
-  // discharge curve into a straight line.
-  const sc = limits(s.bv, 0.1);
-  if (!sc) {
-    placeholder(surf, 'no battery data');
-    return;
-  }
-  // Shade the stretches the charger was active, so a rising line reads as
-  // "charging" rather than "mystery".
-  c.fillStyle = 'rgba(59,130,246,.14)';
-  let i = 0;
-  while (i < s.n) {
-    if (s.chg[i] === 1) {
-      let j = i;
-      // A shading run ends at an outage gap: whether the charger ran while
-      // the device was dark is unknown, so the tint must not claim it did.
-      // (Night shading deliberately differs -- night is clock-derived and
-      // true regardless of whether the device was awake to record it.)
-      while (j < s.n && s.chg[j] === 1 && (j === i || !s.gap[j])) j++;
-      const x0 = xAt(s, i, W);
-      c.fillRect(x0, 0, xAt(s, j - 1, W) - x0 || 1, H - 2);
-      i = j;
-    } else {
-      i++;
-    }
-  }
-  frame(surf, s, sc, (v) => v.toFixed(2), false);
-  line(surf, s, sc, s.bv, PU, false, 2);
-  crosshair(surf, s, index);
-}
-
 export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): void {
   const surf = surface(canvas);
   if (!surf) return;
@@ -605,14 +465,3 @@ export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): vo
     c.fillText(label, x, 14);
   }
 }
-
-
-export const SERIES_COLOURS = {
-  fan: AC,
-  humidity: RH,
-  pressure: OK,
-  battery: PU,
-  power: '#e8834a',
-  voc: '#22a06b',
-  nox: '#b98add',
-} as const;

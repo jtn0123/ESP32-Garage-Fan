@@ -5,7 +5,7 @@
 // mock device first, then pinned here.
 
 import { describe, expect, it } from 'vitest';
-import { limits } from '../src/charts.js';
+import { limits, unsignedZero } from '../src/charts.js';
 import { isNewer } from '../src/console.js';
 import { battReadout, powerReadout, speedReadout } from '../src/history_view.js';
 import { plugBit, plugColour } from '../src/status_bits.js';
@@ -50,6 +50,34 @@ describe('limits: minimum y-span', () => {
     for (const vals of [[5], [0, 0], [-3, -3, -3]]) {
       const sc = limits(vals)!;
       expect(sc.max - sc.min).toBeGreaterThan(0);
+    }
+  });
+
+  it('does not pad a quantity below the least value it can take', () => {
+    // Plug watts from an idle fan, and a gas index sitting at zero: the
+    // padding drew these axes down to -1.3 W and -13.
+    expect(limits([0, 4.2, 23.4], 2, 0)!.min).toBe(0);
+    expect(limits([0, 0, 3], 2, 0)!.min).toBe(0);
+    const flat = limits([0, 0, 0], 2, 0)!;
+    expect(flat.min).toBe(0);
+    expect(flat.max).toBeGreaterThan(0);
+  });
+
+  it('pads as before when the data sits well clear of the bound', () => {
+    expect(limits([40, 50], 2, 0)).toEqual(limits([40, 50]));
+  });
+});
+
+describe('unsignedZero: tick labels', () => {
+  it('drops the sign from a tick that rounds to zero', () => {
+    expect(unsignedZero('-0')).toBe('0');
+    expect(unsignedZero('-0.0')).toBe('0.0');
+    expect(unsignedZero('-0°')).toBe('0°');
+  });
+
+  it('leaves real negatives and ordinary values alone', () => {
+    for (const label of ['-0.1', '-0.05', '-1', '-10°', '0', '0.0', '12', '-03']) {
+      expect(unsignedZero(label)).toBe(label);
     }
   });
 });

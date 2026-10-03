@@ -182,8 +182,12 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
    the prose caption -- knowing which trace is the SHT41 is not optional. */
 .leg{font:500 10px var(--mono);letter-spacing:.04em;color:var(--dim);white-space:nowrap}
 .leg b{font-weight:700;margin-right:10px}
+/* The overnight stripes' key. Text in the label ink, the tint in a swatch: the
+   stripe colour is too faint to carry a word. */
+.leg b.night{color:var(--dim);font-weight:500}
+.leg b.night i{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px;background:rgba(255,255,255,.07);border:1px solid var(--bd)}
 .cr{margin-left:auto;font:500 11.5px var(--mono);color:var(--tx);padding-left:12px}
-.srow{display:flex;align-items:baseline;margin:10px 0 0}
+.srow{display:flex;align-items:baseline;gap:12px;margin:10px 0 0}
 .srow .cn{font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim)}
 #plots canvas{display:block;width:100%}
 #cv_t{height:250px}
@@ -192,14 +196,17 @@ body.offline #console,body.offline #settings{filter:saturate(.25)}
 
 /* ---- odometer ---- */
 #odo{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--ln);border-top:1px solid var(--ln);margin-top:28px}
-#odo div{background:var(--bg);padding:16px 4px 14px;text-align:center}
+/* `>`: a bare `#odo div` also matched each tile's label and value rows, so the
+   padding landed three times over and a tile stood ~150 px tall. */
+#odo>div{background:var(--bg);padding:16px 4px 14px;text-align:center}
 #odo .ov{display:flex;align-items:baseline;justify-content:center;gap:6px;margin-top:6px}
 #odo .ov b{font:600 26px/1 var(--sans);letter-spacing:-.02em;font-weight:600}
 #odo .ov i{font-size:12px;color:var(--dim);font-style:normal}
 
 /* ---- status bar ---- */
 #statwrap{position:relative;margin-top:22px}
-#stats{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font:500 11px var(--mono);letter-spacing:.04em}
+#stats{display:flex;flex-direction:column;gap:22px;font:500 11px var(--mono);letter-spacing:.04em}
+#stats>div{display:flex;gap:22px;justify-content:center;flex-wrap:wrap}
 #stats span.bit{cursor:help;display:flex;gap:6px;border-bottom:1px dotted var(--bd);padding-bottom:2px}
 #stats span.bit>b{color:var(--dim);font-weight:500}
 #tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:12px;width:440px;max-width:calc(100vw - 40px);background:var(--pop);border:1px solid var(--pbd);border-radius:7px;padding:11px 14px;box-shadow:0 10px 30px rgba(0,0,0,.55);z-index:5}
@@ -345,7 +352,7 @@ body{padding:0 16px 32px}
 #scstats{grid-template-columns:repeat(3,1fr)}
 #capgrid{grid-template-columns:repeat(7,1fr)}
 #odo{grid-template-columns:repeat(2,1fr)}
-#odo div:last-child{grid-column:1/-1}
+#odo>div:last-child{grid-column:1/-1}
 .grp{grid-template-columns:1fr;gap:14px}
 .grow{flex-direction:column;align-items:flex-start;gap:10px}
 .grow .rl{max-width:none}

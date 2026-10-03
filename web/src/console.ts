@@ -10,7 +10,6 @@
 // its settings painter through setSettingsPainter to keep the dependency one
 // way.
 
-import { SERIES_COLOURS } from './charts.js';
 import { $, at, el, show } from './dom.js';
 import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
 import { paintChartTitle } from './history_view.js';
@@ -19,7 +18,7 @@ import { liveReason } from './reason.js';
 import { paintBits } from './status_bits.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, sampleIndex, view, type RowKey } from './state.js';
-import { AC, FAI, OK, OR, OUT, PU, TX } from './theme.js';
+import { AC, FAI, OK, OR, OUT, PU, SERIES_COLOURS, TX } from './theme.js';
 import type { DeviceState } from './types.js';
 
 let settingsPainter: (() => void) | null = null;
