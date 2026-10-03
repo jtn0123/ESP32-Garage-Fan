@@ -121,19 +121,21 @@ export function cardTight(usedMb: number, totalMb: number): boolean {
 }
 
 /**
- * One tick label, at the resolution the window can actually distinguish.
+ * One time-axis label, worded by the spacing of the ticks around it.
  *
- * Three tiers, because one format cannot serve 24 hours and 60 days. A day of
- * samples wants the clock; a week wants the date AND the hour, or two ticks
- * both read "8/3" and the axis looks broken; a month or two wants the date
- * alone -- the hour is noise there (rows are 2.6 to 5.1 hours apart, so "8/3
- * 14h" claims a precision the row does not have) and it is what made the
- * 30D/60D axis unreadable at phone width.
+ * Ticks under a day apart are clock times, except the one at midnight, which
+ * names the day it opens ("Wed 30") -- the only label on a 24 h axis that says
+ * which day the hours belong to. Daily and two-day ticks are all midnights, so
+ * they are all days. Weekly and wider ticks are dates ("9/14"): they always
+ * fall on a Monday, so a weekday would say the same word every time.
  */
-export function axisLabel(t: number, days: number): string {
+export function tickLabel(t: number, stepS: number): string {
   const d = new Date(t * 1000);
-  const hh = String(d.getHours()).padStart(2, '0');
-  if (days <= 1) return `${hh}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const date = `${d.getMonth() + 1}/${d.getDate()}`;
-  return days <= 7 ? `${date} ${d.getHours()}h` : date;
+  const midnight = d.getHours() === 0 && d.getMinutes() === 0;
+  if (stepS < 86400 && !midnight) return clock(t);
+  if (stepS <= 2 * 86400) {
+    const w = WEEKDAYS[d.getDay()] ?? '';
+    return `${w.charAt(0)}${w.slice(1).toLowerCase()} ${d.getDate()}`;
+  }
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }

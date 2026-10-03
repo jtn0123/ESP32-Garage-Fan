@@ -1,16 +1,18 @@
-// The chart engine: the drawing primitives, temperature with its differential
-// band, restart marks and the shared time axis. The toggleable rows under the
+// The chart engine: the drawing primitives, and temperature with its
+// differential band and restart marks. The toggleable rows under the
 // temperature chart (fan, humidity, pressure, battery, power, gas) draw with
-// these primitives from chart_rows.ts.
+// these primitives from chart_rows.ts; the shared time axis is time_axis.ts.
 //
 // Hand-rolled canvas rather than a charting library, for the same reason the
 // page has no framework: the whole thing ships inside the firmware image.
 
 import { at } from './dom.js';
-import { axisLabel } from './format.js';
 import type { Series } from './series.js';
+import { TIGHT_PX, niceScale, resolution, type Scale } from './ticks.js';
 import type { BootMark } from './types.js';
 import { DIM, OR, OUT, PAD_LEFT as L, PAD_RIGHT as R } from './theme.js';
+
+export type { Scale } from './ticks.js';
 
 /** Restart stems and their labels -- the same red family as the outage band. */
 const RESTART_C = '#e0a9a9';
@@ -40,12 +42,6 @@ export function surface(canvas: HTMLCanvasElement): Surface | null {
   return { c, W: w, H: h };
 }
 
-export interface Scale {
-  min: number;
-  max: number;
-  ticks: number[];
-}
-
 /**
  * Smallest y-range a chart may auto-scale to.
  *
@@ -60,14 +56,30 @@ export interface Scale {
 export const MIN_SPAN = 2;
 
 /**
+ * Headroom above and below the data, as a fraction of its span.
+ *
+ * 5 %, down from 12 %. The 12 % existed to keep the line off the top and
+ * bottom gridlines back when those sat at the padded min and max. Gridlines
+ * are round values inside the range now, so the margin buys nothing but
+ * squeeze: at 12 % a 66 px row lost a fifth of its height to it, and four
+ * battery ticks landed 13 px apart -- labels touching labels.
+ */
+const HEADROOM = 0.05;
+
+/**
  * `lowest` is the least value the quantity can physically take. Watts and the
- * gas indices cannot go negative, but the 12 % padding below the data drew
- * their axes down to -1.3 W, -13 and "-0" anyway.
+ * gas indices cannot go negative, but the padding below the data drew their
+ * axes down to -1.3 W, -13 and "-0" anyway.
+ *
+ * The gridlines are round values inside the padded range (see niceScale), no
+ * finer than minSpan says the labels can resolve, spaced for a plot `plotPx`
+ * tall -- 50 on a 66 px row (see plotH).
  */
 export function limits(
   values: readonly (number | null)[],
   minSpan = MIN_SPAN,
   lowest = -Infinity,
+  plotPx = 50,
 ): Scale | null {
   let mn = Infinity;
   let mx = -Infinity;
@@ -84,12 +96,13 @@ export function limits(
     mn = mid - minSpan / 2;
     mx = mid + minSpan / 2;
   }
-  const pad = (mx - mn) * 0.12;
-  return scale(Math.max(mn - pad, lowest), mx + pad);
+  const pad = (mx - mn) * HEADROOM;
+  return niceScale(Math.max(mn - pad, lowest), mx + pad, resolution(minSpan), plotPx, lowest);
 }
 
+/** A fixed scale with gridlines at both ends and the middle: the fan's 0 / 6 / 12. */
 export function scale(min: number, max: number): Scale {
-  return { min, max, ticks: [min, (min + max) / 2, max] };
+  return { min, max, ticks: [min, (min + max) / 2, max], dp: 0 };
 }
 
 // Position by the sample's time fraction, not its index: after a merge with
@@ -110,8 +123,11 @@ export function xAtTime(s: Series, t: number, W: number): number | null {
   return L + ((t - t0) / (tn - t0)) * (W - L - R);
 }
 
+/** Height of the band the data is drawn in: 10 px clear above, 6 below. */
+export const plotH = (H: number): number => H - 16;
+
 export const yAt = (v: number, H: number, s: Scale): number =>
-  H - 6 - ((v - s.min) * (H - 16)) / (s.max - s.min);
+  H - 6 - ((v - s.min) * plotH(H)) / (s.max - s.min);
 
 /**
  * Coarsest row spacing the overnight stripes still describe honestly.
@@ -181,12 +197,15 @@ function shadeOutages({ c, W, H }: Surface, s: Series): void {
   }
 }
 
-/** Gridlines, y-axis labels, and the shading behind them. */
+/**
+ * Gridlines, y-axis labels, and the shading behind them. Labels carry the
+ * scale's own decimals (the step's), so a 10 W step reads "10", not "10.0".
+ */
 export function frame(
   surf: Surface,
   s: Series,
   sc: Scale,
-  fmt: (v: number) => string,
+  unit: string,
   shadeNight: boolean,
 ): void {
   const { c, W, H } = surf;
@@ -197,13 +216,19 @@ export function frame(
   c.fillStyle = DIM;
   c.font = '10px "JetBrains Mono",monospace';
   c.textAlign = 'right';
+  // Every gridline is drawn; a label only where it clears the last one. The
+  // picker already keeps them TIGHT_PX apart, so this only bites on a
+  // fallback scale -- stacked 10 px digits read as one smudge.
+  let lastY = Infinity;
   for (const v of sc.ticks) {
     const y = yAt(v, H, sc);
     c.beginPath();
     c.moveTo(L, y);
     c.lineTo(W - R, y);
     c.stroke();
-    c.fillText(unsignedZero(fmt(v)), L - 5, y + 3);
+    if (lastY - y < TIGHT_PX - 0.5) continue;
+    c.fillText(unsignedZero(v.toFixed(sc.dp) + unit), L - 5, y + 3);
+    lastY = y;
   }
 }
 
@@ -405,12 +430,12 @@ export function drawTemperature(
     placeholder(surf, 'waiting for data — one sample every 5 minutes');
     return;
   }
-  const sc = limits([...s.tf, ...s.of]);
+  const sc = limits([...s.tf, ...s.of], MIN_SPAN, -Infinity, plotH(H));
   if (!sc) {
     placeholder(surf, 'no data');
     return;
   }
-  frame(surf, s, sc, (v) => `${v.toFixed(0)}°`, shadesNights(s));
+  frame(surf, s, sc, '°', shadesNights(s));
 
   fillDifferential(surf, s, sc);
 
@@ -437,31 +462,5 @@ export function drawTemperature(
       c.arc(x, y, 3.5, 0, Math.PI * 2);
       c.fill();
     }
-  }
-}
-
-export function drawAxis(canvas: HTMLCanvasElement, s: Series, days: number): void {
-  const surf = surface(canvas);
-  if (!surf) return;
-  const { c, W } = surf;
-  if (s.n < 2) return;
-  c.fillStyle = DIM;
-  c.font = '10px "JetBrains Mono",monospace';
-  c.textAlign = 'center';
-  // Label density follows the available width: ~120px apart on a desktop,
-  // tighter on a phone, never fewer than three.
-  const perLabel = W < 520 ? 70 : 120;
-  const step = Math.max(1, Math.ceil(s.n / Math.max(3, Math.floor((W - L - R) / perLabel))));
-  // Time-proportional x means index steps can land labels unevenly around a
-  // gap; the lastX guard drops any label that would crowd its neighbour.
-  let lastX = -Infinity;
-  for (let i = 0; i < s.n; i += step) {
-    const t = s.ts(i);
-    if (t === null) continue;
-    const label = axisLabel(t, days);
-    const x = Math.min(Math.max(xAt(s, i, W), 22), W - 24);
-    if (x - lastX < perLabel * 0.6) continue;
-    lastX = x;
-    c.fillText(label, x, 14);
   }
 }

@@ -8,11 +8,12 @@
 // write only to the DOM.
 
 import { drawBattery, drawFanSpeed, drawPower, drawSimple } from './chart_rows.js';
-import { drawAxis, drawTemperature, shadesNights } from './charts.js';
+import { drawTemperature, shadesNights } from './charts.js';
 import { $, at, el } from './dom.js';
 import { ago, hoursMinutes, moment, rangeLabel, rangeNoun } from './format.js';
 import type { Series } from './series.js';
 import { sampleIndex, view } from './state.js';
+import { drawAxis } from './time_axis.js';
 import { OR, OUT, SERIES_COLOURS } from './theme.js';
 
 /** One entry of a series legend: a coloured line sample and the sensor name. */
@@ -223,7 +224,7 @@ export function drawAll(): void {
     // 0.5 hPa floor: the ticks carry one decimal, so a smaller range is still
     // legible in the labels and does not need flattening.
     drawSimple($<HTMLCanvasElement>('cv_p'), s, s.hpa, SERIES_COLOURS.pressure,
-      'no pressure data', view.scrub, { minSpan: 0.5, fmt: (v) => v.toFixed(1) });
+      'no pressure data', view.scrub, { minSpan: 0.5 });
   }
   if (view.rows.battery) drawBattery($<HTMLCanvasElement>('cv_b'), s, view.scrub);
   if (view.rows.power) drawPower($<HTMLCanvasElement>('cv_w'), s, view.scrub);
@@ -240,6 +241,6 @@ export function drawAll(): void {
     drawSimple($<HTMLCanvasElement>('cv_n'), s, warming ? s.noxr : s.nox, SERIES_COLOURS.nox,
       'no NOx sensor data', view.scrub, { lowest: 0 });
   }
-  drawAxis($<HTMLCanvasElement>('cv_ax'), s, view.days);
+  drawAxis($<HTMLCanvasElement>('cv_ax'), s);
   paintReadouts();
 }
