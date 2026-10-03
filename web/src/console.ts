@@ -15,6 +15,7 @@ import { $, at, el, show } from './dom.js';
 import { ago, airflow, clock, hoursMinutes, moment, signed } from './format.js';
 import { paintChartTitle } from './history_view.js';
 import { paintRail } from './rail.js';
+import { liveReason } from './reason.js';
 import { paintBits } from './status_bits.js';
 import { drawScope, msPerDivision, type Waveform } from './pwm.js';
 import { ROW_IDS, sampleIndex, view, type RowKey } from './state.js';
@@ -178,7 +179,7 @@ export function paintHero(): void {
   }
   paintChartTitle();
 
-  $('reason').textContent = reason(delta, scrubbing, i);
+  $('reason').textContent = reason(garage, delta, scrubbing, i);
 }
 
 /**
@@ -194,10 +195,9 @@ function loggedSpeed(speed: number | undefined): string {
   return speed > 0 ? `running at ${speed}` : 'off';
 }
 
-function reason(delta: number | null, scrubbing: boolean, i: number): string {
+function reason(garage: number | null, delta: number | null, scrubbing: boolean, i: number): string {
   const s = view.state;
   if (!s) return '';
-  const rest = s.auto_min > 0 ? `speed ${s.auto_min}` : 'off';
 
   if (scrubbing && view.series) {
     const t = view.series.ts(i);
@@ -213,20 +213,7 @@ function reason(delta: number | null, scrubbing: boolean, i: number): string {
     // than three lines at 320 px, and this is at most three.
     return `At ${when} the garage was ${gap}°F hotter than the yard and the fan was ${fanWas}.`;
   }
-  if (delta === null) {
-    return 'No outdoor reading yet — auto holds the last speed rather than guessing. The fan fetches the outside temperature from open-meteo every 10 minutes.';
-  }
-  if (!s.auto) {
-    return `Auto is off — the fan is at ${s.speed > 0 ? `speed ${s.speed}` : 'off'} because you set it by hand. Turn auto back on to let the differential drive it again.`;
-  }
-  const gap = delta.toFixed(1);
-  if (delta >= s.on_f) {
-    return `Garage is ${gap}°F hotter than the yard — past the +${s.on_f}° engage point, so auto is holding speed ${s.auto_max}. It falls back to ${rest} when the gap drops under +${s.off_f}°, though never before 15 minutes of running.`;
-  }
-  if (delta <= s.off_f) {
-    return `Garage is only ${gap}°F hotter than the yard — under the +${s.off_f}° release point, so auto has dropped the fan to ${rest}. It engages speed ${s.auto_max} again above +${s.on_f}°.`;
-  }
-  return `Gap is ${gap}°F, inside the +${s.off_f}°/+${s.on_f}° deadband — auto is holding ${s.speed > 0 ? `speed ${s.speed}` : 'off'} until it crosses a threshold, so the fan does not chatter.`;
+  return liveReason(s, garage);
 }
 
 export function paintStats(): void {

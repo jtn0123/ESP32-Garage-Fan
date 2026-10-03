@@ -23,6 +23,13 @@ STATE: Json = {
     "auto_min": 0,
     "on_f": 2.5,
     "off_f": 1.5,
+    # The winter limits, as fan/control reports them: both switched off, the
+    # temperatures kept. `limit` is driven by the SCEN knob of the same name.
+    "floor_on": False,
+    "floor_f": 64.0,
+    "start_on": False,
+    "start_f": 74.0,
+    "limit": None,
     "outside_f": 73.2,
     "fw": "1.14.23",
     "slot": "ota_0",
@@ -121,6 +128,10 @@ SCEN: Json = {
     # itself on and off at a held speed (the 2026-08-20 night), "none" no
     # meter at all
     "plug": "ok",
+    # Which absolute limit the thermostat reports as in charge: "floor" (the
+    # garage is at the low limit), "start" (warmer than the yard but under the
+    # start point), or "none". Winter states; summer hardware never shows them.
+    "limit": "none",
 }
 
 
@@ -157,6 +168,7 @@ SCEN_SPEC: dict[str, ScenSpec] = {
     "plug": ("choice", "ok", "bad", "cycling", "none"),
     "ota_fw": ("version",),  # X.Y.Z or none
     "fw": ("version",),  # what the board reports; resets after an /update
+    "limit": ("choice", "none", "floor", "start"),
 }
 
 

@@ -120,11 +120,15 @@ void state_json(char* out, size_t cap) {
   } else {
     snprintf(plugs, sizeof(plugs), "null");
   }
+  char limit[12] = "null";
+  if (const char* name = fan::limit())
+    snprintf(limit, sizeof(limit), "\"%s\"", name);
   // Keys are the WK_* macros generated from web/src/types.ts -- rename a
   // field there and this stops compiling instead of silently drifting.
   snprintf(out, cap,
            "{" WK_SPEED "%d," WK_AUTO "%s," WK_AUTO_MAX "%d," WK_AUTO_MIN "%d," WK_ON_F
-           "%.1f," WK_OFF_F "%.1f," WK_OUTSIDE_F "%s," WK_FW "\"%s\"," WK_SLOT
+           "%.1f," WK_OFF_F "%.1f," WK_FLOOR_ON "%s," WK_FLOOR_F "%.1f," WK_START_ON
+           "%s," WK_START_F "%.1f," WK_LIMIT "%s," WK_OUTSIDE_F "%s," WK_FW "\"%s\"," WK_SLOT
            "\"%s\"," WK_CONFIRMED "%s," WK_UNHEALTHY_BOOTS "%lu," WK_SENSOR "%s," WK_LAST_RESET
            "\"%s\"," WK_BOOTS "%lu," WK_PREV_DEATH "\"%s\"," WK_SD_Q "%s," WK_SD_TOTAL_MB
            "%lu," WK_SD_USED_MB "%lu," WK_SD_FREE_MB "%lu," WK_BATT "%s," WK_RSSI "%d," WK_DROPS
@@ -132,8 +136,9 @@ void state_json(char* out, size_t cap) {
            "%s," WK_GAS_SPD "%d," WK_GAS_VOC "%d," WK_GAS_ACTIVE "%s," WK_WH_TODAY
            "%.1f," WK_COST_KWH "%.3f," WK_ACTUATOR_FAULT "%s}",
            fan::speed(), fan::auto_on() ? "true" : "false", fan::auto_max(), fan::auto_min(),
-           fan::engage_f(), fan::release_f(), outside, kFwVersion, run ? run->label : "?",
-           ota_rollback_image_confirmed() ? "true" : "false",
+           fan::engage_f(), fan::release_f(), fan::floor_on() ? "true" : "false", fan::floor_f(),
+           fan::start_on() ? "true" : "false", fan::start_f(), limit, outside, kFwVersion,
+           run ? run->label : "?", ota_rollback_image_confirmed() ? "true" : "false",
            (unsigned long)ota_rollback_unhealthy_boots(), climate::ok() ? "true" : "false",
            crashlog::last_death(), (unsigned long)crashlog::boots(), crashlog::prev_death(),
            sdcard::quarantined() ? "true" : "false", (unsigned long)sdcard::total_mb(),

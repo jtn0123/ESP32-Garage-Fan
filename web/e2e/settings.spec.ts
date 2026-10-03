@@ -40,7 +40,7 @@ function dialogLog(
 
 test('every group renders', async ({ page }) => {
   await openSettings(page);
-  for (const title of ['AUTO MODE', 'SENSORS', 'NETWORK', 'POWER', 'DEVICE', 'UPDATE']) {
+  for (const title of ['AUTO MODE', 'TEMPERATURE LIMITS', 'SENSORS', 'NETWORK', 'POWER', 'DEVICE', 'UPDATE']) {
     await expect(page.locator('#groups')).toContainText(title);
   }
 });
@@ -129,6 +129,58 @@ test('the gas boost controls reach the controller with their own keys', async ({
   const spd = page.locator('#groups .grow', { hasText: 'Gas boost · speed' });
   await spd.locator('button').last().click();
   await expect.poll(() => posts.some((r) => new URLSearchParams(r.postData() ?? '').has('gasspd'))).toBe(true);
+});
+
+test('the temperature limits reach the controller with their own keys', async ({ page }) => {
+  await openSettings(page);
+  const posts = recordRequests(page, /\/api\/config/);
+  const sent = (key: string) => posts.some((r) => new URLSearchParams(r.postData() ?? '').has(key));
+  // Each switch, and each stepper, on its own key -- and each switch actually
+  // flips, because a winter setting that only changes the label leaves the fan
+  // venting the garage down to outdoor temperature.
+  for (const [label, key] of [['Low limit', 'flooron'], ['Start above', 'starton']] as const) {
+    const tgl = page.locator('#groups .grow', { hasText: label }).first().locator('button.tgl');
+    await expect(tgl).toHaveAttribute('aria-checked', 'false');
+    await tgl.click();
+    await expect(tgl).toHaveAttribute('aria-checked', 'true');
+    await expect.poll(() => sent(key)).toBe(true);
+    await tgl.click(); // leave it as found
+    await expect(tgl).toHaveAttribute('aria-checked', 'false');
+  }
+  for (const [label, key, before, after] of [
+    ['Low limit · temperature', 'floorf', '64 °F', '63 °F'],
+    ['Start above · temperature', 'startf', '74 °F', '75 °F'],
+  ] as const) {
+    const row = page.locator('#groups .grow', { hasText: label });
+    const value = row.locator('.stp span');
+    await expect(value).toHaveText(before);
+    // Away from the other limit: down for the floor, up for the start point.
+    const away = key === 'floorf' ? /^decrease / : /^increase /;
+    const back = key === 'floorf' ? /^increase / : /^decrease /;
+    await row.getByRole('button', { name: away }).click();
+    await expect(value).toHaveText(after);
+    await expect.poll(() => sent(key)).toBe(true);
+    await row.getByRole('button', { name: back }).click();
+    await expect(value).toHaveText(before);
+  }
+});
+
+test('the limit steppers keep the low limit under the start point', async ({ page }) => {
+  await openSettings(page);
+  // 64 and 74 sit ten apart; eight presses of the floor's + must stop two
+  // short of the start point rather than cross it.
+  const floor = page.locator('#groups .grow', { hasText: 'Low limit · temperature' });
+  const value = floor.locator('.stp span');
+  try {
+    for (let i = 0; i < 10; i++) {
+      const was = await value.textContent();
+      await floor.getByRole('button', { name: /^increase / }).click();
+      if (i < 8) await expect(value).not.toHaveText(was ?? '');
+    }
+    await expect(value).toHaveText('72 °F');
+  } finally {
+    await page.request.post('/api/config?floorf=64');
+  }
 });
 
 test('the electricity price stepper reaches the controller as ckwh', async ({ page }) => {

@@ -27,6 +27,34 @@ test.afterEach(async ({ page }) => {
   await page.request.post('/api/set?speed=9');
 });
 
+// The winter states. The mock's garage reads ~75 °F, so the limits are set
+// around that reading rather than at their 64/74 defaults, and put back after.
+// Each also switches auto on: a limit only speaks in auto, and specs elsewhere
+// (the auto pill, the first settings toggle) leave it off on this worker's mock.
+
+test('the low limit, not the gap, explains a resting fan', async ({ page }) => {
+  await page.request.post('/api/config?auto=1&flooron=1&floorf=100');
+  try {
+    await scen(page, { limit: 'floor' });
+    await openConsole(page);
+    await expect(page.locator('#reason')).toContainText('down to your 100° low limit');
+    await expect(page.locator('#reason')).toContainText('rather than vent it any colder');
+  } finally {
+    await page.request.post('/api/config?flooron=0&floorf=64');
+  }
+});
+
+test('the start gate explains a warm garage being left alone', async ({ page }) => {
+  await page.request.post('/api/config?auto=1&starton=1&startf=100');
+  try {
+    await scen(page, { limit: 'start' });
+    await openConsole(page);
+    await expect(page.locator('#reason')).toContainText('under your 100° start point');
+  } finally {
+    await page.request.post('/api/config?starton=0&startf=74');
+  }
+});
+
 test('an unmounted card still renders the page', async ({ page }) => {
   await scen(page, { card: 'false' });
   await openConsole(page);

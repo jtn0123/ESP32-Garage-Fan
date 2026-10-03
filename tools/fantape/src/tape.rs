@@ -61,6 +61,9 @@ pub struct AutoDecision {
     pub dwell_of: u32,
     pub target: i32,
     pub gas: bool,
+    /// The absolute limit overriding the differential (`floor` or `start`),
+    /// None when the differential decided -- or the line predates 1.28.0.
+    pub limit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -208,6 +211,9 @@ pub fn parse_line(line: &str) -> Option<Record> {
             dwell_of: dwell(t).map(|d| d.1).unwrap_or(0),
             target: num(t, "tgt=").unwrap_or(-1),
             gas: flag(t, "gas="),
+            limit: field(t, "lim=")
+                .filter(|v| !v.is_empty() && *v != "-")
+                .map(str::to_string),
         })),
         _ => Some(Record::Other { epoch, tag, text }),
     }
@@ -308,6 +314,25 @@ mod tests {
                 assert_eq!(a.dwell, 12);
             }
             other => panic!("not an auto line: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_limit_holding_the_fan_is_read_and_its_absence_is_none() {
+        let winter =
+            "1 2 auto in=63.8 out=30.0 d=+33.8 latch=off dwell=0/30 tgt=0 gas=off lim=floor";
+        match parse_line(winter) {
+            Some(Record::Auto(a)) => assert_eq!(a.limit.as_deref(), Some("floor")),
+            other => panic!("not an auto line: {other:?}"),
+        }
+        for line in [
+            "1 2 auto in=81.0 out=71.6 d=+9.4 latch=on dwell=12/30 tgt=10 gas=off lim=-",
+            AUTO, // pre-1.28.0: no lim= at all
+        ] {
+            match parse_line(line) {
+                Some(Record::Auto(a)) => assert_eq!(a.limit, None),
+                other => panic!("not an auto line: {other:?}"),
+            }
         }
     }
 

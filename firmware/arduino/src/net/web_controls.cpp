@@ -47,11 +47,24 @@ static void handle_config() {
   };
   const RealField reals[] = {{"ckwh", 0.01f, 2, odometer::set_cost_per_kwh},
                              {"onf", 0.5f, 20, fan::set_engage_f},
-                             {"offf", 0, 20, fan::set_release_f}};
-  long iv[4] = {}, automatic = 0, gas = 0;
-  float rv[3] = {};
+                             {"offf", 0, 20, fan::set_release_f},
+                             {"floorf", 32, 100, fan::set_floor_f},
+                             {"startf", 32, 120, fan::set_start_f}};
+  struct BoolField {
+    const char* name;
+    void (*set)(bool);
+  };
+  const BoolField bools[] = {{"auto", fan::set_auto},
+                             {"gason", fan::set_gas_boost},
+                             {"flooron", fan::set_floor_on},
+                             {"starton", fan::set_start_on}};
+  constexpr size_t kInts = sizeof(ints) / sizeof(ints[0]);
+  constexpr size_t kReals = sizeof(reals) / sizeof(reals[0]);
+  constexpr size_t kBools = sizeof(bools) / sizeof(bools[0]);
+  long iv[kInts] = {}, bv[kBools] = {};
+  float rv[kReals] = {};
   // Validate every supplied field before any setter can persist a change.
-  for (size_t i = 0; i < 4; ++i) {
+  for (size_t i = 0; i < kInts; ++i) {
     const auto& f = ints[i];
     if (g_http->hasArg(f.name) &&
         !numeric_arg::integer(g_http->arg(f.name).c_str(), f.low, f.high, &iv[i])) {
@@ -59,7 +72,7 @@ static void handle_config() {
       return;
     }
   }
-  for (size_t i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < kReals; ++i) {
     const auto& f = reals[i];
     if (g_http->hasArg(f.name) &&
         !numeric_arg::real(g_http->arg(f.name).c_str(), f.low, f.high, &rv[i])) {
@@ -67,14 +80,13 @@ static void handle_config() {
       return;
     }
   }
-  if (g_http->hasArg("auto") &&
-      !numeric_arg::integer(g_http->arg("auto").c_str(), 0, 1, &automatic)) {
-    bad_argument("auto");
-    return;
-  }
-  if (g_http->hasArg("gason") && !numeric_arg::integer(g_http->arg("gason").c_str(), 0, 1, &gas)) {
-    bad_argument("gason");
-    return;
+  for (size_t i = 0; i < kBools; ++i) {
+    const auto& f = bools[i];
+    if (g_http->hasArg(f.name) &&
+        !numeric_arg::integer(g_http->arg(f.name).c_str(), 0, 1, &bv[i])) {
+      bad_argument(f.name);
+      return;
+    }
   }
   if (g_http->hasArg("newtoken")) {
     if (!web_gate::guard_token(*g_http, g_token))
@@ -90,14 +102,13 @@ static void handle_config() {
     }
     snprintf(g_token, g_token_cap, "%s", next.c_str());
   }
-  if (g_http->hasArg("auto"))
-    fan::set_auto(automatic != 0);
-  if (g_http->hasArg("gason"))
-    fan::set_gas_boost(gas != 0);
-  for (size_t i = 0; i < 4; ++i)
+  for (size_t i = 0; i < kBools; ++i)
+    if (g_http->hasArg(bools[i].name))
+      bools[i].set(bv[i] != 0);
+  for (size_t i = 0; i < kInts; ++i)
     if (g_http->hasArg(ints[i].name))
       ints[i].set(static_cast<int>(iv[i]));
-  for (size_t i = 0; i < 3; ++i)
+  for (size_t i = 0; i < kReals; ++i)
     if (g_http->hasArg(reals[i].name))
       reals[i].set(rv[i]);
   fan::enforce_hysteresis_gap();

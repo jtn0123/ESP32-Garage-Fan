@@ -227,6 +227,8 @@ class H(BaseHTTPRequestHandler):
 
     def _state(self, _query: Query) -> None:
         STATE["actuator_fault"] = SCEN["actuator_fault"]
+        # fan::limit() is null in manual mode: no thermostat, nothing overridden.
+        STATE["limit"] = SCEN["limit"] if SCEN["limit"] != "none" and STATE["auto"] else None
         mode = SCEN["plug"]
         if mode == "none":
             STATE["plug"] = None
@@ -353,6 +355,10 @@ class H(BaseHTTPRequestHandler):
         "min": ("auto_min", int),
         "onf": ("on_f", float),
         "offf": ("off_f", float),
+        "flooron": ("floor_on", int),
+        "floorf": ("floor_f", float),
+        "starton": ("start_on", int),
+        "startf": ("start_f", float),
     }
 
     # The ranges handle_config() enforces. Without these the mock happily
@@ -368,7 +374,14 @@ class H(BaseHTTPRequestHandler):
         "ckwh": (0.01, 2.0),
         "onf": (0.5, 20.0),
         "offf": (0.0, 20.0),
+        "flooron": (0, 1),
+        "floorf": (32.0, 100.0),
+        "starton": (0, 1),
+        "startf": (32.0, 120.0),
     }
+
+    # The on/off arguments: 0/1 on the wire, booleans in the state.
+    CONFIG_SWITCHES = ("auto", "gason", "flooron", "starton")
 
     def _config(self, query: Query) -> None:
         updates: dict[str, object] = {}
@@ -387,7 +400,7 @@ class H(BaseHTTPRequestHandler):
                 lo, hi = span
                 if not (lo <= value <= hi):
                     return self._json(400, {"error": f"bad {arg}"})
-            updates[key] = bool(value) if arg in ("auto", "gason") else value
+            updates[key] = bool(value) if arg in self.CONFIG_SWITCHES else value
         STATE.update(updates)
         STATE["uptime_s"] += 1
         return self._json(200, STATE)
