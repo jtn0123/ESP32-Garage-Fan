@@ -29,9 +29,11 @@ test.afterEach(async ({ page }) => {
 
 // The winter states. The mock's garage reads ~75 °F, so the limits are set
 // around that reading rather than at their 64/74 defaults, and put back after.
+// Each also switches auto on: a limit only speaks in auto, and specs elsewhere
+// (the auto pill, the first settings toggle) leave it off on this worker's mock.
 
 test('the low limit, not the gap, explains a resting fan', async ({ page }) => {
-  await page.request.post('/api/config?flooron=1&floorf=100');
+  await page.request.post('/api/config?auto=1&flooron=1&floorf=100');
   try {
     await scen(page, { limit: 'floor' });
     await openConsole(page);
@@ -43,7 +45,7 @@ test('the low limit, not the gap, explains a resting fan', async ({ page }) => {
 });
 
 test('the start gate explains a warm garage being left alone', async ({ page }) => {
-  await page.request.post('/api/config?starton=1&startf=100');
+  await page.request.post('/api/config?auto=1&starton=1&startf=100');
   try {
     await scen(page, { limit: 'start' });
     await openConsole(page);
