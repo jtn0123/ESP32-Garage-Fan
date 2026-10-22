@@ -2,7 +2,7 @@
 
 # Code formatting and linting
 ruff>=0.17.1
-black>=26.5.1
+black>=26.10.1
 
 # Type checking
 mypy>=2.3.1
