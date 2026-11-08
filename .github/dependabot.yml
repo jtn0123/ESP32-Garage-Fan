@@ -25,17 +25,19 @@ updates:
         patterns:
           - "github/codeql-action*"
 
-  # The console. bun rather than npm, but the ecosystem name is still "npm":
-  # Dependabot reads bun.lock under npm_and_yarn, because bun is npm-compatible
-  # and its lockfile became text-based in 1.1.39. The directory is /web, not /,
-  # since that is where package.json lives.
+  # The console, managed by bun. The ecosystem is "bun", not "npm": the
+  # npm_and_yarn updater used to read bun.lock, but now refuses a directory
+  # with a bun.lock and no npm/yarn/pnpm lockfile ("Dependabot's npm_and_yarn
+  # ecosystem cannot update bun.lock"), so every weekly run for /web failed
+  # from 2026-09-30 and the console went unwatched again. The directory is /web,
+  # not /, since that is where package.json lives.
   #
   # This entry was absent for a while: web/manager, the repo's only npm project
   # before the console, belonged to the inherited room-node tooling and went in
   # the fan-only cleanup. The comment saying to re-add one "if a JS project ever
   # lands" outlived the landing -- the console's six devDependencies (esbuild,
   # typescript, vitest, playwright, jsdom, @types/node) were watched by nobody.
-  - package-ecosystem: "npm"
+  - package-ecosystem: "bun"
     directory: "/web"
     schedule:
       interval: "weekly"
