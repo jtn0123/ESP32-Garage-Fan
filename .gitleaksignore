@@ -19,3 +19,37 @@ cd9195ee7df0786d063d09c514eb1539cc368389:scripts/mock_device.py:bare-credential-
 # predates the annotation.
 bdf8273daa45a072d2bbf067b3fa8863b63f461b:scripts/mock_device.py:bare-credential-assignment:371
 
+
+# --- Weekly full-history scan (red since at least 2026-10-25) -------------
+# PR and push scans only see new commits; the scheduled scan walks all
+# history and failed on the 16 findings below. Each was read at its commit
+# on 2026-11-08; none is a credential.
+
+# Docs and comments about the OTA_REQUIRE_PASSWORD build flag: the "value"
+# the rule sees is the flag's 0/1.
+8f13a88c31d1ddd993f7dc6d74743dfc5f15eb95:firmware/arduino/src/config.h:bare-credential-assignment:184
+8f13a88c31d1ddd993f7dc6d74743dfc5f15eb95:firmware/arduino/src/config.h:bare-credential-assignment:185
+cf5fe7a19b0676bd4350bf8075e670984e6afef8:firmware/arduino/src/config.h:bare-credential-assignment:179
+cf5fe7a19b0676bd4350bf8075e670984e6afef8:firmware/arduino/src/config.h:bare-credential-assignment:180
+8f13a88c31d1ddd993f7dc6d74743dfc5f15eb95:docs/ALWAYS_ON_AND_OTA.md:bare-credential-assignment:176
+8f13a88c31d1ddd993f7dc6d74743dfc5f15eb95:docs/ALWAYS_ON_AND_OTA.md:bare-credential-assignment:185
+a523a817fba8f8e7a01a8e923d796fe066b81204:docs/ALWAYS_ON_AND_OTA.md:bare-credential-assignment:158
+cf5fe7a19b0676bd4350bf8075e670984e6afef8:docs/ALWAYS_ON_AND_OTA.md:bare-credential-assignment:171
+
+# A log message that names the OTA password setting, an error-code enum
+# (ERR_WIFI_INVALID_PASSWORD, code 103), and a PASS test counter set to 0.
+a523a817fba8f8e7a01a8e923d796fe066b81204:firmware/arduino/src/ota_manager.cpp:bare-credential-assignment:55
+1d57744a52397c8f1dd9220d012a427768f44a58:firmware/arduino/src/error_codes.h:bare-credential-assignment:16
+6743e236a583a27b6ca56f00aff1a9301443e2fd:firmware/arduino/validate_refactor.sh:bare-credential-assignment:12
+
+# Setup docs with stock placeholders: PRODUCTION_IMPROVEMENTS.md exports the
+# MQTT password as the literal mqtt_pass; README.md shows a <PASS> placeholder.
+c745f663b927f2a7152448b4f5b9c2206f3bca89:PRODUCTION_IMPROVEMENTS.md:bare-credential-assignment:29
+c745f663b927f2a7152448b4f5b9c2206f3bca89:PRODUCTION_IMPROVEMENTS.md:mqtt-password:29
+5cba9c073bec6acb0adf5948b2fa719aedfc4df7:README.md:mqtt-client-password-flag:304
+
+# fan_protocol/mac helper scripts as they stand after the history rewrite:
+# the password reads ***REMOVED-MQTT-PASSWORD***, the marker that replaced
+# the real one, and that marker is what the rule matches.
+69e991ee2cc8c88fdb17f698f27209853f12c79e:firmware/arduino/docs/fan_protocol/mac/climate_logger.sh:mqtt-client-password-flag:6
+69e991ee2cc8c88fdb17f698f27209853f12c79e:firmware/arduino/docs/fan_protocol/mac/weather_bridge.sh:bare-credential-assignment:9
