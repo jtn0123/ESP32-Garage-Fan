@@ -37,7 +37,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
 
@@ -149,7 +149,7 @@ jobs:
 
       # SHA-pinned per githubactions:S7637 — see the other third-party actions.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           # steps.ver.outputs.tag, not github.ref_name: under workflow_call the
           # ref is the caller's branch (main), which would publish the release
